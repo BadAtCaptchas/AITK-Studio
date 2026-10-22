@@ -152,8 +152,15 @@ export default function LayeredDocumentsButton({
   };
   return (
     <>
-      <button type="button" className="operator-button h-8 gap-1.5 px-3 text-xs" onClick={openDocuments}>
-        <Layers className="h-3.5 w-3.5" /> Layered documents
+      <button
+        type="button"
+        className="operator-button h-8 gap-1.5 px-3 text-xs"
+        onClick={openDocuments}
+        aria-label="Layered documents"
+        title="Layered documents"
+      >
+        <Layers className="h-3.5 w-3.5" aria-hidden="true" />{' '}
+        <span className="hidden sm:inline">Layered documents</span>
       </button>
       <Modal isOpen={open} onClose={close} title="Layered documents" size="xl" closeOnOverlayClick={false}>
         <div className="max-h-[78vh] space-y-4 overflow-auto p-5">

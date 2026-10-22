@@ -19,7 +19,7 @@ type NavigateEvent = Event & {
   navigationType: string;
 };
 
-export function useTrainingDraft(key: string, draft: TrainingDraft) {
+export function useTrainingDraft(key: string, draft: TrainingDraft, hasUnsavedConfigText = false) {
   const router = useRouter();
   const current = useCommittedRef(draft);
   const baseline = useRef(drafts.get(key)?.baseline || serialize(draft));
@@ -30,14 +30,18 @@ export function useTrainingDraft(key: string, draft: TrainingDraft) {
   const currentURL = useRef('');
   const currentState = useRef<unknown>(null);
   useEffect(() => {
+    if (allowing.current) {
+      dirty.current = false;
+      return;
+    }
     if (!interacted.current) baseline.current = serialize(draft);
-    dirty.current = serialize(draft) !== baseline.current;
+    dirty.current = hasUnsavedConfigText || serialize(draft) !== baseline.current;
     if (!dirty.current) return;
     const timer = window.setTimeout(() => {
       if (dirty.current && !allowing.current) saveStoredTrainingDraft(key, { draft: current.current, baseline: baseline.current });
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [draft.config, draft.workerID, draft.gpuIDs, draft.migration, key, current]);
+  }, [draft.config, draft.workerID, draft.gpuIDs, draft.migration, hasUnsavedConfigText, key, current]);
   const leaveSetup = useCallback(
     (onLeave: () => void) => {
       if (allowing.current || !dirty.current) {
@@ -51,7 +55,7 @@ export function useTrainingDraft(key: string, draft: TrainingDraft) {
       openConfirm({
         title: 'Leave training setup?',
         message:
-          'Your changes have not been saved as a run. Your draft stays available in this tab, with reload recovery when browser storage is available.',
+          'Your changes have not been saved as a run. Your draft stays available in this tab. Parsed settings can be recovered after reload; unfinished Config text stays in memory only.',
         confirmText: 'Leave setup',
         onCancel: () => {
           confirming.current = false;

@@ -91,6 +91,7 @@ import {
 } from './StandaloneImagePalettePanel';
 import { StandaloneJsonWorkspace } from './StandaloneJsonWorkspace';
 import { ToolRail } from './ToolRail';
+import advancedStyles from './advanced-workspace.module.css';
 import { appendImageSizeFields, createEncryptedImageFormData } from './openRouterMedia';
 import {
   appendRecaptionFields,
@@ -382,6 +383,8 @@ function DatasetImageStudioContent({
   const toolsMenuRef = useRef<HTMLDivElement | null>(null);
   const [autoBoxesPanelOpen, setAutoBoxesPanelOpen] = useState(false);
   const [advancedMode, setAdvancedMode] = useState<'boxes' | 'layers' | 'palettes' | 'json' | null>(null);
+  const [advancedInspectorOpen, setAdvancedInspectorOpen] = useState(true);
+  const advancedCaptionRef = useRef<HTMLElement>(null);
   const [jsonDraft, setJsonDraft] = useState('');
   const [jsonDraftBaseCaption, setJsonDraftBaseCaption] = useState('');
   const [jsonDraftKey, setJsonDraftKey] = useState('');
@@ -2475,6 +2478,7 @@ function DatasetImageStudioContent({
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
+      if (target?.closest('[role="dialog"]')) return;
       const tag = target?.tagName;
       const isTyping = tag === 'TEXTAREA' || tag === 'INPUT' || (target?.isContentEditable ?? false);
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
@@ -2487,7 +2491,9 @@ function DatasetImageStudioContent({
         void (advancedMode === 'json' ? saveJsonAndNext() : saveAndNext());
         return;
       }
-      if (isTyping) return;
+      // A focused scroll region owns its arrow keys; scrolling the inspector must
+      // never nudge or delete the selected annotation. Explicit save keys above remain available.
+      if (isTyping || target?.id === 'advanced-caption-inspector') return;
       const isArrowKey =
         event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'ArrowUp' || event.key === 'ArrowDown';
       if (isArrowKey) {
@@ -3175,6 +3181,7 @@ function DatasetImageStudioContent({
           <section
             className={classNames(
               'absolute inset-x-0 bottom-0 z-40 flex min-h-0 flex-col bg-gray-950',
+              advancedStyles.workspace,
               advancedMode === 'palettes' || advancedMode === 'json' ? 'top-[46px]' : 'top-[61px]',
             )}
             aria-label={
@@ -3196,7 +3203,29 @@ function DatasetImageStudioContent({
               onSelectIndex={advancedMode === 'json' ? index => void selectJsonIndex(index) : selectIndex}
             />
 
-            <div className="flex min-h-0 flex-1 border-b border-gray-800">
+            <div className={advancedStyles.mobileToolbar}>
+              <button
+                type="button"
+                className="operator-button"
+                aria-expanded={advancedInspectorOpen}
+                aria-controls="advanced-caption-inspector"
+                onClick={() => setAdvancedInspectorOpen(open => !open)}
+              >
+                Inspector
+              </button>
+              <button
+                type="button"
+                className="operator-button"
+                onClick={() => advancedCaptionRef.current?.scrollIntoView({ block: 'start' })}
+              >
+                Caption and actions
+              </button>
+            </div>
+
+            <div
+              className={classNames('flex min-h-0 flex-1 border-b border-gray-800', advancedStyles.body)}
+              data-tool-rail={advancedMode === 'boxes' || advancedMode === 'layers'}
+            >
               {advancedMode === 'boxes' ? (
                 <StandaloneBoxesToolRail
                   activeTool={activeTool}
@@ -3228,7 +3257,13 @@ function DatasetImageStudioContent({
                 />
               ) : null}
 
-              <main className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-gray-950">
+              <main
+                className={classNames(
+                  'relative min-h-0 min-w-0 flex-1 overflow-hidden bg-gray-950',
+                  advancedStyles.canvas,
+                )}
+                aria-label="Annotation canvas"
+              >
                 <StudioMedia
                   item={selectedItem}
                   datasetName={datasetName}
@@ -3334,8 +3369,13 @@ function DatasetImageStudioContent({
               </main>
 
               <aside
+                id="advanced-caption-inspector"
+                aria-label="Annotation inspector"
+                tabIndex={0}
                 className={classNames(
                   'flex flex-none flex-col bg-gray-950',
+                  advancedStyles.inspector,
+                  !advancedInspectorOpen && advancedStyles.inspectorCollapsed,
                   advancedMode === 'boxes'
                     ? 'w-[clamp(410px,30.8vw,458px)] border-l border-gray-800'
                     : advancedMode === 'layers'
@@ -3527,8 +3567,10 @@ function DatasetImageStudioContent({
             </div>
 
             <section
+              ref={advancedCaptionRef}
               className={classNames(
                 'flex flex-none border-t border-gray-800 bg-gray-950',
+                advancedStyles.captionWorkbench,
                 advancedMode === 'json' ? 'h-[174px]' : 'h-[203px]',
               )}
               aria-label={
@@ -3554,10 +3596,16 @@ function DatasetImageStudioContent({
                 <ChevronDown className="h-4 w-4" />
               </button>
 
-              <div className="operator-scrollbar-none min-w-0 flex-1 overflow-x-auto">
+              <div
+                className={classNames(
+                  'operator-scrollbar-none min-w-0 flex-1 overflow-x-auto',
+                  advancedStyles.captionScroll,
+                )}
+              >
                 <div
                   className={classNames(
                     'grid h-full py-3',
+                    advancedStyles.captionGrid,
                     advancedMode === 'palettes'
                       ? 'min-w-[1320px] grid-cols-[320px_572px_minmax(454px,1fr)] gap-[15px] pl-[17px] pr-4'
                       : advancedMode === 'json'
@@ -3568,6 +3616,7 @@ function DatasetImageStudioContent({
                   <div
                     className={classNames(
                       'flex min-w-0 overflow-hidden',
+                      advancedStyles.metadata,
                       advancedMode === 'palettes' ? 'gap-5' : advancedMode === 'json' ? 'gap-3' : 'gap-4',
                     )}
                   >
@@ -3611,7 +3660,7 @@ function DatasetImageStudioContent({
                             'bg-rose-400': !captionText.trim(),
                           })}
                         />
-                        <span className={selectedApproved ? 'text-emerald-300' : 'text-gray-400'}>
+                        <span className={selectedApproved ? 'text-emerald-800 dark:text-emerald-300' : 'text-gray-400'}>
                           {selectedApproved ? 'Approved' : captionText.trim() ? 'Captioned' : 'Missing caption'}
                         </span>
                       </div>
@@ -3635,7 +3684,12 @@ function DatasetImageStudioContent({
                     </div>
                   </div>
 
-                  <div className="flex min-w-0 flex-col overflow-hidden rounded-[4px] border border-gray-800 bg-gray-950">
+                  <div
+                    className={classNames(
+                      'flex min-w-0 flex-col overflow-hidden rounded-[4px] border border-gray-800 bg-gray-950',
+                      advancedStyles.captionEditor,
+                    )}
+                  >
                     <div className="flex h-10 flex-none items-center border-b border-gray-800 px-3">
                       <button
                         type="button"
@@ -3678,6 +3732,7 @@ function DatasetImageStudioContent({
                   <div
                     className={classNames(
                       'relative grid',
+                      advancedStyles.actions,
                       advancedMode === 'palettes'
                         ? 'min-w-[454px] grid-cols-[134px_40px_minmax(0,1fr)] grid-rows-[42px_41px_47px_1fr] gap-x-0 gap-y-[7px]'
                         : advancedMode === 'json'

@@ -1,9 +1,8 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
 import './globals.css';
-import './graphite.css';
 import './studio-workspaces.css';
 import './journey.css';
+import './native-studio.css';
 import { ThemeProvider } from '@/components/ThemeProvider';
 import ConfirmModal from '@/components/ConfirmModal';
 import AuthWrapper from '@/components/AuthWrapper';
@@ -14,8 +13,6 @@ import MergeLoRAsModal from '@/components/MergeLoRAsModal';
 import AppShell from '@/components/AppShell';
 
 export const dynamic = 'force-dynamic';
-
-const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
   title: 'AITK Studio',
@@ -43,7 +40,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           }}
         />
       </head>
-      <body className={inter.className}>
+      <body>
         <script dangerouslySetInnerHTML={{ __html: `window.server_platform = "${platform}";` }} />
         <ThemeProvider>
           <AuthWrapper authRequired={authRequired}>

@@ -1,6 +1,7 @@
 'use client';
 
 import useHydrated from '@/hooks/useHydrated';
+import { useTheme } from '@/components/ThemeProvider';
 import type { Job, GpuInfo } from '@/types';
 import useJobMetrics, { type MetricPoint } from '@/hooks/useJobMetrics';
 import useGPUInfo from '@/hooks/useGPUInfo';
@@ -23,9 +24,18 @@ import { openConfirm } from '@/components/ConfirmModal';
 
 interface Props {
   job: Job;
+  compact?: boolean;
 }
 
 type ChartTab = 'loss' | 'learning_rate' | 'throughput' | 'timesteps' | 'gradients' | 'memory';
+const chartOptions = [
+  { value: 'loss', label: 'Loss' },
+  { value: 'learning_rate', label: 'Learning rate' },
+  { value: 'throughput', label: 'Throughput' },
+  { value: 'timesteps', label: 'Timesteps' },
+  { value: 'gradients', label: 'Gradients' },
+  { value: 'memory', label: 'Memory' },
+] as const satisfies ReadonlyArray<{ value: ChartTab; label: string }>;
 type EventKind = 'sample' | 'checkpoint' | 'phase_change';
 
 type PhaseTransition = {
@@ -143,7 +153,8 @@ function cleanLabel(key: string) {
 
 function settingsStorageKey(): string | null {
   if (typeof window === 'undefined') return null;
-  return `jobLossGraph:${window.location.pathname}${window.location.search}`;
+  // Monitor tabs are deep links into one workspace, not separate chart preferences.
+  return `jobLossGraph:${window.location.pathname}`;
 }
 
 function colorWithAlpha(rgba: string, alpha: number) {
@@ -615,15 +626,19 @@ function buildChartData({
   };
 }
 
-export default function JobLossGraph({ job }: Props) {
+export default function JobLossGraph({ job, compact = false }: Props) {
   const hydrated = useHydrated();
-  return hydrated ? <JobLossGraphContent key={job.id} job={job} /> : null;
+  return hydrated ? <JobLossGraphContent key={job.id} job={job} compact={compact} /> : null;
 }
 
 function readGraphSettings(): Partial<PersistedGraphSettings> {
   try {
     const key = settingsStorageKey();
-    const value: unknown = key ? JSON.parse(localStorage.getItem(key) || '{}') : {};
+    const legacyKey =
+      typeof window === 'undefined' ? null : `jobLossGraph:${window.location.pathname}${window.location.search}`;
+    const value: unknown = key
+      ? JSON.parse(localStorage.getItem(key) || (legacyKey && localStorage.getItem(legacyKey)) || '{}')
+      : {};
     if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
     const data = value as Record<string, unknown>;
     const settings: Partial<PersistedGraphSettings> = {};
@@ -644,7 +659,8 @@ function readGraphSettings(): Partial<PersistedGraphSettings> {
   }
 }
 
-function JobLossGraphContent({ job }: Props) {
+function JobLossGraphContent({ job, compact = false }: Props) {
+  const { theme } = useTheme();
   const { series, latest, lossKeys, phasePoints, phaseNamePoints, status, version, refreshMetrics } = useJobMetrics(
     job.id,
     job.stop && job.status === 'running' ? 'stopping' : job.status,
@@ -659,7 +675,7 @@ function JobLossGraphContent({ job }: Props) {
     (job.stop && job.status === 'running')
       ? 5000
       : null;
-  const { gpuList } = useGPUInfo(gpuIds, gpuPollInterval);
+  const { gpuList } = useGPUInfo(gpuIds, gpuPollInterval, job.worker_id || 'local');
 
   const [initialSettings] = useState(readGraphSettings);
   const [chartTab, setChartTab] = useState<ChartTab>(initialSettings.chartTab ?? 'loss');
@@ -705,7 +721,18 @@ function JobLossGraphContent({ job }: Props) {
     } catch {
       // Ignore unavailable storage.
     }
-  }, [chartTab, clipOutliers, enabledChoices, enabledLoss, showRaw, showSmoothed, showTrend, smoothing, useLogScale, version]);
+  }, [
+    chartTab,
+    clipOutliers,
+    enabledChoices,
+    enabledLoss,
+    showRaw,
+    showSmoothed,
+    showTrend,
+    smoothing,
+    useLogScale,
+    version,
+  ]);
 
   const activeLossKeys = useMemo(
     () => lossKeys.filter(key => enabledLoss[key] !== false && (series[key]?.length ?? 0) > 0),
@@ -919,18 +946,18 @@ function JobLossGraphContent({ job }: Props) {
       axes: [
         {
           label: 'Step',
-          stroke: 'rgba(203,213,225,0.62)',
-          grid: { stroke: 'rgba(148,163,184,0.08)' },
-          ticks: { stroke: 'rgba(148,163,184,0.18)' },
+          stroke: theme === 'dark' ? '#b2bac4' : '#56616f',
+          grid: { stroke: theme === 'dark' ? '#ffffff0d' : '#20252b14' },
+          ticks: { stroke: theme === 'dark' ? '#7f8a9733' : '#56616f40' },
           labelFont: '12px sans-serif',
           font: '11px sans-serif',
           values: (_u, ticks) => ticks.map(tick => formatCompact(tick)),
         },
         {
           label: chartYAxisLabel(chartTab),
-          stroke: 'rgba(203,213,225,0.62)',
-          grid: { stroke: 'rgba(148,163,184,0.08)' },
-          ticks: { stroke: 'rgba(148,163,184,0.18)' },
+          stroke: theme === 'dark' ? '#b2bac4' : '#56616f',
+          grid: { stroke: theme === 'dark' ? '#ffffff0d' : '#20252b14' },
+          ticks: { stroke: theme === 'dark' ? '#7f8a9733' : '#56616f40' },
           size: 66,
           labelFont: '12px sans-serif',
           font: '11px sans-serif',
@@ -998,7 +1025,7 @@ function JobLossGraphContent({ job }: Props) {
       uplotRef.current?.destroy();
       uplotRef.current = null;
     };
-  }, [structuralKey]);
+  }, [structuralKey, theme]);
 
   useEffect(() => {
     const u = uplotRef.current;
@@ -1065,12 +1092,14 @@ function JobLossGraphContent({ job }: Props) {
                 : 'Waiting for loss points...';
 
   return (
-    <div className="flex h-full flex-col overflow-hidden border border-gray-800 bg-gray-900/60">
+    <div
+      className={`flex h-full flex-col overflow-hidden border border-gray-800 bg-gray-900/60 ${compact ? 'studio-compact-chart' : ''}`}
+    >
       <div className="bg-gray-800 px-4 py-3 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <div className="h-2 w-2 rounded-full bg-blue-400" />
-          <h2 className="text-gray-100 text-sm font-medium">Training Monitor</h2>
-          <span className="text-xs text-gray-400 truncate">
+          <h2 className="text-gray-100 text-sm font-medium">{compact ? 'Metrics' : 'Training Monitor'}</h2>
+          <span className="text-xs text-gray-400 truncate" hidden={compact && built.hasData}>
             {built.hasData
               ? `${built.totalPoints.toLocaleString()} rendered points`
               : status === 'error'
@@ -1091,8 +1120,8 @@ function JobLossGraphContent({ job }: Props) {
         </button>
       </div>
 
-      <div className="p-4 space-y-3 flex-1 min-h-0 overflow-auto">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+      <div className="monitor-body p-4 space-y-3 flex-1 min-h-0 overflow-auto">
+        <div className="monitor-metrics grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
           <KpiCard
             icon={<Activity className="h-4 w-4 text-emerald-400" />}
             label="Progress"
@@ -1177,36 +1206,54 @@ function JobLossGraphContent({ job }: Props) {
           />
         </div>
 
-        <div className="grid min-h-[420px] grid-cols-1 gap-3 xl:h-[clamp(300px,36dvh,360px)] xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_300px]">
-          <div className="flex min-h-[320px] flex-col overflow-hidden border border-gray-800 bg-gray-950 sm:min-h-[360px] xl:min-h-0">
+        <div className="monitor-chart-layout grid min-h-[420px] grid-cols-1 gap-3 xl:h-[clamp(300px,36dvh,360px)] xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_300px]">
+          <div className="monitor-chart-area flex min-h-[320px] flex-col overflow-hidden border border-gray-800 bg-gray-950 sm:min-h-[360px] xl:min-h-0">
             <div className="px-3 py-2 border-b border-gray-800 flex flex-wrap items-center gap-2 justify-between">
-              <div className="inline-flex border border-gray-800 bg-gray-900 p-0.5">
-                <ChartTabButton active={chartTab === 'loss'} onClick={() => setChartTab('loss')} label="Loss" />
-                <ChartTabButton
-                  active={chartTab === 'learning_rate'}
-                  onClick={() => setChartTab('learning_rate')}
-                  label="Learning Rate"
-                />
-                <ChartTabButton
-                  active={chartTab === 'throughput'}
-                  onClick={() => setChartTab('throughput')}
-                  label="Throughput"
-                />
-                <ChartTabButton
-                  active={chartTab === 'timesteps'}
-                  onClick={() => setChartTab('timesteps')}
-                  label="Timesteps"
-                />
-                <ChartTabButton
-                  active={chartTab === 'gradients'}
-                  onClick={() => setChartTab('gradients')}
-                  label="Gradients"
-                />
-                <ChartTabButton active={chartTab === 'memory'} onClick={() => setChartTab('memory')} label="Memory" />
-              </div>
+              {compact ? (
+                <select
+                  aria-label="Chart metric"
+                  value={chartTab}
+                  className="rounded border border-gray-700 bg-gray-950 px-2 py-1 text-xs text-gray-200"
+                  onChange={event => {
+                    const selected = chartOptions.find(option => option.value === event.target.value);
+                    if (selected) setChartTab(selected.value);
+                  }}
+                >
+                  {chartOptions.map(option => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <div className="inline-flex max-w-full overflow-x-auto border border-gray-800 bg-gray-900 p-0.5">
+                  <ChartTabButton active={chartTab === 'loss'} onClick={() => setChartTab('loss')} label="Loss" />
+                  <ChartTabButton
+                    active={chartTab === 'learning_rate'}
+                    onClick={() => setChartTab('learning_rate')}
+                    label="Learning Rate"
+                  />
+                  <ChartTabButton
+                    active={chartTab === 'throughput'}
+                    onClick={() => setChartTab('throughput')}
+                    label="Throughput"
+                  />
+                  <ChartTabButton
+                    active={chartTab === 'timesteps'}
+                    onClick={() => setChartTab('timesteps')}
+                    label="Timesteps"
+                  />
+                  <ChartTabButton
+                    active={chartTab === 'gradients'}
+                    onClick={() => setChartTab('gradients')}
+                    label="Gradients"
+                  />
+                  <ChartTabButton active={chartTab === 'memory'} onClick={() => setChartTab('memory')} label="Memory" />
+                </div>
+              )}
 
               <div className="flex items-center gap-2 text-xs text-gray-400">
-                <span>server cap {CHART_MAX_POINTS.toLocaleString()}</span>
+                {!compact && <span>server cap {CHART_MAX_POINTS.toLocaleString()}</span>}
                 {isZoomed && (
                   <button
                     type="button"
@@ -1236,7 +1283,7 @@ function JobLossGraphContent({ job }: Props) {
             </div>
           </div>
 
-          <div className="space-y-3 xl:min-h-0 xl:overflow-y-auto xl:pr-1">
+          <div className="monitor-chart-settings space-y-3 xl:min-h-0 xl:overflow-y-auto xl:pr-1">
             <div className="border border-gray-800 bg-gray-950 p-3">
               <div className="text-xs text-gray-400 mb-2">Display</div>
               <div className="flex flex-wrap gap-2">
@@ -1342,7 +1389,7 @@ function JobLossGraphContent({ job }: Props) {
           </div>
         </div>
 
-        <div className="border border-gray-800 bg-gray-950 p-3">
+        <div className="monitor-events border border-gray-800 bg-gray-950 p-3">
           <div className="flex items-center justify-between gap-3 mb-3">
             <div className="text-xs text-gray-400">Events & phase timeline</div>
             <div className="flex items-center gap-3 text-[11px] text-gray-500">
@@ -1436,9 +1483,10 @@ function ChartTabButton({ active, onClick, label }: { active: boolean; onClick: 
     <button
       type="button"
       onClick={onClick}
+      aria-pressed={active}
       className={[
         'px-3 py-1.5 rounded text-xs transition-colors',
-        active ? 'bg-blue-500/15 text-blue-200' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800',
+        active ? 'bg-brand-500/15 text-brand-300' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800',
       ].join(' ')}
     >
       {label}
@@ -1454,7 +1502,7 @@ function ToggleButton({ checked, onClick, label }: { checked: boolean; onClick: 
       className={[
         'px-2.5 py-1 rounded-md text-xs border transition-colors',
         checked
-          ? 'bg-blue-500/10 text-blue-300 border-blue-500/30 hover:bg-blue-500/15'
+          ? 'bg-brand-500/10 text-brand-300 border-brand-500/30 hover:bg-brand-500/15'
           : 'bg-gray-900 text-gray-400 border-gray-800 hover:bg-gray-800/60',
       ].join(' ')}
       aria-pressed={checked}

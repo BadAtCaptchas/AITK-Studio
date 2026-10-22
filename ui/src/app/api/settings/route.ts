@@ -81,6 +81,8 @@ export async function GET(request: NextRequest) {
     });
     settingsObject.MODELS_PATH = modelsPathState.path;
     settingsObject.MODELS_PATH_LOCKED = modelsPathState.lockedByEnv ? 'true' : 'false';
+    // Deprecated API compatibility value. The current UI always uses the continuous
+    // training workspace; preserve this setting for older clients without a DB migration.
     settingsObject.TRAINING_LEGACY_VIEW = normalizeBooleanSetting(settingsObject.TRAINING_LEGACY_VIEW, true);
     const offlineModeState = await getOfflineModeState();
     settingsObject[OFFLINE_MODE_SETTING_KEY] = offlineModeState.enabled ? 'true' : 'false';

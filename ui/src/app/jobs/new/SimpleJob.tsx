@@ -43,24 +43,19 @@ import {
 } from '@/components/formInputs';
 import Card from '@/components/Card';
 import {
-  AlertTriangle,
-  CheckCircle2,
   ChevronDown,
+  ChevronRight,
   Clock3,
   Copy,
-  Cpu,
   Database,
   FolderOpen,
   Gauge,
   Info,
   Layers3,
-  ListChecks,
   Loader2,
-  Save,
   Settings2,
   Shuffle,
   SlidersHorizontal,
-  Sparkles,
   Target,
   TerminalSquare,
   Upload,
@@ -73,7 +68,6 @@ import { FlipHorizontal2, FlipVertical2 } from 'lucide-react';
 import { handleModelArchChange } from './utils';
 import { applySelectedDatasetDefaults } from '@/utils/jobDatasetDefaults';
 import { IoFlaskSharp } from 'react-icons/io5';
-import { isMac } from '@/helpers/basic';
 import { getLayerOffloadingMemoryProfile } from '@/utils/memoryProfiles';
 import { hasTextEmbeddingCache, updateTextEncoderControls, type TextEncoderControl } from '@/utils/textEncoderControls';
 import {
@@ -86,7 +80,8 @@ import { apiClient } from '@/utils/api';
 import { getRememberedEncryptedDatasetKey } from '@/utils/encryptedDatasets';
 import { normalizeDetectedCaptionExt } from '@/utils/jobDatasetDefaults';
 import { setNestedValue } from '@/utils/hooks';
-import { TrainingAdvisorPanel } from '@/components/TrainingAdvisorPanel';
+import TrainingSectionNav, { revealTrainingField } from './TrainingSectionNav';
+import styles from './trainingWorkspace.module.css';
 import {
   AUTHENLORA_BUILTIN_CODEC_BITS,
   AUTHENLORA_CODEC_OPTIONS,
@@ -95,16 +90,12 @@ import {
 import { uploadLoraFile, uploadTemporaryMediaFile } from '@/utils/streamedUploads';
 import { openDoc } from '@/components/DocModal';
 type Props = {
-  legacyView?: boolean;
   jobConfig: JobConfig;
+  readOnly?: boolean;
+  onOpenConfig?: () => void;
   setJobConfig: (value: any, key?: string) => void;
-  status: 'idle' | 'saving' | 'success' | 'error';
-  saveError?: string | null;
   handleSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
   runId: string | null;
-  gpuIDs: string | null;
-  setGpuIDs: (value: string | null) => void;
-  gpuList: any;
   datasetOptions: Array<
     SelectOption & {
       encrypted?: boolean;
@@ -117,13 +108,6 @@ type Props = {
   >;
   validationMessages?: ValidationMessage[];
   focusTarget?: (TrainingFieldTarget & { nonce: number }) | null;
-  onRevealFinding?: (message: ValidationMessage) => void;
-  workerLabel?: string;
-  workerId?: string;
-  computeControls?: ReactNode;
-  trainerLabel?: string;
-  onOpenAdvanced?: () => void;
-  onOpenRawConfig?: () => void;
   isLoading?: boolean;
   comfyAutoInstall?: boolean;
   migrationModelOptions?: GroupedSelectOption[];
@@ -148,35 +132,16 @@ const comfyOnErrorOptions: SelectOption[] = [
   { value: 'native', label: 'Native fallback' },
   { value: 'skip', label: 'Skip' },
 ];
-const guidedStepItems = [
-  { id: 'job-basics', title: 'Basics', detail: 'Name your job and choose a model.' },
-  { id: 'job-dataset', title: 'Dataset', detail: 'Add the dataset you want to train on.' },
-  { id: 'job-training', title: 'Training', detail: 'Set training length and core parameters.' },
-  { id: 'job-samples', title: 'Samples', detail: 'Add prompts to generate previews.' },
-  { id: 'job-validation', title: 'Validation', detail: 'Track deterministic loss on held-out images.' },
-  { id: 'job-review', title: 'Review', detail: 'Review settings before starting.' },
-];
 export default function SimpleJob({
-  workerId = 'local',
-  legacyView = false,
   jobConfig,
+  readOnly = false,
+  onOpenConfig,
   setJobConfig,
   handleSubmit,
-  status,
-  saveError,
   runId,
-  gpuIDs,
-  setGpuIDs,
-  gpuList,
   datasetOptions,
   validationMessages = [],
   focusTarget,
-  onRevealFinding,
-  workerLabel = 'Local worker',
-  computeControls,
-  trainerLabel = 'LoRA Trainer',
-  onOpenAdvanced,
-  onOpenRawConfig,
   isLoading,
   comfyAutoInstall = false,
   migrationModelOptions,
@@ -577,7 +542,6 @@ export default function SimpleJob({
     () => getLayerOffloadingMemoryProfile(jobConfig.config.process[0].model.arch),
     [jobConfig.config.process[0].model.arch],
   );
-  const showGPUSelect = !isMac();
   let numDatasetCols = 4;
   let numSampleTopCols = 4;
   let datasetStyleClass = 'grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4';
@@ -609,23 +573,7 @@ export default function SimpleJob({
   const sampleConfig = processConfig.sample;
   const validationConfig = processConfig.train.validation_config;
   const validationItems = Array.isArray(validationConfig?.validation_items) ? validationConfig.validation_items : [];
-  const firstDataset = datasetsConfig[0] || defaultDatasetConfig;
   const firstSample = sampleConfig.samples?.[0] || { prompt: '' };
-  const selectedDatasetOption = datasetOptions.find(option => option.value === firstDataset.folder_path);
-  const selectedGpu = Array.isArray(gpuList) ? gpuList.find((gpu: any) => `${gpu.index}` === `${gpuIDs}`) : null;
-  const samplePromptBlank = !processConfig.train.disable_sampling && !firstSample.prompt?.trim();
-  const incompleteValidationItems = validationItems.filter(
-    item => typeof item.image_path !== 'string' || !item.image_path.trim(),
-  ).length;
-  const unresolvedDataset =
-    !datasetsConfig.length ||
-    !firstDataset.folder_path ||
-    firstDataset.folder_path === defaultDatasetConfig.folder_path;
-  const readinessMessages = validationMessages;
-  const readinessErrors = readinessMessages.filter(message => message.level === 'error');
-  const readinessWarnings = readinessMessages.filter(message => message.level === 'warning');
-  const stepItems = guidedStepItems;
-  const [activeStepId, setActiveStepId] = useState(stepItems[0].id);
   const dtypeOptions = [
     { value: 'bf16', label: 'BF16' },
     { value: 'fp16', label: 'FP16' },
@@ -666,22 +614,6 @@ export default function SimpleJob({
     { value: 'dora', label: 'DoRA' },
     { value: 'lokr', label: 'LoKr' },
   ].filter(option => !modelArch?.allowedNetworkTypes || modelArch.allowedNetworkTypes.includes(option.value));
-  const formatNumber = (value: number | null | undefined) => {
-    if (value === null || value === undefined || Number.isNaN(Number(value))) return '-';
-    return Number(value).toLocaleString();
-  };
-  const formatMemory = (value: number | null | undefined) => {
-    if (value === null || value === undefined || !Number.isFinite(Number(value))) return '-';
-    return `${(Number(value) / 1024).toFixed(1)} GB`;
-  };
-  const selectedGpuLabel = selectedGpu
-    ? `GPU #${selectedGpu.index} - ${selectedGpu.name}`
-    : gpuIDs
-      ? `GPU #${gpuIDs}`
-      : 'GPU not selected';
-  const selectedGpuMemory = selectedGpu?.memory
-    ? `${formatMemory(selectedGpu.memory.free)} free / ${formatMemory(selectedGpu.memory.total)}`
-    : 'Telemetry loading';
   const setPrimarySamplePrompt = (prompt: string) => {
     if (!sampleConfig.samples?.length) {
       setJobConfig([{ prompt }], 'config.process[0].sample.samples');
@@ -706,111 +638,32 @@ export default function SimpleJob({
       'config.process[0].datasets',
     );
   };
-  const renderSectionIntro = (title: string, detail: string) => (
-    <div className={legacyView ? 'mb-3 border-b border-gray-800 pb-3' : 'mb-5 border-b border-gray-900 pb-4'}>
-      <h2 tabIndex={-1} className="text-2xl font-semibold text-gray-100 outline-none">
-        {title}
-      </h2>
-      {!legacyView && <p className="mt-1 text-sm text-gray-500">{detail}</p>}
+  const renderSectionIntro = (title: string, _detail: string) => (
+    <div className={styles.sectionHeading}>
+      <h2 tabIndex={-1} className="outline-none">{title}</h2>
     </div>
   );
   const renderDisclosure = (
-    id: string,
-    title: string,
-    detail: string,
-    Icon: typeof Settings2,
-    children: ReactNode,
-    defaultOpen = false,
-  ) =>
-    legacyView ? (
-      <section id={id} className="studio-legacy-card">
-        <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-100">
-          <Icon className="h-4 w-4 text-brand-400" />
-          {title}
-        </h3>
-        {children}
-      </section>
-    ) : (
-      <details id={id} className="group border-t border-gray-900 bg-gray-950/30" open={defaultOpen}>
-        <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3 text-sm hover:bg-gray-900/45">
-          <Icon className="h-4 w-4 flex-none text-gray-300" />
-          <span className="min-w-0 flex-1">
-            <span className="font-semibold text-gray-100">{title}</span>
-            <span className="ml-3 hidden text-gray-500 sm:inline">{detail}</span>
-          </span>
-          <ChevronDown className="h-4 w-4 flex-none text-gray-400 transition-transform group-open:rotate-180" />
-        </summary>
-        <div className="border-t border-gray-900 px-4 pb-5 pt-2">{children}</div>
-      </details>
-    );
-  const activeStepIndex = stepItems.findIndex(step => step.id === activeStepId);
+    id: string, title: string, _detail: string, Icon: typeof Settings2,
+    children: ReactNode, _defaultOpen = false,
+  ) => (
+    <section id={id} className={styles.parameterGroup}>
+      <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-100">
+        <Icon className="h-4 w-4 text-gray-400" />{title}
+      </h3>
+      {children}
+    </section>
+  );
   const formRef = useRef<HTMLFormElement>(null);
-  const didSelectStep = useRef(false);
-  const selectStep = (id: string) => {
-    didSelectStep.current = true;
-    setActiveStepId(id);
-    window.history.replaceState(null, '', `#${id}`);
-  };
-  const [previousFocusTarget, setPreviousFocusTarget] = useState(focusTarget);
-  if (previousFocusTarget !== focusTarget) {
-    setPreviousFocusTarget(focusTarget);
-    if (focusTarget) setActiveStepId(focusTarget.step);
-  }
   useEffect(() => {
-    if (focusTarget) didSelectStep.current = false;
+    if (focusTarget && formRef.current) revealTrainingField(formRef.current, focusTarget);
   }, [focusTarget]);
-  useEffect(() => {
-    if (!focusTarget || focusTarget.step !== activeStepId) return;
-    const candidates = Array.from(formRef.current?.querySelectorAll<HTMLElement>('[data-field-label]') || []).filter(
-      element => element.dataset.fieldLabel === focusTarget.label,
-    );
-    const wrapper = candidates[focusTarget.index ?? 0];
-    let ancestor = wrapper?.parentElement;
-    while (ancestor) {
-      if (ancestor instanceof HTMLDetailsElement) ancestor.open = true;
-      ancestor = ancestor.parentElement;
-    }
-    const control =
-      wrapper?.querySelector<HTMLElement>(
-        'input:not([type="file"]), select, textarea, [role="switch"], [role="combobox"], [role="button"]',
-      ) ||
-      wrapper?.querySelector<HTMLElement>('button') ||
-      formRef.current?.querySelector<HTMLElement>(`#${focusTarget.step} h2`);
-    control?.focus({ preventScroll: true });
-    control?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  }, [focusTarget, activeStepId]);
-  const nextStep = () => {
-    if (formRef.current && !formRef.current.reportValidity()) return;
-    const next = stepItems[activeStepIndex + 1];
-    if (next) selectStep(next.id);
-  };
-  useEffect(() => {
-    const syncHash = () => {
-      const id = window.location.hash.slice(1);
-      if (guidedStepItems.some(step => step.id === id)) setActiveStepId(id);
-    };
-    syncHash();
-    window.addEventListener('hashchange', syncHash);
-    return () => window.removeEventListener('hashchange', syncHash);
-  }, []);
-  useEffect(() => {
-    if (!didSelectStep.current) return;
-    const heading = document.querySelector<HTMLElement>(`#${activeStepId} h2`);
-    heading?.focus({ preventScroll: true });
-    document.getElementById('training-step-navigation')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-  }, [activeStepId]);
   return (
     <>
       <form
         ref={formRef}
-        onSubmit={event => {
-          if (legacyView || activeStepId === 'job-review') handleSubmit(event);
-          else {
-            event.preventDefault();
-            nextStep();
-          }
-        }}
-        className={`relative min-h-full bg-gray-950 ${legacyView ? 'studio-training-legacy' : ''} ${isLoading ? 'pointer-events-none opacity-50' : ''}`}
+        onSubmit={handleSubmit}
+        className={`${styles.workspace} ${isLoading ? 'pointer-events-none opacity-50' : ''}`}
       >
         <input
           ref={baseLoraFileInputRef}
@@ -831,52 +684,20 @@ export default function SimpleJob({
           </div>
         )}
 
-        <header className="studio-page-intro px-5 pt-8 sm:px-8">
-          <h2>
-            {legacyView
-              ? 'Training configuration'
-              : runId
-                ? 'Refine your training setup.'
-                : 'Start with the essentials.'}
-          </h2>
-          <p>
-            {legacyView
-              ? 'Configure your model, training, datasets, and samples. Creating a job does not start training.'
-              : 'Choose your model. We will guide you through the rest.'}
-          </p>
-        </header>
-        {!legacyView && (
-          <nav id="training-step-navigation" aria-label="Training setup steps" className="studio-training-steps">
-            {stepItems.map((step, index) => (
-              <button
-                key={step.id}
-                type="button"
-                onClick={() => selectStep(step.id)}
-                aria-current={activeStepId === step.id ? 'step' : undefined}
-              >
-                <span>{index + 1}</span>
-                {step.title}
-              </button>
-            ))}
-          </nav>
-        )}
-        <div className="studio-training-layout">
-          <div className="studio-training-sections training-form-area min-w-0">
+        <TrainingSectionNav formRef={formRef} config={jobConfig} />
+        <div className={styles.sections}>
+          <div className="training-form-area min-w-0">
             <fieldset
               id="job-basics"
-              hidden={!legacyView && activeStepId !== 'job-basics'}
-              disabled={!legacyView && activeStepId !== 'job-basics'}
-              className="studio-training-panel"
+              disabled={readOnly} inert={readOnly}
+              className={styles.section}
             >
-              {!legacyView && (
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-brand-400">Step 1 of 6</p>
-              )}
               {renderSectionIntro(
-                legacyView ? 'Job & model' : 'Name your run',
+                'Basics',
                 'Give your training run a name and choose your base model.',
               )}
 
-              <div className={legacyView ? 'studio-training-basics-fields' : 'space-y-5'}>
+              <div className={styles.basicsFields}>
                 <div className="max-w-2xl">
                   <TextInput
                     label="Training name"
@@ -888,11 +709,28 @@ export default function SimpleJob({
                     disabled={runId !== null}
                     required
                   />
-                  <p className="mt-1 text-xs text-gray-500">
-                    A name to identify this run inside the current workspace.
-                  </p>
                 </div>
 
+                  {disableSections.includes('trigger_word') ? null : (
+                    <div>
+                      <TextInput
+                        label="Trigger word (optional)"
+                        value={processConfig.trigger_word || ''}
+                        docKey="config.process[0].trigger_word"
+                        onChange={(value: string | null) => {
+                          if (value?.trim() === '') value = null;
+                          setJobConfig(value, 'config.process[0].trigger_word');
+                        }}
+                        placeholder="mytrigger"
+                      />
+                      <p className="mt-1 text-xs text-gray-500">The token that represents your concept.</p>
+                    </div>
+                  )}
+              </div>
+            </fieldset>
+            <fieldset id="job-model" disabled={readOnly} inert={readOnly} className={styles.section}>
+              {renderSectionIntro('Model', '')}
+              <div className={styles.basicsFields}>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <SelectInput
                     label="Model architecture"
@@ -983,7 +821,7 @@ export default function SimpleJob({
                   </button>
                 )}
 
-                {modelUiErrors.length > 0 && <p className="text-xs text-amber-400">{modelUiErrors.join('; ')}</p>}
+                {modelUiErrors.length > 0 && <p className="text-xs text-amber-800 dark:text-amber-400">{modelUiErrors.join('; ')}</p>}
                 {modelArch?.extensionNotes && <div className="text-sm text-gray-300">{modelArch.extensionNotes}</div>}
                 {modelArch?.customSections?.(jobConfig, setJobConfig)}
                 {modelArch?.additionalSections?.includes('model.model_kwargs.instruction') && (
@@ -1021,9 +859,9 @@ export default function SimpleJob({
                         ),
                       });
                     }}
-                    className="flex w-full items-center gap-2 border border-amber-900 bg-amber-950/25 px-3 py-2 text-left text-sm text-amber-100 transition-colors hover:border-amber-800 hover:bg-amber-950/40"
+                    className="flex w-full items-center gap-2 border border-amber-300 bg-amber-50 px-3 py-2 text-left text-sm text-amber-900 transition-colors hover:border-amber-500 hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/25 dark:text-amber-100 dark:hover:border-amber-800 dark:hover:bg-amber-950/40"
                   >
-                    <IoFlaskSharp className="h-4 w-4 shrink-0 text-amber-300" />
+                    <IoFlaskSharp className="h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300" />
                     <span>
                       Experimental model. <span className="underline">Read model notes.</span>
                     </span>
@@ -1057,24 +895,9 @@ export default function SimpleJob({
                 ))}
 
                 <div className="grid grid-cols-1 gap-5">
-                  {disableSections.includes('trigger_word') ? null : (
-                    <div>
-                      <TextInput
-                        label="Trigger word (optional)"
-                        value={processConfig.trigger_word || ''}
-                        docKey="config.process[0].trigger_word"
-                        onChange={(value: string | null) => {
-                          if (value?.trim() === '') value = null;
-                          setJobConfig(value, 'config.process[0].trigger_word');
-                        }}
-                        placeholder="mytrigger"
-                      />
-                      <p className="mt-1 text-xs text-gray-500">The token that represents your concept.</p>
-                    </div>
-                  )}
                   {!processConfig.model.arch.startsWith('minimax_h3') && (
-                    <details className="studio-disclosure" open={processConfig.model.base_lora_path ? true : undefined}>
-                      <summary>Continue from an existing LoRA</summary>
+                    <details className={`studio-disclosure ${styles.continuation}`} open={processConfig.model.base_lora_path ? true : undefined}>
+                      <summary><ChevronRight className={styles.disclosureChevron} size={14} aria-hidden="true" />Continue from an existing LoRA</summary>
                       <div>
                         <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
                           <TextInput
@@ -1107,7 +930,7 @@ export default function SimpleJob({
                           <div
                             className={`mt-2 border px-3 py-2 text-xs ${
                               baseLoraUploadStatus === 'error'
-                                ? 'border-red-900 bg-red-950/30 text-red-300'
+                                ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300'
                                 : 'border-gray-800 bg-gray-950 text-gray-300'
                             }`}
                           >
@@ -1123,16 +946,15 @@ export default function SimpleJob({
 
             <fieldset
               id="job-training"
-              hidden={!legacyView && activeStepId !== 'job-training'}
-              disabled={!legacyView && activeStepId !== 'job-training'}
-              className="studio-training-panel"
+              disabled={readOnly} inert={readOnly}
+              className={styles.section}
             >
               {renderSectionIntro('Training', 'Set the pace and duration of your run.')}
               <div className="mb-6">
                 {' '}
                 <div>
                   <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-100">
-                    Quick training settings <Info className="h-3.5 w-3.5 text-gray-500" />
+                    Core parameters <Info className="h-3.5 w-3.5 text-gray-500" />
                   </div>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
                     <NumberInput
@@ -1172,9 +994,6 @@ export default function SimpleJob({
                       required
                     />
                   </div>
-                  <p className="mt-2 text-xs text-gray-500">
-                    These defaults work well for most LoRA training runs. Adjust later in Advanced if needed.
-                  </p>
                 </div>
               </div>
               {renderDisclosure(
@@ -1750,7 +1569,7 @@ export default function SimpleJob({
               <button
                 type="button"
                 onClick={() => {
-                  (onOpenRawConfig ?? onOpenAdvanced)?.();
+                  onOpenConfig?.();
                 }}
                 aria-haspopup="dialog"
                 aria-controls="raw-config-drawer"
@@ -1769,9 +1588,8 @@ export default function SimpleJob({
 
             <fieldset
               id="job-dataset"
-              hidden={!legacyView && activeStepId !== 'job-dataset'}
-              disabled={!legacyView && activeStepId !== 'job-dataset'}
-              className="studio-training-panel"
+              disabled={readOnly} inert={readOnly}
+              className={styles.section}
             >
               {renderSectionIntro(
                 'Dataset',
@@ -1802,7 +1620,7 @@ export default function SimpleJob({
                         <button
                           type="button"
                           onClick={() => removeDataset(i)}
-                          className="operator-icon-button h-7 w-7 hover:border-rose-800 hover:bg-rose-950/60 hover:text-rose-100"
+                          className="operator-icon-button h-7 w-7 hover:border-rose-500 hover:bg-rose-50 hover:text-rose-800 dark:hover:border-rose-800 dark:hover:bg-rose-950/60 dark:hover:text-rose-100"
                           title="Remove dataset"
                         >
                           <X className="h-3.5 w-3.5" />
@@ -1954,9 +1772,8 @@ export default function SimpleJob({
 
             <fieldset
               id="job-samples"
-              hidden={!legacyView && activeStepId !== 'job-samples'}
-              disabled={!legacyView && activeStepId !== 'job-samples'}
-              className="studio-training-panel"
+              disabled={readOnly} inert={readOnly}
+              className={styles.section}
             >
               {renderSectionIntro('Samples', 'Add prompts used to preview the LoRA during training.')}
               <div className="mb-6 space-y-5">
@@ -1969,7 +1786,7 @@ export default function SimpleJob({
                   rows={3}
                 />
                 <p className="-mt-4 text-xs text-gray-500">
-                  We will use this to generate previews during training. Add more prompts below.
+                  Preview prompt used during training.
                 </p>
               </div>
               {isQwenImage2(processConfig.model.arch) && (
@@ -2181,9 +1998,8 @@ export default function SimpleJob({
 
             <fieldset
               id="job-validation"
-              hidden={!legacyView && activeStepId !== 'job-validation'}
-              disabled={!legacyView && activeStepId !== 'job-validation'}
-              className="studio-training-panel"
+              disabled={readOnly} inert={readOnly}
+              className={styles.section}
             >
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div className="max-w-3xl">
@@ -2304,7 +2120,7 @@ export default function SimpleJob({
                                 'config.process[0].train.validation_config.validation_items',
                               )
                             }
-                            className="operator-icon-button h-8 w-8 flex-none self-end hover:border-rose-800 hover:bg-rose-950/60 hover:text-rose-100 sm:self-center"
+                            className="operator-icon-button h-8 w-8 flex-none self-end hover:border-rose-500 hover:bg-rose-50 hover:text-rose-800 dark:hover:border-rose-800 dark:hover:bg-rose-950/60 dark:hover:text-rose-100 sm:self-center"
                             title="Remove validation image"
                             aria-label={`Remove validation image ${index + 1}`}
                           >
@@ -2334,198 +2150,7 @@ export default function SimpleJob({
               )}
             </fieldset>
 
-            <fieldset
-              id="job-review"
-              hidden={!legacyView && activeStepId !== 'job-review'}
-              disabled={!legacyView && activeStepId !== 'job-review'}
-              className="studio-training-panel"
-            >
-              {renderSectionIntro(
-                'Review',
-                'Confirm the worker, dataset, training plan, and any warnings before creating the job.',
-              )}
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                <div className="border border-gray-900 bg-gray-950/35 p-3">
-                  <h3 className="text-sm font-semibold text-gray-100">Training plan</h3>
-                  <div className="mt-3 grid grid-cols-[1fr_auto] gap-y-2 text-sm">
-                    <div className="text-gray-500">Trainer</div>
-                    <div className="text-gray-200">{trainerLabel}</div>
-                    <div className="text-gray-500">Architecture</div>
-                    <div className="text-gray-200">{modelArch?.label || processConfig.model.arch}</div>
-                    <div className="text-gray-500">Model / artifact</div>
-                    <div className="max-w-64 break-all text-right text-gray-200">
-                      {processConfig.model.name_or_path}
-                    </div>
-                    <div className="text-gray-500">Sample output</div>
-                    <div className="text-gray-200">
-                      {modelArch?.group === 'audio' ? 'Audio' : modelArch?.isVideoModel ? 'Video' : 'Image'}
-                    </div>
-                    <div className="text-gray-500">Target</div>
-                    <div className="text-gray-200">
-                      {networkType === 'lokr' ? 'LoKr' : networkType === 'dora' ? 'DoRA' : 'LoRA'}
-                    </div>
-                    <div className="text-gray-500">Steps</div>
-                    <div className="text-gray-200">{formatNumber(processConfig.train.steps)}</div>
-                    <div className="text-gray-500">Batch size</div>
-                    <div className="text-gray-200">{formatNumber(processConfig.train.batch_size)}</div>
-                    <div className="text-gray-500">Learning rate</div>
-                    <div className="text-gray-200">{processConfig.train.lr}</div>
-                  </div>
-                </div>
-
-                <div className="border border-gray-900 bg-gray-950/35 p-3">
-                  <h3 className="text-sm font-semibold text-gray-100">Worker and data</h3>
-                  <div className="mt-3 grid grid-cols-[1fr_auto] gap-y-2 text-sm">
-                    <div className="text-gray-500">Worker</div>
-                    <div className="text-gray-200">{workerLabel}</div>
-                    <div className="text-gray-500">GPU</div>
-                    <div className="text-right text-gray-200">{selectedGpuLabel}</div>
-                    <div className="text-gray-500">Dataset</div>
-                    <div className="max-w-52 truncate text-right text-gray-200">
-                      {selectedDatasetOption?.label || 'Not selected'}
-                    </div>
-                    <div className="text-gray-500">Saves every</div>
-                    <div className="text-gray-200">{formatNumber(processConfig.save.save_every)} steps</div>
-                    <div className="text-gray-500">Data type</div>
-                    <div className="text-gray-200">{processConfig.save.dtype?.toUpperCase()}</div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-4 border border-gray-900 bg-gray-950/35 p-3">
-                <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-100">
-                  {readinessErrors.length > 0 ? (
-                    <AlertTriangle className="h-4 w-4 text-rose-300" />
-                  ) : readinessWarnings.length > 0 ? (
-                    <AlertTriangle className="h-4 w-4 text-amber-300" />
-                  ) : (
-                    <CheckCircle2 className="h-4 w-4 text-emerald-300" />
-                  )}
-                  {readinessErrors.length > 0
-                    ? `Issues (${readinessErrors.length})`
-                    : readinessWarnings.length > 0
-                      ? `Warnings (${readinessWarnings.length})`
-                      : 'No blocking issues'}
-                </div>
-                {readinessMessages.length > 0 ? (
-                  <div className="space-y-2">
-                    {readinessMessages.map((message, index) => (
-                      <button
-                        type="button"
-                        onClick={() => onRevealFinding?.(message)}
-                        key={`${message.level}-${index}`}
-                        className={`border px-2 py-2 text-xs ${message.level === 'error' ? 'border-rose-900 bg-rose-950/25 text-rose-200' : 'border-amber-900 bg-amber-950/20 text-amber-200'}`}
-                      >
-                        {message.message}
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-gray-500">
-                    Configuration checks passed. Review data quality and available memory before starting.
-                  </p>
-                )}
-              </div>
-
-              {saveError && (
-                <p role="alert" className="mt-4 border border-rose-800 bg-rose-950/25 p-3 text-sm text-rose-200">
-                  {saveError}
-                </p>
-              )}
-              <button
-                type="submit"
-                disabled={status === 'saving' || readinessErrors.length > 0}
-                className="operator-button-primary mt-5 h-11 w-full"
-              >
-                <Sparkles className="h-4 w-4" />
-                {status === 'saving' ? 'Saving...' : runId ? 'Update Job' : 'Create Job'}
-              </button>
-            </fieldset>
-
-            {!legacyView && (
-              <div className="mt-5 flex items-center justify-between gap-3">
-                <button
-                  type="button"
-                  className="operator-button h-11 px-5"
-                  disabled={activeStepIndex === 0}
-                  onClick={() => selectStep(stepItems[activeStepIndex - 1].id)}
-                >
-                  Back
-                </button>
-                {activeStepIndex < stepItems.length - 1 && (
-                  <button type="button" className="operator-button-primary h-11 px-6" onClick={nextStep}>
-                    Continue to {stepItems[activeStepIndex + 1].title.toLowerCase()}{' '}
-                    <ChevronDown className="h-4 w-4 -rotate-90" />
-                  </button>
-                )}
-              </div>
-            )}
           </div>
-          <aside id="job-readiness-rail" className="min-w-0">
-            <div className="operator-panel space-y-6 p-6">
-              <h2 className="text-lg font-semibold text-gray-100">Run overview</h2>
-              <div className="space-y-3">
-                {computeControls || (
-                  <div className="flex items-center gap-2 text-sm text-gray-400">
-                    <Cpu className="h-4 w-4" />
-                    {workerLabel}
-                  </div>
-                )}
-                <p className="break-words text-sm text-gray-200">{selectedGpuLabel}</p>
-                <p className="text-xs text-gray-400">{selectedGpuMemory}</p>
-                {showGPUSelect && (
-                  <SelectInput
-                    label="GPU"
-                    value={`${gpuIDs}`}
-                    onChange={value => setGpuIDs(value)}
-                    options={gpuList.map((gpu: { index: number }) => ({
-                      value: `${gpu.index}`,
-                      label: `GPU #${gpu.index}`,
-                    }))}
-                  />
-                )}
-              </div>
-              <dl className="grid grid-cols-[1fr_minmax(0,1fr)] gap-x-4 gap-y-4 border-t border-gray-800 pt-6 text-sm">
-                <dt className="text-gray-400">Model</dt>
-                <dd className="text-right text-gray-100">{modelArch?.label || processConfig.model.arch}</dd>
-                <dt className="text-gray-400">Target</dt>
-                <dd className="text-right text-gray-100">
-                  {networkType === 'lokr' ? 'LoKr' : networkType === 'dora' ? 'DoRA' : 'LoRA'}
-                </dd>
-                <dt className="text-gray-400">Dataset</dt>
-                <dd className="break-words text-right text-gray-100">
-                  {selectedDatasetOption?.label || (unresolvedDataset ? 'Not selected' : firstDataset.folder_path)}
-                </dd>
-                {(legacyView || activeStepIndex >= 2) && (
-                  <>
-                    <dt className="text-gray-400">Steps</dt>
-                    <dd className="text-right text-gray-100">
-                      {formatNumber(processConfig.train.steps)}
-                    </dd>
-                    <dt className="text-gray-400">Learning rate</dt>
-                    <dd className="text-right text-gray-100">{processConfig.train.lr}</dd>
-                  </>
-                )}
-              </dl>
-              <p className="flex items-start gap-2 border-t border-gray-800 pt-5 text-xs leading-5 text-gray-400">
-                <Info className="mt-0.5 h-4 w-4 shrink-0" />
-                You can review everything before creating the job.
-              </p>
-            </div>
-            <button
-              type="button"
-              className="mt-5 inline-flex items-center gap-2 px-3 py-2 text-sm text-gray-300 hover:text-brand-400"
-              onClick={onOpenRawConfig ?? onOpenAdvanced}
-            >
-              <TerminalSquare className="h-4 w-4" />
-              Open raw configuration
-            </button>
-            {(legacyView || activeStepId === 'job-review') && (
-              <div className="operator-panel mt-5 p-5">
-                <TrainingAdvisorPanel jobConfig={jobConfig} gpuIDs={gpuIDs} workerId={workerId} variant="rail" />
-              </div>
-            )}
-          </aside>
         </div>
       </form>
       <AddSingleImageModal />

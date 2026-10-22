@@ -8,9 +8,9 @@ type Tone = 'neutral' | 'info' | 'success' | 'warning' | 'danger';
 const toneClasses: Record<Tone, string> = {
   neutral: 'border-gray-700 bg-gray-900/70 text-gray-300',
   info: 'border-brand-700/70 bg-brand-950/30 text-brand-200',
-  success: 'border-emerald-700/70 bg-emerald-950/30 text-emerald-200',
-  warning: 'border-amber-700/70 bg-amber-950/30 text-amber-200',
-  danger: 'border-rose-700/70 bg-rose-950/30 text-rose-200',
+  success: 'border-emerald-600/40 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200',
+  warning: 'border-amber-600/40 bg-amber-500/10 text-amber-800 dark:text-amber-200',
+  danger: 'border-rose-600/40 bg-rose-500/10 text-rose-700 dark:text-rose-200',
 };
 
 const jobStatusMeta: Record<string, { label: string; tone: Tone; icon: LucideIcon; active?: boolean }> = {
@@ -24,11 +24,13 @@ const jobStatusMeta: Record<string, { label: string; tone: Tone; icon: LucideIco
 };
 
 export function getJobStatusMeta(status: string) {
-  return jobStatusMeta[status?.toLowerCase()] || {
-    label: status || 'Unknown',
-    tone: 'neutral' as Tone,
-    icon: CircleDashed,
-  };
+  return (
+    jobStatusMeta[status?.toLowerCase()] || {
+      label: status || 'Unknown',
+      tone: 'neutral' as Tone,
+      icon: CircleDashed,
+    }
+  );
 }
 
 export function StatusBadge({ status, label, className }: { status: string; label?: string; className?: string }) {
@@ -100,7 +102,8 @@ export function PageNotice({
   className?: string;
   action?: React.ReactNode;
 }) {
-  const Icon = tone === 'danger' || tone === 'warning' ? AlertTriangle : tone === 'success' ? CheckCircle2 : CircleDashed;
+  const Icon =
+    tone === 'danger' || tone === 'warning' ? AlertTriangle : tone === 'success' ? CheckCircle2 : CircleDashed;
 
   return (
     <div className={classNames('border px-3 py-2 text-sm', toneClasses[tone], className)} role="status">

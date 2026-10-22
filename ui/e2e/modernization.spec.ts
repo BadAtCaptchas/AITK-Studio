@@ -118,12 +118,12 @@ test('continuous training, queue and detail retain navigation and responsive con
   await page.route(`**/api/jobs/${job.id}/metrics*`, route => {
     finishMetrics = () => route.fulfill({ json: { keys: [], series: {} } });
   });
-  await page.getByRole('button', { name: 'Training Monitor', exact: true }).click();
+  await page.getByRole('tab', { name: 'Metrics', exact: true }).click();
   await expect.poll(() => Boolean(finishMetrics)).toBe(true);
   await expect.poll(() => page.evaluate(key => JSON.parse(localStorage.getItem(key) || '{}').smoothing, graphSettingsKey)).toBe(82);
   expect(await page.evaluate(key => JSON.parse(localStorage.getItem(key) || '{}').enabledLoss, graphSettingsKey)).toEqual({ 'loss/loss': false });
   await finishMetrics!();
-  await page.getByRole('button', { name: 'Overview', exact: true }).click();
+  await page.getByRole('tab', { name: 'Overview', exact: true }).click();
   await page.unroute(`**/api/jobs/${job.id}/metrics*`);
   // Render controlled live telemetry without starting a worker or GPU job.
   const liveJob = { ...job, status: 'running', step: 1560, info: 'Training in progress', speed_string: '2.4 s/step' };
@@ -145,7 +145,7 @@ test('continuous training, queue and detail retain navigation and responsive con
   await page.route('**/api/queue', route =>
     route.fulfill({
       json: {
-        queues: [{ id: 'visual-queue', gpu_ids: '0', worker_id: 'local', is_running: true }],
+        queues: [{ id: 1, gpu_ids: '0', worker_id: 'local', is_running: true }],
       },
     }),
   );
@@ -159,6 +159,9 @@ test('continuous training, queue and detail retain navigation and responsive con
     }),
   );
   await page.goto('/jobs');
+  // Returning to Queue preserves the previous history/search context; explicitly choose the live lane view.
+  await page.getByLabel('Search jobs').fill('');
+  await page.getByRole('button', { name: /^Queue\s/ }).click();
   await expect(page.getByText('Queue running', { exact: true })).toBeVisible();
   await expect(page.getByText('Queued fixture', { exact: true })).toBeVisible();
   const stepsHeading = await page.locator('[data-queue-steps-heading]').first().boundingBox();
@@ -179,7 +182,11 @@ test('continuous training, queue and detail retain navigation and responsive con
   await expect(page.locator('#training-step-navigation')).toHaveCount(0);
   await capture(page, 'new-training');
   await page.getByLabel('Training name', { exact: true }).fill('unsaved continuous form');
-  await page.getByRole('link', { name: 'Queue', exact: true }).click();
+  await page.getByRole('tab', { name: 'Config', exact: true }).click();
+  await expect(page.getByRole('tabpanel', { name: 'Config', exact: true })).toBeVisible();
+  await page.getByRole('tab', { name: 'Form', exact: true }).click();
+  await expect(page.getByLabel('Training name', { exact: true })).toHaveValue('unsaved continuous form');
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Train', exact: true }).click();
   await expect(page.getByText('Leave training setup?', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(page.getByLabel('Training name', { exact: true })).toHaveValue('unsaved continuous form');
@@ -222,8 +229,16 @@ test('caption gallery keeps dirty edits, reports save failures, and saves once b
   await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeVisible();
   await capture(page, 'caption-studio');
   await caption.fill('Unsaved caption to preserve');
-  page.once('dialog', dialog => dialog.dismiss());
-  await page.getByRole('link', { name: 'Queue', exact: true }).click();
+  const leaveWarning = page.waitForEvent('dialog').then(async dialog => {
+    expect(dialog.message()).toContain('unapplied or unsaved caption changes');
+    await dialog.dismiss();
+  });
+  await page
+    .getByRole('navigation', { name: 'Main navigation' })
+    .getByRole('link', { name: 'Monitor', exact: true })
+    .click();
+  await leaveWarning;
+  await expect(page).toHaveURL(new RegExp(`/datasets/${dataset}$`));
   await expect(caption).toHaveValue('Unsaved caption to preserve');
   await page.route('**/api/img/caption', route =>
     route.fulfill({ status: 500, json: { error: 'Fixture save failure' } }),

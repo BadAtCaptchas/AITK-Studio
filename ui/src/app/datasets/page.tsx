@@ -24,6 +24,7 @@ import {
   MinusCircle,
   Pencil,
   Plus,
+  RefreshCw,
   Search,
   Trash2,
 } from 'lucide-react';
@@ -124,10 +125,10 @@ function CaptionStatusBadge({ dataset, unlocked = false }: { dataset: DatasetSum
   if (dataset.encrypted && unlocked) {
     return (
       <span
-        className="inline-flex w-fit items-center gap-1.5 rounded-md border border-emerald-500/35 bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-100"
+        className="inline-flex w-fit items-center gap-1.5 rounded-md border border-emerald-500/35 bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:text-emerald-100"
         title="This encrypted dataset is unlocked in the current browser session"
       >
-        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-300" />
+        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-300" />
         Unlocked
       </span>
     );
@@ -135,10 +136,10 @@ function CaptionStatusBadge({ dataset, unlocked = false }: { dataset: DatasetSum
   if (dataset.encrypted) {
     return (
       <span
-        className="inline-flex w-fit items-center gap-1.5 rounded-md border border-slate-700 bg-slate-900/70 px-2 py-0.5 text-xs font-medium text-slate-300"
+        className="inline-flex w-fit items-center gap-1.5 rounded-md border border-gray-700 bg-gray-900 px-2 py-0.5 text-xs font-medium text-gray-300"
         title="Caption counts are encrypted until the dataset is unlocked"
       >
-        <LockKeyhole className="h-3.5 w-3.5 text-slate-400" />
+        <LockKeyhole className="h-3.5 w-3.5 text-gray-400" />
         Locked
       </span>
     );
@@ -176,17 +177,23 @@ function CaptionStatusBadge({ dataset, unlocked = false }: { dataset: DatasetSum
       <span
         className={
           hasMissingCaptions
-            ? 'inline-flex w-fit items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-100'
-            : 'inline-flex w-fit items-center gap-1.5 rounded-md border border-emerald-500/35 bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-100'
+            ? 'inline-flex w-fit items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-800 dark:text-amber-100'
+            : 'inline-flex w-fit items-center gap-1.5 rounded-md border border-emerald-500/35 bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:text-emerald-100'
         }
       >
         {hasMissingCaptions ? (
-          <AlertTriangle className="h-3.5 w-3.5 text-amber-300" />
+          <AlertTriangle className="h-3.5 w-3.5 text-amber-700 dark:text-amber-300" />
         ) : (
-          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-300" />
+          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-300" />
         )}
         <span>{hasMissingCaptions ? `${missingCount} missing` : 'Complete'}</span>
-        <span className={hasMissingCaptions ? 'text-amber-200/70' : 'text-emerald-200/70'}>of {itemCount}</span>
+        <span
+          className={
+            hasMissingCaptions ? 'text-amber-700 dark:text-amber-200/70' : 'text-emerald-700 dark:text-emerald-200/70'
+          }
+        >
+          of {itemCount}
+        </span>
       </span>
       <span className="block h-1.5 w-28 overflow-hidden rounded-full bg-gray-800" aria-hidden="true">
         <span
@@ -900,7 +907,7 @@ export default function Datasets() {
     />
   );
   const renderDatasetActions = (row: DatasetExplorerRow, compact = false) => (
-    <div className="flex justify-end gap-1">
+    <div className="flex min-w-0 flex-wrap justify-end gap-1">
       {row.source === 'remote' && !row.encrypted && (
         <button
           type="button"
@@ -926,7 +933,7 @@ export default function Datasets() {
         />
       )}
       <Link
-        className="operator-button text-xs"
+        className="operator-button max-w-full whitespace-normal text-center text-xs"
         href={
           row.encrypted
             ? `/datasets/${encodeURIComponent(row.name)}?worker_id=${encodeURIComponent(row.worker_id)}`
@@ -972,7 +979,7 @@ export default function Datasets() {
       className={`inline-flex items-center rounded-sm border px-2 py-0.5 text-xs font-medium ${
         row.encrypted
           ? row.unlocked
-            ? 'border-emerald-700/70 bg-emerald-950/35 text-emerald-200'
+            ? 'border-emerald-700/70 bg-emerald-500/10 text-emerald-800 dark:bg-emerald-950/35 dark:text-emerald-200'
             : 'border-brand-700/70 bg-brand-950/35 text-brand-200'
           : 'border-gray-700 bg-gray-900/80 text-gray-300'
       }`}
@@ -1006,21 +1013,14 @@ export default function Datasets() {
     }
     if (filteredTableRows.length === 0) {
       return (
-        <div className="studio-library-empty operator-panel">
-          <div className="studio-empty-icon">
-            <FolderPlus className="h-12 w-12" strokeWidth={1.25} />
-          </div>
-          <h2 className="mt-6 text-2xl font-medium text-gray-100">
-            {datasetFilter
-              ? 'No matching datasets'
-              : tableRows.length > 0
-                ? 'No datasets in this view'
-                : 'Build your first dataset'}
+        <div className="border-y border-gray-800 px-4 py-8">
+          <h2 className="text-sm font-semibold text-gray-100">
+            {datasetFilter ? 'No matching datasets' : tableRows.length > 0 ? 'No datasets in this view' : 'No datasets'}
           </h2>
-          <p className="mt-3 max-w-md text-sm leading-6 text-gray-400">
+          <p className="mt-2 text-sm text-gray-400">
             {datasetFilter
               ? 'Try a different dataset, worker, caption, or type filter.'
-              : 'Create a collection or bring in files you already have.'}
+              : 'Import media or create an empty dataset from the toolbar.'}
           </p>
           {datasetFilter && (
             <button type="button" className="operator-button mt-5" onClick={() => setDatasetFilter('')}>
@@ -1036,10 +1036,10 @@ export default function Datasets() {
     const stateContent = renderBrowserState();
     if (stateContent) return stateContent;
     return (
-      <div className="overflow-hidden border border-gray-800 bg-gray-950/40">
+      <div className="overflow-hidden border-y border-gray-800">
         <div className="overflow-x-auto">
-          <div className="min-w-[920px]">
-            <div className="grid grid-cols-[2.75rem_minmax(16rem,1.5fr)_8rem_minmax(11rem,0.8fr)_9rem_7rem_10rem] border-b border-gray-800 bg-gray-900/85 text-xs uppercase text-gray-500">
+          <div className="min-w-[1120px]">
+            <div className="grid grid-cols-[2.75rem_minmax(16rem,1.5fr)_8rem_minmax(11rem,0.8fr)_9rem_7rem_16rem] border-b border-gray-800 bg-gray-900 text-xs text-gray-400">
               <div className="px-3 py-2" />
               <div className="px-3 py-2 font-medium">Name</div>
               <div className="px-3 py-2 font-medium">Items</div>
@@ -1048,17 +1048,13 @@ export default function Datasets() {
               <div className="px-3 py-2 font-medium">Type</div>
               <div className="px-3 py-2 text-right font-medium">Actions</div>
             </div>
-            {filteredTableRows.map((row, index) => {
+            {filteredTableRows.map(row => {
               const selected = isRowSelected(row);
-              const rowClass = selected
-                ? 'bg-brand-950/35 ring-1 ring-inset ring-brand-700/45'
-                : index % 2 === 0
-                  ? 'bg-gray-950/20'
-                  : 'bg-gray-900/35';
+              const rowClass = selected ? 'bg-brand-950/35 ring-1 ring-inset ring-brand-700/45' : '';
               return (
                 <div
                   key={row.ref}
-                  className={`grid grid-cols-[2.75rem_minmax(16rem,1.5fr)_8rem_minmax(11rem,0.8fr)_9rem_7rem_10rem] items-center border-b border-gray-800 text-sm text-gray-300 last:border-b-0 hover:bg-gray-800/70 ${rowClass}`}
+                  className={`grid grid-cols-[2.75rem_minmax(16rem,1.5fr)_8rem_minmax(11rem,0.8fr)_9rem_7rem_16rem] items-center border-b border-gray-800 text-sm text-gray-300 last:border-b-0 hover:bg-gray-800/70 ${rowClass}`}
                 >
                   <div className="flex items-center justify-center px-3 py-2">{renderSelectionCheckbox(row)}</div>
                   <div className="min-w-0 px-3 py-2">
@@ -1075,9 +1071,6 @@ export default function Datasets() {
                       />
                       <span className="min-w-0 truncate font-medium">{row.name}</span>
                     </Link>
-                    {row.dataset.path && (
-                      <div className="mt-0.5 truncate text-xs text-gray-600">{row.dataset.path}</div>
-                    )}
                   </div>
                   <div className="px-3 py-2 text-xs text-gray-400">{datasetMediaLabel(row.dataset, row.unlocked)}</div>
                   <div className="px-3 py-2">
@@ -1152,6 +1145,7 @@ export default function Datasets() {
         <div className="flex shrink-0 items-center gap-2">
           <Database className="h-4 w-4 text-brand-300" />
           <h1 className="text-base font-semibold">Datasets</h1>
+          <span className="text-xs tabular-nums text-gray-500">{tableRows.length}</span>
         </div>
         <div className="flex-1"></div>
         {selectedDatasets.length > 0 && (
@@ -1161,9 +1155,22 @@ export default function Datasets() {
           </div>
         )}
         <div className="flex items-center gap-2">
-          <Button className="operator-button shrink-0" onClick={() => setImportChooserOpen(true)}>
+          <button
+            type="button"
+            className="operator-button"
+            onClick={() => refreshDatasets()}
+            aria-label="Refresh datasets"
+            title="Refresh datasets"
+          >
+            <RefreshCw size={15} aria-hidden="true" />
+          </button>
+          <Button
+            className="operator-button shrink-0"
+            aria-label="Import data"
+            onClick={() => setImportChooserOpen(true)}
+          >
             <FolderPlus size={16} aria-hidden="true" />
-            Import data
+            <span className="hidden sm:inline">Import data</span>
           </Button>
           {selectedDatasets.length > 0 && (
             <Button
@@ -1178,31 +1185,27 @@ export default function Datasets() {
             </Button>
           )}
           <Button
-            className="operator-button-primary h-10 shrink-0"
+            className="operator-button-primary shrink-0"
             onClick={() => openNewDatasetModal()}
             title="Create dataset"
             aria-label="Create dataset"
           >
             <Plus className="h-3.5 w-3.5" />
-            <span>Create dataset</span>
+            <span className="hidden sm:inline">Create dataset</span>
           </Button>
         </div>
       </TopBar>
 
-      <MainContent className="studio-library-page">
+      <MainContent>
         {returnToTraining && (
-          <div className="mb-5 rounded-lg border border-gray-700 p-4">
-            <p>Your training draft is kept in this tab. Return after preparing your dataset.</p>
-            <Link href={getTrainingReturnPath()} className="studio-text-link mt-2">
-              Return to training setup
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3 border border-gray-700 px-3 py-2 text-sm">
+            <p>Training draft open in this tab.</p>
+            <Link href={getTrainingReturnPath()} className="studio-text-link">
+              Return to training
             </Link>
           </div>
         )}
-        <header className="studio-page-intro">
-          <h2>Better models start here.</h2>
-          <p>Organize the images, video, and audio your model learns from.</p>
-        </header>
-        <div className="my-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="text-xs text-gray-500">
             {filteredTableRows.length} of {tableRows.length} datasets shown
             {selectedDatasets.length > 0 ? `, ${selectedDatasets.length} selected` : ''}
@@ -1245,29 +1248,21 @@ export default function Datasets() {
                 onChange={event => setDatasetFilter(event.target.value)}
                 aria-label="Search datasets"
                 placeholder="Search datasets, workers, type"
-                className="h-10 w-full rounded-md border border-gray-800 bg-gray-950 pl-8 pr-3 text-sm text-gray-100 placeholder:text-gray-500 focus:border-brand-700 focus:outline-none"
+                className="h-8 w-full rounded border border-gray-700 bg-gray-950 pl-8 pr-3 text-sm text-gray-100 placeholder:text-gray-500 focus:border-brand-500 focus:outline-none"
               />
             </label>
           </div>
         </div>
         {errors.length > 0 && (
-          <div className="mb-3 rounded-md border border-yellow-700 bg-yellow-950/40 px-3 py-2 text-sm text-yellow-200">
+          <div className="mb-3 rounded-md border border-yellow-700 bg-yellow-500/10 px-3 py-2 text-sm text-yellow-900 dark:bg-yellow-950/40 dark:text-yellow-200">
             Some datasets could not be loaded: {errors.map(error => `${error.worker_name}: ${error.error}`).join('; ')}
           </div>
         )}
         {datasetView === 'details' ? renderDetailsView() : renderIconView()}
-
-        <footer className="mt-8 flex items-center justify-between border-t border-gray-800 py-5 text-xs text-gray-400">
-          <span>Dataset library</span>
-          <button type="button" className="operator-button" onClick={() => refreshDatasets()}>
-            Refresh
-          </button>
-        </footer>
       </MainContent>
 
       <Modal isOpen={importChooserOpen} onClose={() => setImportChooserOpen(false)} title="Import data" size="md">
         <div className="space-y-3">
-          <p className="mb-5 text-gray-400">Choose where your media is coming from.</p>
           <button
             type="button"
             className="operator-button w-full justify-start p-4"

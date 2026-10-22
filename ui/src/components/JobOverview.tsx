@@ -7,6 +7,7 @@ import FilesWidget from '@/components/FilesWidget';
 import TensorBoardLink from '@/components/TensorBoardLink';
 import { JobAdvisorPanel } from '@/components/TrainingAdvisorPanel';
 import { getJobConfig, getTotalSteps } from '@/utils/jobs';
+import { isActiveJobStatus } from '@/utils/jobStatus';
 import { buildTrainingPhaseSummary, hasTrainingPhases, type TrainingPhaseSummary } from '@/utils/trainingPhaseSummary';
 import { Cpu, HardDrive, Info, Gauge, Layers } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -20,10 +21,6 @@ import { PageNotice, ProgressBar, StatusBadge } from '@/components/OperatorPrimi
 
 interface JobOverviewProps {
   job: Job;
-}
-
-function isLiveJob(job: Job) {
-  return job.status === 'queued' || job.status === 'running' || job.status === 'stopping';
 }
 
 function formatPhaseValue(value: number) {
@@ -87,7 +84,7 @@ export default function JobOverview({ job }: JobOverviewProps) {
     return job.gpu_ids.split(',').map(id => parseInt(id));
   }, [job.gpu_ids]);
   const isStopping = job.stop && job.status === 'running';
-  const shouldPoll = isLiveJob(job) || isStopping;
+  const shouldPoll = isActiveJobStatus(job.status) || isStopping;
   const logPollInterval = shouldPoll ? 5000 : null;
   const downloadPollInterval = shouldPoll ? 2000 : null;
   const systemPollInterval = shouldPoll ? 10000 : null;

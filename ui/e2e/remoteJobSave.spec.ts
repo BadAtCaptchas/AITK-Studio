@@ -72,7 +72,7 @@ async function prepareRemoteForm(page: Page) {
   const name = `remote-save-${randomUUID().slice(0, 8)}`;
   await page.getByLabel('Training name', { exact: true }).fill(name);
   await page.getByLabel('Model path', { exact: true }).fill('fixture/not-downloaded-yet');
-  await page.locator('.training-topbar').getByRole('combobox').first().fill(worker.name);
+  await page.getByRole('combobox', { name: 'Compute', exact: true }).fill(worker.name);
   await page.getByRole('option', { name: worker.name, exact: true }).click();
   const save = page.getByRole('button', { name: 'Create Job', exact: true }).first();
   await expect(save).toBeEnabled();
@@ -113,7 +113,8 @@ test('a stalled save releases the button, keeps the form, and allows an explicit
   const sent = page.waitForRequest(request => request.url().endsWith('/api/jobs') && request.method() === 'POST');
   await save.click();
   await sent;
-  await expect(page.getByRole('button', { name: 'Saving...', exact: true }).first()).toBeDisabled();
+  await expect(save).toBeDisabled();
+  await expect(save).toHaveText('Saving...');
   await page.clock.fastForward(30_001);
   await expect(
     page.getByRole('alert').filter({ hasText: 'The server did not confirm the save in time.' }),

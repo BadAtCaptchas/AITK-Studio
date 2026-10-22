@@ -58,7 +58,7 @@ test('delete selected and all local samples with confirmation and associated fil
   }
   await writeFile(path.join(trainingRoot, job.storageKey, 'keep.safetensors'), 'checkpoint fixture');
   await page.goto(`/jobs/${job.id}`);
-  await page.getByRole('button', { name: 'Samples', exact: true }).click();
+  await page.getByRole('tab', { name: 'Samples', exact: true }).click();
   const toolbar = page.getByRole('toolbar', { name: 'Sample actions' });
   await expect(toolbar.getByRole('status')).toHaveText('3 samples');
   await page.getByAltText('Sample Image', { exact: true }).first().click();
@@ -127,7 +127,7 @@ test('remote sample references use the mirror job and failed deletions remain se
   });
   await page.goto(`/jobs/${job.id}`);
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole('button', { name: 'Samples', exact: true }).click();
+  await page.getByRole('tab', { name: 'Samples', exact: true }).click();
   const toolbar = page.getByRole('toolbar', { name: 'Sample actions' });
   await toolbar.getByRole('button', { name: 'Delete all', exact: true }).click();
   await page.getByRole('dialog', { name: 'Delete All Samples', exact: true })

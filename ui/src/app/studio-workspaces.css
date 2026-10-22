@@ -101,19 +101,6 @@
   }
 }
 @media (max-width: 639px) {
-  .training-topbar {
-    height: 184px;
-    flex-wrap: wrap;
-    align-content: center;
-    gap: 8px;
-  }
-  .training-topbar > div:first-child {
-    width: 100%;
-    flex: none;
-  }
-  .training-content {
-    padding-top: 200px;
-  }
   .caption-gallery-search {
     flex-basis: 100%;
   }

@@ -15,7 +15,8 @@ import JobConfigViewer from '@/components/JobConfigViewer';
 import JobLossGraph from '@/components/JobLossGraph';
 import type { Job } from '@/types';
 import { PageNotice, StatusBadge } from '@/components/OperatorPrimitives';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 
 type PageKey = 'overview' | 'samples' | 'config' | 'loss_log' | 'notes';
 
@@ -30,13 +31,11 @@ interface Page {
 }
 
 const pages: Page[] = [
-  { name: 'Notes', value: 'notes', icon: MdCode, component: JobNotes, mainCss: 'pt-[124px]' },
   {
     name: 'Overview',
     value: 'overview',
     icon: MdDashboard,
     component: JobOverview,
-    mainCss: 'pt-[124px]',
   },
   {
     name: 'Samples',
@@ -44,24 +43,24 @@ const pages: Page[] = [
     icon: MdImage,
     component: SampleImages,
     menuItem: SampleImagesMenu,
-    mainCss: 'pt-[124px]',
     jobTypes: ['train', 'generate'],
   },
   {
-    name: 'Training Monitor',
+    name: 'Metrics',
     value: 'loss_log',
     icon: MdShowChart,
     component: JobLossGraph,
-    mainCss: 'pt-[124px] pb-4',
+    mainCss: 'pb-4',
     jobTypes: ['train'],
   },
   {
-    name: 'Config File',
+    name: 'Configuration',
     value: 'config',
     icon: MdCode,
     component: JobConfigViewer,
-    mainCss: 'pt-[112px] px-0 pb-0',
+    mainCss: 'px-0 pb-0',
   },
+  { name: 'Notes', value: 'notes', icon: MdCode, component: JobNotes },
 ];
 
 function shouldPollJob(job: Job | null) {
@@ -72,17 +71,29 @@ function shouldPollJob(job: Job | null) {
 export default function JobPage({ params }: { params: Promise<{ jobID: string }> }) {
   const usableParams = use(params);
   const router = useRouter();
+  const searchParams = useSearchParams();
   const jobID = usableParams.jobID;
   const [jobReloadInterval, setJobReloadInterval] = useState<number | null>(5000);
   const { job, status, refreshJob } = useJob(jobID, jobReloadInterval);
-  const [pageKey, setPageKey] = useState<PageKey>('overview');
+  const [visitedNotesJobID, setVisitedNotesJobID] = useState<string | null>(null);
 
   const nextInterval = shouldPollJob(job) ? 5000 : null;
   if (jobReloadInterval !== nextInterval) setJobReloadInterval(nextInterval);
 
-  const page = pages.find(p => p.value === pageKey);
-
   const jobType = job?.job_type || 'unknown';
+  const availablePages = pages.filter(page => !page.jobTypes || page.jobTypes.includes(jobType));
+  const requestedTab = searchParams.get('tab');
+  const normalizedTab = requestedTab === 'metrics' ? 'loss_log' : requestedTab === 'logs' ? 'overview' : requestedTab;
+  const pageKey = availablePages.find(page => page.value === normalizedTab)?.value || 'overview';
+  const page = availablePages.find(page => page.value === pageKey);
+  const selectPage = (value: PageKey) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', value);
+    // Next copies its history metadata for external changes. Passing its __NA marker
+    // back would bypass the search-parameter update and leave the old panel mounted.
+    window.history.replaceState(null, '', url);
+  };
+  if (pageKey === 'notes' && visitedNotesJobID !== jobID) setVisitedNotesJobID(jobID);
 
   let title = `Job: ${job?.name || (status === 'success' ? 'Not found' : 'Loading...')}`;
   if (jobType === 'caption') {
@@ -96,9 +107,9 @@ export default function JobPage({ params }: { params: Promise<{ jobID: string }>
       {/* Fixed top bar */}
       <TopBar>
         <div>
-          <Button className="operator-icon-button" onClick={() => router.push('/jobs')} title="Back to queue">
+          <Link className="operator-icon-button" href="/jobs" title="Back to queue" aria-label="Back to queue">
             <FaChevronLeft />
-          </Button>
+          </Link>
         </div>
         <div className="min-w-0">
           <h1 className="truncate text-base font-semibold">{title}</h1>
@@ -117,7 +128,9 @@ export default function JobPage({ params }: { params: Promise<{ jobID: string }>
           />
         )}
       </TopBar>
-      <MainContent className={job ? pages.find(page => page.value === pageKey)?.mainCss : undefined}>
+      <MainContent
+        className={job ? `!pt-[calc(var(--studio-page-toolbar-height,48px)+3rem)] ${page?.mainCss || ''}` : undefined}
+      >
         {status === 'loading' && job == null && (
           <PageNotice tone="neutral" title="Loading job">
             Fetching job details, status, logs, and metrics.
@@ -125,7 +138,19 @@ export default function JobPage({ params }: { params: Promise<{ jobID: string }>
         )}
         {status === 'error' && job == null && (
           <PageNotice tone="danger" title="Could not load job">
-            Refresh the queue or check whether this job still exists.
+            Check whether this job still exists, or{' '}
+            <button type="button" className="underline" onClick={refreshJob} aria-label="Retry job refresh">
+              retry loading it
+            </button>
+            .
+          </PageNotice>
+        )}
+        {status === 'error' && job != null && (
+          <PageNotice tone="warning" title="Job details could not be refreshed">
+            Showing the last loaded status.{' '}
+            <button type="button" className="underline" onClick={refreshJob} aria-label="Retry job refresh">
+              Retry
+            </button>
           </PageNotice>
         )}
         {status === 'success' && job == null && (
@@ -135,34 +160,70 @@ export default function JobPage({ params }: { params: Promise<{ jobID: string }>
         )}
         {job && (
           <>
-            {pages.map(page => {
-              const Component = page.component;
-              return page.value === pageKey ? <Component key={page.value} job={job} /> : null;
+            {availablePages.map(candidate => {
+              const Component = candidate.component;
+              const active = candidate.value === pageKey;
+              if (!active && (candidate.value !== 'notes' || visitedNotesJobID !== jobID)) return null;
+              return (
+                <div
+                  key={`${jobID}:${candidate.value}`}
+                  role="tabpanel"
+                  id={`job-panel-${candidate.value}`}
+                  aria-labelledby={`job-tab-${candidate.value}`}
+                  className={candidate.value === 'config' ? 'h-full min-h-80' : undefined}
+                  hidden={!active}
+                  tabIndex={0}
+                >
+                  <Component job={job} />
+                </div>
+              );
             })}
           </>
         )}
       </MainContent>
       {job && (
-        <div className="operator-scrollbar-none absolute left-0 top-[72px] flex h-9 w-full items-center overflow-x-auto border-b border-gray-800 bg-gray-900 px-5 text-sm sm:px-8">
-          {pages.map(page => {
-            if (page.jobTypes && !page.jobTypes.includes(jobType)) {
-              return null;
-            }
-            return (
-              <Button
-                key={page.value}
-                onClick={() => setPageKey(page.value)}
-                className={`flex h-8 items-center gap-1.5 border-b-2 px-3 py-1 ${
-                  page.value === pageKey
-                    ? 'border-brand-400 text-brand-100'
-                    : 'border-transparent text-gray-400 hover:text-gray-100'
-                }`}
-              >
-                <page.icon className="text-sm" />
-                {page.name}
-              </Button>
-            );
-          })}
+        <div className="operator-scrollbar-none absolute left-0 top-[var(--studio-page-toolbar-height,48px)] flex h-9 w-full items-center overflow-x-auto border-b border-gray-800 bg-gray-900 px-3 text-sm">
+          <div
+            role="tablist"
+            aria-label="Job details"
+            className="flex items-center"
+            onKeyDown={event => {
+              if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+              const tabs = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+              const index = tabs.indexOf(event.target as HTMLButtonElement);
+              if (index < 0) return;
+              event.preventDefault();
+              const next =
+                event.key === 'Home'
+                  ? 0
+                  : event.key === 'End'
+                    ? tabs.length - 1
+                    : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+              tabs[next]?.focus();
+            }}
+          >
+            {availablePages.map(page => {
+              return (
+                <Button
+                  key={page.value}
+                  role="tab"
+                  id={`job-tab-${page.value}`}
+                  aria-controls={`job-panel-${page.value}`}
+                  aria-selected={page.value === pageKey}
+                  tabIndex={page.value === pageKey ? 0 : -1}
+                  onClick={() => selectPage(page.value)}
+                  className={`flex h-8 items-center gap-1.5 border-b-2 px-3 py-1 ${
+                    page.value === pageKey
+                      ? 'border-brand-400 text-brand-100'
+                      : 'border-transparent text-gray-400 hover:text-gray-100'
+                  }`}
+                >
+                  <page.icon className="text-sm" />
+                  {page.name}
+                </Button>
+              );
+            })}
+          </div>
           {page?.menuItem && (
             <>
               <div className="flex-grow"></div>

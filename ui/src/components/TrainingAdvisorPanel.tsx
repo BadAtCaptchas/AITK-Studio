@@ -18,15 +18,15 @@ const severityLabel: Record<AdvisorSeverity, string> = {
 };
 
 const severityClasses: Record<AdvisorSeverity, string> = {
-  critical: 'border-rose-700 bg-rose-950/35 text-rose-100',
-  warning: 'border-amber-700 bg-amber-950/35 text-amber-100',
-  info: 'border-sky-800 bg-sky-950/30 text-sky-100',
+  critical: 'border-rose-300 bg-rose-50 text-rose-800 dark:border-rose-700 dark:bg-rose-950/35 dark:text-rose-100',
+  warning: 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-700 dark:bg-amber-950/35 dark:text-amber-100',
+  info: 'border-sky-300 bg-sky-50 text-sky-800 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-100',
 };
 
 const severityBadgeClasses: Record<AdvisorSeverity, string> = {
-  critical: 'bg-rose-500/15 text-rose-200',
-  warning: 'bg-amber-500/15 text-amber-200',
-  info: 'bg-sky-500/15 text-sky-200',
+  critical: 'bg-rose-500/15 text-rose-700 dark:text-rose-200',
+  warning: 'bg-amber-500/15 text-amber-800 dark:text-amber-200',
+  info: 'bg-sky-500/15 text-sky-800 dark:text-sky-200',
 };
 
 function isEditableElement(element: Element | null) {
@@ -161,12 +161,12 @@ function AdvisorResultPanel({
             className={classNames(
               'mt-0.5 flex h-8 w-8 flex-none items-center justify-center rounded-full border',
               error
-                ? 'border-rose-700 text-rose-300'
+                ? 'border-rose-700 text-rose-700 dark:text-rose-300'
                 : initialLoading
                   ? 'border-brand-700 text-brand-300'
                   : clean
-                    ? 'border-emerald-600 text-emerald-300'
-                    : 'border-amber-700 text-amber-300',
+                    ? 'border-emerald-600 text-emerald-700 dark:text-emerald-300'
+                    : 'border-amber-700 text-amber-800 dark:text-amber-300',
             )}
           >
             {initialLoading || loading ? (
@@ -293,7 +293,7 @@ function AdvisorResultPanel({
       </div>
 
       {error && (
-        <div className="mt-3 rounded-sm border border-rose-800 bg-rose-950/30 px-3 py-2 text-sm text-rose-200">
+        <div className="mt-3 rounded-sm border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:border-rose-800 dark:bg-rose-950/30 dark:text-rose-200">
           {error}
         </div>
       )}
@@ -310,7 +310,7 @@ function AdvisorResultPanel({
 
       {result?.target && <p role="status" className="mt-2 text-xs text-gray-400">{result.target.detail}</p>}
       {!initialLoading && result && !hasFindings && result.target?.state !== 'unknown' && (
-        <div className="mt-3 flex items-center gap-2 rounded-sm border border-emerald-800 bg-emerald-950/25 px-3 py-2 text-sm text-emerald-100">
+        <div className="mt-3 flex items-center gap-2 rounded-sm border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/25 dark:text-emerald-100">
           <CheckCircle2 className="h-4 w-4" />
           No training quality issues found.
         </div>
@@ -424,17 +424,7 @@ export function TrainingAdvisorPanel({
   }, [advisorVisibility.enabled, advisorVisibility.loaded, payload, runPreflight]);
 
   if (!advisorVisibility.loaded) return null;
-  if (!advisorVisibility.enabled) {
-    if (variant !== 'rail') return null;
-    return (
-      <section className="border border-gray-800 bg-gray-950/50 p-3">
-        <div className="text-sm font-semibold text-gray-100">Advisor checks off</div>
-        <p className="mt-1 text-xs leading-5 text-gray-400">
-          Enable Training Advisor in Settings to check this setup for common issues.
-        </p>
-      </section>
-    );
-  }
+  if (!advisorVisibility.enabled) return null;
 
   return (
     <AdvisorResultPanel

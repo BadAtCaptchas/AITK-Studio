@@ -24,7 +24,6 @@ function loadSource(relative, dependencies = {}) {
 const basic = loadSource('../src/utils/basic.ts');
 const media = loadSource('../src/utils/media.ts', { './remoteDatasetRefs': loadSource('../src/utils/remoteDatasetRefs.ts') });
 const jobStatus = loadSource('../src/utils/jobStatus.ts');
-const homeJourney = loadSource('../src/utils/homeJourney.ts');
 
 function fixture({ jobStatus: status = 'running', samples = [], sampleStatus = 'success' } = {}) {
   const requests = [];
@@ -33,22 +32,15 @@ function fixture({ jobStatus: status = 'running', samples = [], sampleStatus = '
     'lucide-react': icons, '@/utils/basic': basic, '@/utils/jobStatus': jobStatus, '@/utils/media': media,
     '@/hooks/useSampleImages': (id, interval) => { requests.push({ id, interval }); return { sampleImages: samples, status: sampleStatus }; },
   });
-  const { default: Dashboard } = loadSource('../src/app/dashboard/page.tsx', {
-    react: React, 'next/link': ({ children, ...props }) => React.createElement('a', props, children), 'lucide-react': icons,
-    '@/components/DashboardHardware': () => null, '@/components/JobSamplePreview': preview,
-    '@/hooks/useScopedState': loadSource('../src/hooks/useScopedState.ts', { react: React }).default,
-    '@/hooks/useGPUInfo': () => ({ status: 'success', isGPUInfoLoaded: true, gpuList: [] }),
-    '@/hooks/useMonitorStream': () => ({}),
-    '@/hooks/useJobsList': () => ({ jobs: [job], status: 'success', refreshJobs() {} }),
-    '@/hooks/useDatasetList': () => ({ datasets: [], status: 'success', errors: [], refreshDatasets() {} }),
-    '@/utils/api': {}, '@/utils/media': media, '@/utils/homeJourney': homeJourney,
-  });
-  return { requests, render: () => renderToStaticMarkup(React.createElement(Dashboard)) };
+  // The operational Overview now mounts the full Samples workspace on demand.
+  // Keep this preview component's routing/polling contract covered independently;
+  // premiumShell.spec.ts covers the new Overview's actual Samples tab.
+  return { requests, render: () => renderToStaticMarkup(React.createElement(preview.default, { job })) };
 }
 
 const remoteSample = name => `remote://local-mirror/img/${encodeURIComponent(`/api/jobs/worker-job/samples/${name}`)}/${encodeURIComponent(name)}`;
 
-test('the dashboard run panel displays the latest local and remote samples through thumbnail routes', () => {
+test('the compact run preview displays the latest local and remote samples through thumbnail routes', () => {
   for (const sample of [name => `/api/jobs/local-mirror/samples/${name}`, remoteSample]) {
     const samples = ['sample_10.png', 'sample_2.png', 'sample_11.png', 'sample_1.png', 'sample_12.txt', 'sample_12.mp4'].map(sample);
     const f = fixture({ samples });

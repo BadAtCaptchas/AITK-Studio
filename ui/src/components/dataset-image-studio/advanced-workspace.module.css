@@ -1,0 +1,122 @@
+.mobileToolbar {
+  display: none;
+}
+
+@media (max-width: 1100px) {
+  .workspace {
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+  }
+
+  .workspace .mobileToolbar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    display: flex;
+    flex: none;
+    gap: 8px;
+    padding: 6px 10px;
+    border-block: 1px solid var(--studio-line);
+    background: var(--studio-toolbar);
+  }
+
+  .workspace .body {
+    display: grid;
+    flex: none;
+    grid-template-columns: 48px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .workspace .body[data-tool-rail='false'] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workspace .body > aside:not(.inspector) {
+    width: 48px;
+    height: 340px;
+    max-height: 340px;
+  }
+
+  .workspace .canvas {
+    grid-column: -2 / -1;
+    height: 340px;
+  }
+
+  .workspace .inspector {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-width: 0;
+    height: 540px;
+    overflow: auto;
+    border-left: 0;
+    border-top: 1px solid var(--studio-line);
+  }
+
+  .workspace .inspectorCollapsed {
+    display: none;
+  }
+
+  .workspace .captionWorkbench {
+    height: auto;
+    flex-direction: column;
+    scroll-margin-top: 48px;
+  }
+
+  .workspace .captionWorkbench > button {
+    width: 100%;
+    height: 28px;
+    border-right: 0;
+    border-bottom: 1px solid var(--studio-line);
+  }
+
+  .workspace .captionScroll {
+    overflow: visible;
+  }
+
+  .workspace .captionGrid {
+    min-width: 0;
+    height: auto;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .workspace .metadata {
+    height: 96px;
+  }
+
+  .workspace .metadata > div:first-child {
+    width: 72px;
+  }
+
+  .workspace .metadata dl {
+    display: none;
+  }
+
+  .workspace .captionEditor {
+    min-height: 180px;
+  }
+
+  .workspace .actions {
+    min-width: 0;
+    min-height: 172px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: 40px 36px 36px 20px;
+    gap: 8px;
+  }
+
+  .workspace .actions > * {
+    grid-column: auto;
+    margin-left: 0;
+  }
+
+  .workspace .actions > :first-child,
+  .workspace .actions > :last-child {
+    grid-column: 1 / -1;
+  }
+
+  .workspace .actions > :first-child > [aria-hidden='true'] {
+    display: none;
+  }
+}

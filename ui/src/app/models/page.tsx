@@ -1,8 +1,9 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, Box, Search, Loader2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Box, Search, Loader2, RefreshCw, Upload } from 'lucide-react';
 import { apiClient } from '@/utils/api';
+import { TopBar, MainContent } from '@/components/layout';
 
 type LibraryModel = {
   id: string;
@@ -13,6 +14,16 @@ type LibraryModel = {
   jobId?: string;
   triggerWords: string[];
 };
+type ModelSort = 'name' | 'size' | 'updated';
+
+function modelTimestamp(value: string): number {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function modelSize(bytes: number): string {
+  return bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(2)} GB` : `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+}
 function readModels(value: unknown): LibraryModel[] {
   if (!value || typeof value !== 'object' || !('loras' in value) || !Array.isArray(value.loras))
     throw new Error('Invalid model library response.');
@@ -41,6 +52,8 @@ export default function ModelsPage() {
   const [models, setModels] = useState<LibraryModel[]>([]);
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [query, setQuery] = useState('');
+  const [sort, setSort] = useState<ModelSort>('updated');
+  const [direction, setDirection] = useState<'asc' | 'desc'>('desc');
   const loadModels = useCallback(
     () =>
       apiClient
@@ -59,84 +72,181 @@ export default function ModelsPage() {
   useEffect(() => {
     void loadModels();
   }, [loadModels]);
-  const filtered = models.filter(model =>
-    `${model.label} ${model.triggerWords.join(' ')}`.toLowerCase().includes(query.toLowerCase()),
+  const filtered = useMemo(() => {
+    const search = query.trim().toLowerCase();
+    return models
+      .filter(model =>
+        `${model.label} ${model.filename} ${model.triggerWords.join(' ')}`.toLowerCase().includes(search),
+      )
+      .sort((a, b) => {
+        const compared =
+          sort === 'name'
+            ? a.label.localeCompare(b.label, undefined, { numeric: true })
+            : sort === 'size'
+              ? a.sizeBytes - b.sizeBytes
+              : modelTimestamp(a.updatedAt) - modelTimestamp(b.updatedAt);
+        return (direction === 'asc' ? compared : -compared) || a.label.localeCompare(b.label);
+      });
+  }, [direction, models, query, sort]);
+  const changeSort = (nextSort: ModelSort) => {
+    if (nextSort === sort) setDirection(current => (current === 'asc' ? 'desc' : 'asc'));
+    else {
+      setSort(nextSort);
+      setDirection(nextSort === 'name' ? 'asc' : 'desc');
+    }
+  };
+  const sortHeader = (key: ModelSort, label: string) => (
+    <th
+      scope="col"
+      className="px-4 py-2 text-left font-medium"
+      aria-sort={sort === key ? (direction === 'asc' ? 'ascending' : 'descending') : 'none'}
+    >
+      <button
+        type="button"
+        onClick={() => changeSort(key)}
+        className="inline-flex items-center gap-2 hover:text-gray-100"
+      >
+        {label}
+        {sort !== key ? (
+          <ArrowUpDown size={12} aria-hidden="true" />
+        ) : direction === 'asc' ? (
+          <ArrowUp size={12} aria-hidden="true" />
+        ) : (
+          <ArrowDown size={12} aria-hidden="true" />
+        )}
+      </button>
+    </th>
   );
   return (
-    <div className="journey-page">
-      <header className="journey-heading">
-        <div>
-          <h1 className="journey-title">Models</h1>
-          <p className="mt-2 text-gray-400">Your training checkpoints and uploaded LoRAs, ready to explore.</p>
-        </div>
+    <>
+      <TopBar>
+        <Box size={16} className="text-gray-400" aria-hidden="true" />
+        <h1 className="text-base font-semibold">Models</h1>
+        <span className="text-xs tabular-nums text-gray-500">{models.length}</span>
+        <div className="flex-1" />
+        <button
+          type="button"
+          className="operator-button"
+          onClick={() => void refresh()}
+          disabled={status === 'loading'}
+          aria-label="Refresh models"
+        >
+          <RefreshCw size={15} className={status === 'loading' ? 'animate-spin' : ''} aria-hidden="true" />
+          <span className="hidden sm:inline">Refresh</span>
+        </button>
         <Link className="operator-button" href="/generate">
-          Upload in Generate <ArrowRight size={16} />
+          <Upload size={15} aria-hidden="true" /> Upload LoRA
         </Link>
-      </header>
-      <label className="my-8 flex max-w-lg items-center gap-3 rounded-lg border border-gray-700 px-4 py-3">
-        <Search size={18} aria-hidden="true" />
-        <span className="sr-only">Search models</span>
-        <input
-          className="min-w-0 flex-1 bg-transparent outline-none"
-          value={query}
-          onChange={event => setQuery(event.target.value)}
-          placeholder="Search models or trigger words"
-        />
-      </label>
-      {status === 'loading' ? (
-        <p role="status" className="flex items-center gap-3">
-          <Loader2 className="animate-spin" /> Loading models…
-        </p>
-      ) : status === 'error' ? (
-        <div role="alert" className="journey-card p-6">
-          <p>Couldn’t load the model library.</p>
-          <button className="studio-primary mt-4" onClick={() => void refresh()}>
-            Retry
-          </button>
+      </TopBar>
+      <MainContent>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <span className="text-xs text-gray-400">
+            {filtered.length} of {models.length} models
+          </span>
+          <label className="flex h-8 w-full items-center gap-2 rounded border border-gray-700 bg-gray-950 px-3 sm:w-80">
+            <Search size={15} className="text-gray-500" aria-hidden="true" />
+            <span className="sr-only">Search models</span>
+            <input
+              className="min-w-0 flex-1 bg-transparent text-sm outline-none"
+              value={query}
+              onChange={event => setQuery(event.target.value)}
+              placeholder="Filter models or trigger words"
+            />
+          </label>
         </div>
-      ) : models.length === 0 ? (
-        <div className="journey-card p-8">
-          <Box className="mb-5 text-gray-400" size={42} />
-          <h2 className="text-2xl font-semibold">Your models will appear here</h2>
-          <p className="mt-3 max-w-xl text-gray-400">
-            Train a LoRA or upload an existing one in Generate. Checkpoints saved by local training runs appear
-            automatically.
+        {status === 'loading' ? (
+          <p role="status" className="flex items-center gap-2 border-y border-gray-800 px-4 py-6 text-sm text-gray-400">
+            <Loader2 size={16} className="animate-spin" /> Loading models…
           </p>
-          <Link className="studio-primary mt-6" href="/jobs/new">
-            Set up training <ArrowRight size={16} />
-          </Link>
-        </div>
-      ) : filtered.length === 0 ? (
-        <p role="status">No models match this search.</p>
-      ) : (
-        <ul className="grid gap-5 lg:grid-cols-2">
-          {filtered.map(model => (
-            <li key={model.id} className="journey-card min-w-0 p-6">
-              <Box className="mb-5 text-[var(--studio-accent)]" aria-hidden="true" />
-              <h2 className="break-words text-lg font-semibold">{model.label}</h2>
-              <p className="mt-2 text-sm text-gray-400">
-                {(model.sizeBytes / 1024 / 1024).toFixed(1)} MB
-                {model.updatedAt && ` · ${new Date(model.updatedAt).toLocaleDateString()}`}
-              </p>
-              <p className="mt-4 text-sm text-gray-300">
-                {model.triggerWords.length
-                  ? `Trigger words: ${model.triggerWords.join(', ')}`
-                  : 'No trigger words recorded'}
-              </p>
-              <div className="mt-6 flex flex-wrap items-center gap-5">
-                <Link className="studio-primary" href={`/generate?model_ref=${encodeURIComponent(model.id)}`}>
-                  Try this model <ArrowRight size={16} />
-                </Link>
-                {model.jobId && (
-                  <Link className="studio-text-link text-sm" href={`/jobs/${encodeURIComponent(model.jobId)}`}>
-                    View training run
-                  </Link>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+        ) : status === 'error' ? (
+          <div role="alert" className="flex items-center justify-between gap-3 border border-red-800 p-4 text-sm">
+            <p>Couldn’t load the model library.</p>
+            <button className="operator-button" onClick={() => void refresh()}>
+              Retry
+            </button>
+          </div>
+        ) : models.length === 0 ? (
+          <div className="border-y border-gray-800 px-4 py-8">
+            <h2 className="text-sm font-semibold">No models</h2>
+            <p className="mt-2 text-sm text-gray-400">Local checkpoints and uploaded LoRAs appear here.</p>
+            <Link className="operator-button mt-4" href="/jobs/new">
+              New training
+            </Link>
+          </div>
+        ) : filtered.length === 0 ? (
+          <p role="status" className="border-y border-gray-800 p-4 text-sm text-gray-400">
+            No models match this filter.
+          </p>
+        ) : (
+          <div className="overflow-x-auto border-y border-gray-800">
+            <table className="w-full min-w-[760px] border-collapse text-sm">
+              <thead className="border-b border-gray-800 bg-gray-900 text-xs text-gray-400">
+                <tr>
+                  {sortHeader('name', 'Name')}
+                  {sortHeader('size', 'Size')}
+                  {sortHeader('updated', 'Updated')}
+                  <th scope="col" className="px-4 py-2 text-left font-medium">
+                    Trigger words
+                  </th>
+                  <th scope="col" className="px-4 py-2 text-right font-medium">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(model => (
+                  <tr key={model.id} className="border-b border-gray-800 last:border-b-0 hover:bg-gray-900/60">
+                    <th scope="row" className="max-w-[320px] px-4 py-2.5 text-left font-medium">
+                      <Link
+                        className="block truncate hover:text-brand-300"
+                        title={model.filename}
+                        href={`/generate?model_ref=${encodeURIComponent(model.id)}`}
+                      >
+                        {model.label}
+                      </Link>
+                    </th>
+                    <td className="whitespace-nowrap px-4 py-2.5 tabular-nums text-gray-400">
+                      {modelSize(model.sizeBytes)}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-2.5 tabular-nums text-gray-400">
+                      {modelTimestamp(model.updatedAt) ? (
+                        <time dateTime={model.updatedAt} title={new Date(model.updatedAt).toLocaleString()}>
+                          {new Date(model.updatedAt).toLocaleDateString()}
+                        </time>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                    <td className="max-w-[240px] px-4 py-2.5 text-gray-400">
+                      <span className="block truncate" title={model.triggerWords.join(', ')}>
+                        {model.triggerWords.join(', ') || '—'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <div className="flex justify-end gap-3 whitespace-nowrap">
+                        {model.jobId && (
+                          <Link
+                            className="text-gray-400 hover:text-gray-100"
+                            href={`/jobs/${encodeURIComponent(model.jobId)}`}
+                          >
+                            Training run
+                          </Link>
+                        )}
+                        <Link
+                          className="text-brand-300 hover:text-brand-200"
+                          href={`/generate?model_ref=${encodeURIComponent(model.id)}`}
+                        >
+                          Generate
+                        </Link>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </MainContent>
+    </>
   );
 }

@@ -21,6 +21,8 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTheme } from '@/components/ThemeProvider';
+import styles from './json-workspace.module.css';
 
 export type CaptionJsonValidity = 'valid' | 'invalid' | 'checking';
 
@@ -126,6 +128,7 @@ export function StandaloneJsonWorkspace({
   onSelectSection,
   onSelectElement,
 }: StandaloneJsonWorkspaceProps) {
+  const { theme } = useTheme();
   const editorRef = useRef<MonacoEditor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<typeof import('monaco-editor') | null>(null);
   const decorationsRef = useRef<MonacoEditor.IEditorDecorationsCollection | null>(null);
@@ -153,14 +156,14 @@ export function StandaloneJsonWorkspace({
         { token: 'delimiter.bracket.json', foreground: 'D7E0E8' },
       ],
       colors: {
-        'editor.background': '#031019',
+        'editor.background': '#232629',
         'editor.foreground': '#D5DEE6',
         'editorLineNumber.foreground': '#70808E',
         'editorLineNumber.activeForeground': '#B9C6D0',
         'editorCursor.foreground': '#22D3EE',
         'editor.selectionBackground': '#123E59',
         'editor.inactiveSelectionBackground': '#0D2D41',
-        'editor.lineHighlightBackground': '#071721',
+        'editor.lineHighlightBackground': '#2B2F34',
         'editorIndentGuide.background1': '#17303F',
         'editorIndentGuide.activeBackground1': '#315063',
         'editorBracketHighlight.foreground1': '#9CDCF8',
@@ -307,12 +310,15 @@ export function StandaloneJsonWorkspace({
 
   return (
     <section
-      className="flex h-full min-h-0 min-w-0 overflow-hidden bg-gray-950 text-gray-100"
+      className={classNames(styles.workspace, 'flex h-full min-h-0 min-w-0 overflow-hidden bg-gray-950 text-gray-100')}
       aria-label="Caption JSON workspace"
       title={disabled ? disabledReason : undefined}
     >
       <nav
-        className="flex w-[145px] flex-none flex-col border-r border-gray-800 bg-gray-950"
+        className={classNames(
+          styles.navigation,
+          'flex w-[145px] flex-none flex-col border-r border-gray-800 bg-gray-950',
+        )}
         aria-label="JSON sections"
       >
         <div className="flex h-12 flex-none items-center border-b border-gray-800 px-4 text-gray-200">
@@ -320,7 +326,7 @@ export function StandaloneJsonWorkspace({
           <span className="sr-only">JSON structure</span>
         </div>
 
-        <div className="operator-scrollbar-none min-h-0 flex-1 overflow-y-auto">
+        <div className={classNames(styles.sections, 'operator-scrollbar-none min-h-0 flex-1 overflow-y-auto')}>
           {sections.map(section => {
             const selected = selectedSectionId === section.id;
             return (
@@ -360,7 +366,7 @@ export function StandaloneJsonWorkspace({
                           className={classNames(
                             'grid min-h-[49px] w-full grid-cols-[16px_minmax(0,1fr)] items-start gap-1.5 border-r-2 px-2 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-300 disabled:cursor-not-allowed disabled:opacity-45',
                             elementSelected
-                              ? 'border-brand-300 bg-brand-950 text-white'
+                              ? 'border-brand-300 bg-brand-950 text-gray-100'
                               : 'border-transparent text-gray-300 hover:bg-gray-900 hover:text-white',
                           )}
                         >
@@ -390,14 +396,18 @@ export function StandaloneJsonWorkspace({
       </nav>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-gray-950">
-        <header className="flex h-12 flex-none items-center gap-2 border-b border-gray-800 px-5">
+        <header
+          className={classNames(styles.toolbar, 'flex h-12 flex-none items-center gap-2 border-b border-gray-800 px-5')}
+        >
           <h2 className="flex-none text-sm font-semibold tracking-tight text-gray-100">Caption JSON</h2>
 
           <span
             className={classNames(
               'ml-2 inline-flex h-7 flex-none items-center gap-1.5 rounded-[4px] border px-2.5 text-[10px] font-medium',
-              validity === 'valid' && 'border-emerald-900/70 bg-emerald-950/20 text-emerald-300',
-              validity === 'invalid' && 'border-red-900/80 bg-red-950/20 text-red-300',
+              validity === 'valid' &&
+                'border-emerald-900/70 bg-emerald-500/10 text-emerald-800 dark:bg-emerald-950/20 dark:text-emerald-300',
+              validity === 'invalid' &&
+                'border-red-900/80 bg-red-500/10 text-red-800 dark:bg-red-950/20 dark:text-red-300',
               validity === 'checking' && 'border-brand-900/70 bg-brand-950/20 text-brand-300',
             )}
             title={problemsTitle}
@@ -421,7 +431,7 @@ export function StandaloneJsonWorkspace({
             {selectedPathLabel}
           </span>
 
-          <div className="flex flex-none items-center gap-1">
+          <div className={classNames(styles.toolbarActions, 'flex flex-none items-center gap-1')}>
             <button
               type="button"
               disabled={disabled || !canUndo}
@@ -451,7 +461,7 @@ export function StandaloneJsonWorkspace({
               aria-label={copied ? 'Copied JSON' : 'Copy JSON'}
             >
               {copied ? (
-                <ClipboardCheck className="h-4 w-4 text-emerald-300" aria-hidden="true" />
+                <ClipboardCheck className="h-4 w-4 text-emerald-800 dark:text-emerald-300" aria-hidden="true" />
               ) : (
                 <Clipboard className="h-4 w-4" aria-hidden="true" />
               )}
@@ -485,7 +495,7 @@ export function StandaloneJsonWorkspace({
             width="100%"
             language="json"
             value={value}
-            theme={EDITOR_THEME}
+            theme={theme === 'dark' ? EDITOR_THEME : 'light'}
             beforeMount={handleBeforeMount}
             onMount={handleMount}
             onChange={nextValue => onChange(nextValue ?? '')}
@@ -526,12 +536,17 @@ export function StandaloneJsonWorkspace({
           />
         </div>
 
-        <footer className="flex h-7 flex-none items-center border-t border-gray-800 bg-gray-900 px-4 text-[10px] text-gray-400">
+        <footer
+          className={classNames(
+            styles.status,
+            'flex h-7 flex-none items-center border-t border-gray-800 bg-gray-900 px-4 text-[10px] text-gray-400',
+          )}
+        >
           <div className="flex items-center gap-3" title={problemsTitle}>
             <span
               className={classNames(
                 'inline-flex items-center gap-1',
-                errors.length > 0 ? 'text-red-300' : 'text-emerald-300',
+                errors.length > 0 ? 'text-red-800 dark:text-red-300' : 'text-emerald-800 dark:text-emerald-300',
               )}
             >
               {errors.length > 0 ? (
@@ -544,7 +559,7 @@ export function StandaloneJsonWorkspace({
             <span
               className={classNames(
                 'inline-flex items-center gap-1',
-                warnings.length > 0 ? 'text-amber-300' : 'text-gray-500',
+                warnings.length > 0 ? 'text-amber-800 dark:text-amber-300' : 'text-gray-500',
               )}
             >
               <TriangleAlert className="h-3.5 w-3.5" aria-hidden="true" />

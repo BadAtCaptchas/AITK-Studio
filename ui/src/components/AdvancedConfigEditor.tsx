@@ -1,187 +1,116 @@
 'use client';
 import { useEffect, useState, useRef } from 'react';
-import YAML from 'yaml';
-import Editor, { OnMount } from '@monaco-editor/react';
+import Editor, { OnMount, type Monaco } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
 import { useTheme } from '@/components/ThemeProvider';
+import { createConfigEditorSession, readConfigEditorSession, rememberConfigEditorSession, syncConfigEditorSession, updateConfigEditorSession } from '@/utils/configEditorSession';
 
 type Props<T> = {
   config: T;
+  setConfig: (value: T, key?: string) => void;
+  transformOnParse?: (parsed: unknown) => T;
   onValidityChange?: (valid: boolean) => void;
-  setConfig: (value: any, key?: string) => void;
-  transformOnParse?: (parsed: any) => any;
+  onDirtyChange?: (dirty: boolean) => void;
+  sessionKey?: string;
+  active?: boolean;
+  readOnly?: boolean;
+  ariaLabel?: string;
 };
 
-const yamlConfig: YAML.DocumentOptions &
-  YAML.SchemaOptions &
-  YAML.ParseOptions &
-  YAML.CreateNodeOptions &
-  YAML.ToStringOptions = {
-  indent: 2,
-  lineWidth: 999999999999,
-  defaultStringType: 'QUOTE_DOUBLE',
-  defaultKeyType: 'PLAIN',
-  directives: true,
-};
-
-function toYaml(obj: any): string {
-  const doc = new YAML.Document(obj, yamlConfig);
-  YAML.visit(doc, {
-    Scalar(_key, node) {
-      if (typeof node.value === 'string' && node.value.includes('\n')) {
-        node.type = YAML.Scalar.BLOCK_LITERAL;
-      }
-    },
-  });
-  return doc.toString(yamlConfig);
-}
-
-export default function AdvancedConfigEditor<T>({ config, setConfig, transformOnParse, onValidityChange }: Props<T>) {
+export default function AdvancedConfigEditor<T>({ config, setConfig, transformOnParse, onValidityChange, onDirtyChange, sessionKey, active = true, readOnly = false, ariaLabel = 'Configuration YAML' }: Props<T>) {
   const { theme } = useTheme();
-  const [editorValue, setEditorValue] = useState<string>('');
-  const [hasError, setHasError] = useState(false);
-  const [errorMessage, setErrorMessage] = useState('');
-  useEffect(() => {
-    onValidityChange?.(!hasError);
-  }, [hasError, onValidityChange]);
-  const lastConfigUpdateStringRef = useRef('');
+  const [initialSession] = useState(() => (sessionKey && readConfigEditorSession(sessionKey)) || createConfigEditorSession(config));
+  const sessionRef = useRef(initialSession);
+  const [errorMessage, setErrorMessage] = useState(initialSession.error);
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
-  const monacoRef = useRef<any>(null);
+  const monacoRef = useRef<Monaco | null>(null);
+  const changingModel = useRef(false);
 
-  // Track if the editor has been mounted
-  const isEditorMounted = useRef(false);
-
-  // Handler for editor mounting
-  const handleEditorDidMount: OnMount = (editor, monaco) => {
-    editorRef.current = editor;
-    monacoRef.current = monaco;
-    isEditorMounted.current = true;
-
-    editor.getModel()?.updateOptions({ tabSize: 2, insertSpaces: true });
-
-    // Initial content setup
-    try {
-      const yamlContent = toYaml(config);
-      setEditorValue(yamlContent);
-      lastConfigUpdateStringRef.current = JSON.stringify(config);
-    } catch (e) {
-      console.warn(e);
-    }
-  };
-
-  useEffect(() => {
-    const lastUpdate = lastConfigUpdateStringRef.current;
-    const currentUpdate = JSON.stringify(config);
-
-    // Skip if no changes or editor not yet mounted
-    if (lastUpdate === currentUpdate || !isEditorMounted.current) {
-      return;
-    }
-
-    try {
-      // Preserve cursor position and selection
-      const editor = editorRef.current;
-      if (editor) {
-        // Save current editor state
-        const position = editor.getPosition();
-        const selection = editor.getSelection();
-        const scrollTop = editor.getScrollTop();
-
-        // Update content
-        const yamlContent = toYaml(config);
-
-        // Only update if the content is actually different
-        if (yamlContent !== editor.getValue()) {
-          // Set value directly on the editor model instead of using React state
-          editor.getModel()?.setValue(yamlContent);
-
-          // Restore cursor position and selection
-          if (position) editor.setPosition(position);
-          if (selection) editor.setSelection(selection);
-          editor.setScrollTop(scrollTop);
-        }
-
-        lastConfigUpdateStringRef.current = currentUpdate;
-      }
-    } catch (e) {
-      console.warn(e);
-    }
-  }, [config]);
-
-  const setMarkers = (errors: { message: string; line: number }[]) => {
+  const updateMarkers = () => {
+    const session = sessionRef.current;
     const monaco = monacoRef.current;
     const model = editorRef.current?.getModel();
     if (!monaco || !model) return;
-    const markers = errors.map(err => ({
-      severity: monaco.MarkerSeverity.Error,
-      message: err.message,
-      startLineNumber: err.line,
-      startColumn: 1,
-      endLineNumber: err.line,
-      endColumn: model.getLineMaxColumn(err.line),
-    }));
-    monaco.editor.setModelMarkers(model, 'yaml', markers);
+    const line = Math.min(session.errorLine, model.getLineCount());
+    monaco.editor.setModelMarkers(model, 'yaml', session.valid ? [] : [{
+      severity: monaco.MarkerSeverity.Error, message: session.error,
+      startLineNumber: line, startColumn: 1,
+      endLineNumber: line, endColumn: model.getLineMaxColumn(line),
+    }]);
+  };
+  const handleMount: OnMount = (instance, monaco) => {
+    const session = sessionRef.current;
+    editorRef.current = instance;
+    monacoRef.current = monaco;
+    instance.getModel()?.updateOptions({ tabSize: 2, insertSpaces: true });
+    if (instance.getValue() !== session.text) {
+      changingModel.current = true;
+      instance.getModel()?.setValue(session.text);
+      changingModel.current = false;
+    }
+    if (session.viewState) instance.restoreViewState(session.viewState);
+    updateMarkers();
   };
 
-  const handleChange = (value: string | undefined) => {
-    if (value === undefined) return;
+  useEffect(() => {
+    const session = sessionRef.current;
+    onValidityChange?.(session.valid);
+    onDirtyChange?.(session.dirty);
+    if (sessionKey) rememberConfigEditorSession(sessionKey, session);
+    return () => { session.viewState = editorRef.current?.saveViewState() ?? session.viewState; };
+  }, [sessionKey, onValidityChange, onDirtyChange]);
 
-    try {
-      let parsed = YAML.parse(value);
-      setHasError(false);
-      setMarkers([]);
-
-      // Don't update config if the change came from the editor itself
-      // to avoid a circular update loop
-      if (JSON.stringify(parsed) !== lastConfigUpdateStringRef.current) {
-        if (transformOnParse) {
-          parsed = transformOnParse(parsed);
-        }
-        lastConfigUpdateStringRef.current = JSON.stringify(parsed);
-        setConfig(parsed);
-      }
-    } catch (e: any) {
-      setHasError(true);
-      setErrorMessage(e instanceof Error ? e.message : 'Invalid YAML');
-      const line = e?.linePos?.[0]?.line ?? e?.linePos?.line ?? 1;
-      setMarkers([{ message: e?.message ?? 'Invalid YAML', line }]);
+  useEffect(() => {
+    const session = sessionRef.current;
+    if (!syncConfigEditorSession(session, config)) return;
+    const instance = editorRef.current;
+    if (instance) {
+      const view = instance.saveViewState();
+      changingModel.current = true;
+      instance.getModel()?.setValue(session.text);
+      changingModel.current = false;
+      if (view) instance.restoreViewState(view);
     }
+    onDirtyChange?.(false);
+  }, [config, onDirtyChange]);
+
+  useEffect(() => {
+    const session = sessionRef.current;
+    if (active) editorRef.current?.layout();
+    else session.viewState = editorRef.current?.saveViewState() ?? session.viewState;
+  }, [active]);
+
+  const handleChange = (value: string | undefined) => {
+    const session = sessionRef.current;
+    if (value === undefined || changingModel.current || readOnly) return;
+    const previous = session.appliedConfig;
+    const result = updateConfigEditorSession(session, value, parsed => {
+      if (transformOnParse) return transformOnParse(parsed);
+      // Non-training callers retain their existing generic editor contract.
+      if (parsed === null || typeof parsed !== 'object') throw new Error('Configuration must be an object.');
+      return parsed as T;
+    });
+    setErrorMessage(session.error);
+    onValidityChange?.(session.valid);
+    onDirtyChange?.(session.dirty);
+    updateMarkers();
+    if (result.valid && session.appliedConfig !== previous) setConfig(result.config);
   };
 
   return (
-    <div className="relative h-full w-full">
-      {hasError && (
-        <div
-          className="absolute inset-0 z-10 pointer-events-none rounded-sm"
-          style={{ boxShadow: 'inset 0 0 12px 2px rgba(239, 68, 68, 0.5)' }}
-        />
-      )}
-      {hasError && (
-        <div
-          role="alert"
-          className="absolute bottom-3 left-3 right-3 z-20 rounded-lg border border-rose-700 bg-gray-950 p-3 text-sm text-rose-300"
-        >
-          {errorMessage} Your last valid configuration is retained.
+    <div className="relative h-full min-h-80 w-full" data-config-editor>
+      <Editor
+        height="100%" width="100%" defaultLanguage="yaml" defaultValue={initialSession.text}
+        theme={theme === 'dark' ? 'vs-dark' : 'light'} onChange={handleChange} onMount={handleMount}
+        options={{ minimap: { enabled: false }, scrollBeyondLastLine: false, automaticLayout: true,
+          tabSize: 2, insertSpaces: true, detectIndentation: false, fontSize: 13, padding: { top: 12 },
+          ariaLabel, readOnly }}
+      />
+      {errorMessage && (
+        <div role="alert" className="absolute bottom-3 left-3 right-3 z-20 rounded border border-rose-700 bg-gray-950 p-3 text-sm text-rose-700 dark:text-rose-300">
+          {errorMessage} Your text is retained. Fix it in Config to edit the form or save.
         </div>
       )}
-      <Editor
-        height="100%"
-        width="100%"
-        defaultLanguage="yaml"
-        value={editorValue}
-        theme={theme === 'dark' ? 'vs-dark' : 'light'}
-        className="z-0"
-        onChange={handleChange}
-        onMount={handleEditorDidMount}
-        options={{
-          minimap: { enabled: true },
-          scrollBeyondLastLine: false,
-          automaticLayout: true,
-          tabSize: 2,
-          insertSpaces: true,
-          detectIndentation: false,
-        }}
-      />
     </div>
   );
 }

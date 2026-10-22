@@ -1,0 +1,78 @@
+.workspace { position: relative; display: grid; grid-template-columns: 180px minmax(0, 1fr); min-height: 100%; align-items: start; }
+.navigator { position: sticky; top: 0; z-index: 5; min-width: 0; max-height: calc(100dvh - 170px); overflow-y: auto; background: rgb(var(--gray-950)); }
+.finder { display: flex; align-items: center; gap: 6px; margin: 12px 8px; padding: 7px 8px; border: 1px solid rgb(var(--gray-700)); border-radius: 4px; }
+.finder input { min-width: 0; width: 100%; background: transparent; font-size: 12px; outline: none; }
+.finder:focus-within { outline: 2px solid rgb(var(--brand-400)); outline-offset: 1px; }
+.sectionLinks { display: flex; flex-direction: column; }
+.sectionLinks a { display: flex; align-items: center; gap: 10px; padding: 13px 16px; border-left: 2px solid transparent; color: rgb(var(--gray-300)); font-size: 13px; }
+.sectionLinks a:hover, .searchResult:hover { background: rgb(var(--gray-800) / .45); }
+.sectionLinks a[aria-current] { color: rgb(var(--brand-300)); border-left-color: rgb(var(--brand-400)); background: rgb(var(--brand-400) / .1); }
+.sectionLinks a:focus-visible, .searchResult:focus-visible { outline: 2px solid rgb(var(--brand-400)); outline-offset: -2px; }
+.searchResult { display: flex; flex-direction: column; gap: 3px; text-align: left; width: 100%; padding: 9px 12px; font-size: 12px; }
+.searchResult small { color: rgb(var(--gray-400)); font-size: 11px; }
+.sections { min-width: 0; border-left: 1px solid rgb(var(--gray-800)); padding: 0 22px 32px; }
+.section { min-width: 0; border: 0; border-bottom: 1px solid rgb(var(--gray-800)); margin: 0; padding: 18px 0 22px; scroll-margin-top: 12px; }
+.section:disabled { opacity: .55; }
+.sectionHeading { margin-bottom: 8px; }
+.sectionHeading h2 { font-size: 16px; line-height: 24px; font-weight: 600; color: rgb(var(--gray-100)); }
+.basicsFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 20px; align-items: start; }
+.basicsFields > * { max-width: none; min-width: 0; }
+.basicsFields > :last-child { grid-column: 1 / -1; }
+.section[id='job-basics'] .basicsFields > :last-child { grid-column: auto; }
+.parameterGroup { min-width: 0; padding: 16px 0; border-top: 1px solid rgb(var(--gray-800)); }
+.continuation > summary { gap: 8px; padding: 10px 0; }
+.disclosureChevron { flex: none; }
+.continuation[open] .disclosureChevron { transform: rotate(90deg); }
+.parameterGroup > :global(.grid) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.section[id='job-training'] { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 8px 20px; }
+.section[id='job-training'] > :first-child, .section[id='job-training'] > :global(.mb-6), .section[id='job-training'] > button { grid-column: 1 / -1; }
+.section[id='job-training'] > :global(.mb-6) { margin-bottom: 0; }
+.statusBar { position: absolute; bottom: 0; left: 0; z-index: 12; display: flex; align-items: center; gap: 12px; width: 100%; min-height: 38px; padding: 4px 12px; border-top: 1px solid rgb(var(--gray-800)); background: rgb(var(--gray-900)); font-size: 12px; }
+.problems { position: absolute; bottom: 38px; left: 0; right: 0; z-index: 11; max-height: min(42vh, 380px); overflow: auto; border-top: 1px solid rgb(var(--gray-700)); background: rgb(var(--gray-950)); padding: 14px 20px; }
+.view { position: absolute; inset: var(--studio-page-toolbar-height, 48px) 0 38px; padding: 0; overflow: auto; }
+.view[hidden] { display: none; }
+.configView { display: flex; flex-direction: column; }
+.viewTabs { display: flex; flex: none; border: 1px solid rgb(var(--gray-700)); border-radius: 4px; overflow: hidden; }
+.viewTabs button { height: 30px; min-width: 60px; padding: 0 10px; font-size: 12px; }
+.viewTabs button[aria-selected='true'] { background: rgb(var(--brand-400) / .16); color: rgb(var(--brand-300)); box-shadow: inset 0 -2px rgb(var(--brand-400)); }
+.toolbar { gap: 8px; }
+.toolbarTitle { min-width: 90px; max-width: 260px; }
+.toolbarSelect { width: 132px; flex: none; }
+.toolbarSave { margin-left: auto; flex: none; }
+.computeControls { display: grid; grid-template-columns: 180px 180px 120px; flex: none; gap: 8px; margin-left: auto; }
+.mobileCompute { display: none; }
+@media (max-width: 1199px) {
+  .computeControls { display: none; }
+  .mobileCompute { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 120px; gap: 8px; border-bottom: 1px solid rgb(var(--gray-800)); padding: 8px 12px; }
+}
+@media (max-width: 1023px) {
+  .workspace { grid-template-columns: 156px minmax(0, 1fr); }
+  .sections { padding-inline: 16px; }
+  .section[id='job-training'], .basicsFields { grid-template-columns: minmax(0, 1fr); }
+  .toolbarSelect { width: 108px; }
+  .toolbarTitle { max-width: 170px; }
+}
+@media (max-width: 767px) {
+  .workspace { display: block; }
+  .navigator { border-bottom: 1px solid rgb(var(--gray-800)); max-height: 240px; }
+  .finder { margin: 8px 12px; }
+  .sectionLinks { flex-direction: row; overflow-x: auto; }
+  .sectionLinks a { flex: none; gap: 6px; padding: 9px 12px; border-left: 0; border-bottom: 2px solid transparent; }
+  .sectionLinks a[aria-current] { border-bottom-color: rgb(var(--brand-400)); }
+  .sections { border-left: 0; padding-inline: 12px; }
+  .section { scroll-margin-top: 110px; }
+  .toolbar { flex-wrap: wrap; align-content: center; overflow: visible; height: 88px; }
+  .toolbarTitle { flex: 1; max-width: none; }
+  .toolbarSelect { display: none; }
+  .toolbarTitle { order: 0; flex-basis: calc(100% - 170px); }
+  .toolbarSave { order: 1; }
+  .viewTabs { order: 2; }
+  .importButton { order: 3; margin-left: auto; }
+  .view { top: 88px; }
+  .parameterGroup > :global(.grid) { grid-template-columns: minmax(0, 1fr); }
+  .searchResults { max-height: 150px; overflow-y: auto; }
+}
+@media (max-width: 639px) {
+  .mobileCompute { grid-template-columns: minmax(0, 1fr) 120px; }
+  .mobileCompute > :first-child { grid-column: 1 / -1; }
+}

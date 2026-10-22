@@ -1,95 +1,105 @@
 'use client';
 import Link from 'next/link';
-import { Home, Database, Box, Wrench, LogOut, Settings, Wand2, Plus, ListOrdered } from 'lucide-react';
+import { MoreHorizontal, LogOut, Settings, Plus, Search, Moon, Sun } from 'lucide-react';
+import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react';
 import { usePathname } from 'next/navigation';
-import ThemeToggle from './ThemeToggle';
-import ThemeLogo from './ThemeLogo';
+import { useTheme } from './ThemeProvider';
 import UpdaterStatus from './UpdaterStatus';
 import { authRequiredState, logout } from '@/utils/api';
-const Sidebar = () => {
+
+const navigation = [
+  { name: 'Monitor', href: '/dashboard' },
+  { name: 'Train', href: '/jobs' },
+  { name: 'Datasets', href: '/datasets' },
+  { name: 'Models', href: '/models' },
+  { name: 'Generate', href: '/generate' },
+] as const;
+
+export default function Sidebar({ onSearch }: { onSearch: () => void }) {
   const pathname = usePathname();
   const [authRequired] = authRequiredState.use();
-  const navigation = [
-    { name: 'Dashboard', href: '/dashboard', icon: Home },
-    { name: 'Generate', href: '/generate', icon: Wand2 },
-    { name: 'New Job', href: '/jobs/new', icon: Plus },
-    { name: 'Queue', href: '/jobs', icon: ListOrdered },
-    { name: 'Datasets', href: '/datasets', icon: Database },
-    { name: 'Settings', href: '/settings', icon: Settings },
-    { name: 'Models', href: '/models', icon: Box },
-    { name: 'Tools', href: '/tools', icon: Wrench },
-  ];
-  const railButtonClass =
-    'flex h-8 w-8 items-center justify-center rounded-sm border border-transparent text-gray-500 transition-colors hover:border-gray-800 hover:bg-gray-900/60 hover:text-gray-100';
-  const isActive = (href: string) => {
-    if (href === '/jobs') {
-      return pathname === '/jobs' || (pathname.startsWith('/jobs/') && pathname !== '/jobs/new');
-    }
-    if (href === '/tools') return ['/tools', '/workflows', '/watermark'].some(route => pathname.startsWith(route));
-    return pathname === href || pathname.startsWith(`${href}/`);
-  };
+  const { theme, toggleTheme } = useTheme();
   return (
-    <aside className="studio-sidebar">
-      <div className="studio-brand">
-        <Link href="/dashboard" className="flex min-w-0 items-center" aria-label="AITK Studio home">
-          <ThemeLogo className="mr-0 h-10" />
-        </Link>
-        <div className="flex items-center gap-1 md:hidden">
-          <UpdaterStatus compact minimal />
-          <ThemeToggle variant="rail" />
-          {authRequired && (
-            <button
-              type="button"
-              onClick={() => void logout()}
-              className={railButtonClass}
-              title="Log out"
-              aria-label="Log out"
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      <nav className="studio-navigation operator-scrollbar-none" aria-label="Main navigation">
-        <ul>
-          {navigation.map(item => {
-            const active = isActive(item.href);
-            return (
-              <li key={item.name} className={item.name === 'Models' ? 'studio-utility-start' : undefined}>
-                <Link
-                  href={item.href}
-                  aria-current={active ? 'page' : undefined}
-                  title={item.name}
-                  className={`studio-nav-link ${active ? 'studio-nav-active' : ''}`}
-                >
-                  <item.icon className="h-5 w-5 flex-none" strokeWidth={1.7} aria-hidden="true" />
-                  <span>{item.name}</span>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
+    <header className="studio-app-header">
+      <Link href="/dashboard" className="studio-wordmark" aria-label="AITK Studio home">
+        <strong>AITK</strong> Studio
+      </Link>
+      <nav className="studio-app-navigation operator-scrollbar-none" aria-label="Main navigation">
+        {navigation.map(item => (
+          <Link
+            key={item.href}
+            href={item.href}
+            aria-current={pathname === item.href || pathname.startsWith(`${item.href}/`) ? 'page' : undefined}
+          >
+            {item.name}
+          </Link>
+        ))}
       </nav>
-      <div className="studio-sidebar-footer hidden md:block">
-        <div className="flex items-center justify-center gap-1.5">
-          <UpdaterStatus compact minimal />
-          <ThemeToggle variant="rail" />
-          {authRequired && (
-            <button
-              type="button"
-              onClick={() => void logout()}
-              className={railButtonClass}
-              title="Log out"
-              aria-label="Log out"
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
-          )}
-        </div>
-        <div className="mt-1 text-center text-[10px] text-gray-500">v{process.env.NEXT_PUBLIC_APP_VERSION}</div>
+      <div className="studio-app-actions">
+        <button
+          type="button"
+          onClick={onSearch}
+          className="operator-icon-button"
+          aria-label="Search commands"
+          title="Search commands (Ctrl / ⌘ K)"
+        >
+          <Search size={18} />
+        </button>
+        <Link href="/settings" className="operator-icon-button" aria-label="Settings" title="Settings">
+          <Settings size={18} />
+        </Link>
+        <Menu>
+          <MenuButton className="operator-icon-button" aria-label="More tools">
+            <MoreHorizontal size={18} />
+          </MenuButton>
+          <MenuItems anchor="bottom end" className="studio-app-menu z-40">
+            {[
+              ['Queue', '/jobs'],
+              ['Tools', '/tools'],
+              ['Workflows', '/workflows'],
+              ['Watermark', '/watermark'],
+            ].map(([label, href]) => (
+              <MenuItem key={href}>
+                <Link href={href} className="block px-3 py-2 text-sm data-[focus]:bg-gray-800">
+                  {label}
+                </Link>
+              </MenuItem>
+            ))}
+            <div className="flex items-center gap-2 border-t border-gray-800 p-2">
+              <MenuItem>
+                <button
+                  type="button"
+                  onClick={toggleTheme}
+                  className="operator-icon-button data-[focus]:bg-gray-800"
+                  title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                  aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                >
+                  {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+                </button>
+              </MenuItem>
+              <UpdaterStatus compact minimal menuItem />
+              {authRequired && (
+                <MenuItem>
+                  <button
+                    type="button"
+                    onClick={() => void logout()}
+                    className="operator-icon-button data-[focus]:bg-gray-800"
+                    aria-label="Log out"
+                    title="Log out"
+                  >
+                    <LogOut size={16} />
+                  </button>
+                </MenuItem>
+              )}
+              <span className="ml-auto text-xs text-gray-500">v{process.env.NEXT_PUBLIC_APP_VERSION}</span>
+            </div>
+          </MenuItems>
+        </Menu>
+        <Link href="/jobs/new" aria-label="New training" className="operator-button-primary studio-new-training">
+          <Plus size={16} />
+          <span>New training</span>
+        </Link>
       </div>
-    </aside>
+    </header>
   );
-};
-export default Sidebar;
+}

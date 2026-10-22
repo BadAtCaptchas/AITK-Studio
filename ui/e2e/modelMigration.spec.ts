@@ -69,23 +69,26 @@ test('migrate a training job, review requirements, and create an independent run
   await expect(page.getByText('Training starts at step 0.', { exact: false }).first()).toBeVisible();
 
   const architecture = page.getByRole('combobox', { name: 'Model architecture', exact: true });
+  const form = page.getByRole('tabpanel', { name: 'Form', exact: true });
   await architecture.fill('Qwen-Image-Edit');
   await page.getByRole('option', { name: 'Qwen-Image-Edit', exact: true }).click();
+  await page.getByRole('button', { name: /\d+ configuration errors/ }).click();
   await expect(page.getByText(/Dataset 1 needs a control dataset/).first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Create Job', exact: true }).first()).toBeDisabled();
+  await page.getByRole('button', { name: 'Close problems panel', exact: true }).click();
   await architecture.fill('Z-Image');
   await page.getByRole('option', { name: 'Z-Image', exact: true }).click();
-  await page.getByText(/^Automatic adjustments/).click();
+  await form.getByText(/^Automatic adjustments/).click();
   await expect(
-    page.getByText('Use destination model components and supported memory settings.', { exact: false }).first(),
+    form.getByText('Use destination model components and supported memory settings.', { exact: false }).first(),
   ).toBeVisible();
   await expect(page.getByLabel('Model path', { exact: true })).toHaveValue('Tongyi-MAI/Z-Image');
   await expect(page.getByLabel('Learning rate', { exact: true })).toHaveValue('0.00037');
-  await page.getByText('Migrate to another model', { exact: true }).scrollIntoViewIfNeeded();
+  await form.getByText('Migrate to another model', { exact: true }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: '.review-build/model-migration.png' });
 
   // Leaving/restoring a migration draft must preserve its source and its independent save mode.
-  await page.getByRole('link', { name: 'Queue', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Train', exact: true }).click();
   await page.getByRole('button', { name: 'Leave setup', exact: true }).click();
   await expect(page).toHaveURL(/\/jobs$/);
   await page.goBack();

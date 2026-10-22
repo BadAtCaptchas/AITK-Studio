@@ -2,7 +2,7 @@
 import QueueWorkbench from '@/components/QueueWorkbench';
 import { TopBar, MainContent } from '@/components/layout';
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@headlessui/react';
 import {
   AlertTriangle,
@@ -21,6 +21,7 @@ import { SelectInput } from '@/components/formInputs';
 import useGPUInfo from '@/hooks/useGPUInfo';
 import { downloadJobModelReferences, importTrainingJob } from '@/utils/jobs';
 import type { Job } from '@/types';
+import { readQueueWorkspace, rememberQueueWorkspace } from '@/utils/queueWorkspace';
 type ImportPhase = 'uploading' | 'processing' | 'completed' | 'failed';
 type ModelDownloadPhase = 'downloading' | 'completed' | 'failed';
 type ImportStatus = {
@@ -110,12 +111,32 @@ function getStageClass(isActive: boolean, isComplete: boolean, isFailed = false)
 }
 export default function Dashboard() {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [savedView] = useState(readQueueWorkspace);
+  const restoreView = useCallback(() => {
+    if (contentRef.current) contentRef.current.scrollTop = savedView.scrollTop;
+  }, [savedView.scrollTop]);
   const { gpuList, isGPUInfoLoaded } = useGPUInfo();
   const [gpuIDs, setGpuIDs] = useState<string | null>(null);
   const [importStatus, setImportStatus] = useState<ImportStatus | null>(null);
   const [modelDownloadStatus, setModelDownloadStatus] = useState<ModelDownloadStatus | null>(null);
   const [jobsTableKey, setJobsTableKey] = useState(0);
-  const [filterText, setFilterText] = useState('');
+  const [filterText, setFilterText] = useState(savedView.filter);
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content) return;
+    const rememberScroll = () => rememberQueueWorkspace({ scrollTop: content.scrollTop });
+    content.addEventListener('scroll', rememberScroll, { passive: true });
+    // Capture before navigation detaches this scroll container; detached nodes report zero.
+    const rememberNavigation = (event: MouseEvent) => {
+      if (event.target instanceof Element && event.target.closest('a[href]')) rememberScroll();
+    };
+    content.addEventListener('click', rememberNavigation, true);
+    return () => {
+      content.removeEventListener('scroll', rememberScroll);
+      content.removeEventListener('click', rememberNavigation, true);
+    };
+  }, []);
   const isImporting = importStatus?.phase === 'uploading' || importStatus?.phase === 'processing';
   const isModelDownloading = modelDownloadStatus?.phase === 'downloading';
   useEffect(() => {
@@ -232,7 +253,7 @@ export default function Dashboard() {
             <SelectInput
               value={gpuIDs ?? ''}
               onChange={value => setGpuIDs(value)}
-              options={gpuList.map((gpu: any) => ({ value: `${gpu.index}`, label: `GPU #${gpu.index}` }))}
+              options={gpuList.map(gpu => ({ value: `${gpu.index}`, label: `GPU #${gpu.index}` }))}
               disabled={isImporting}
             />
           </div>
@@ -274,11 +295,7 @@ export default function Dashboard() {
         </div>
       </TopBar>
       <input ref={fileInputRef} type="file" accept=".zip,.aitk" className="hidden" onChange={handleFileSelected} />
-      <MainContent className="studio-queue-page">
-        <header className="studio-page-intro">
-          <h2>Training queues</h2>
-          <p>Manage training jobs across your GPUs and workers.</p>
-        </header>
+      <MainContent ref={contentRef} className="studio-queue-page">
         {importStatus && (
           <section
             role="status"
@@ -457,30 +474,33 @@ export default function Dashboard() {
             </div>
           </section>
         )}
-        <div className="mb-5 flex justify-start">
-          {' '}
-          <label className="relative block w-full sm:max-w-2xl">
+        <div className="mb-3 flex justify-start">
+          <label className="relative block w-full sm:max-w-sm">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
             <input
               value={filterText}
-              onChange={event => setFilterText(event.target.value)}
+              onChange={event => {
+                setFilterText(event.target.value);
+                rememberQueueWorkspace({ filter: event.target.value });
+              }}
               aria-label="Search jobs"
               placeholder="Search jobs, status, worker..."
-              className="h-11 w-full rounded-md border border-gray-700 bg-gray-900 pl-9 pr-3 text-sm text-gray-100 placeholder:text-gray-500 outline-none focus:border-brand-600"
+              className="h-8 w-full rounded border border-gray-700 bg-gray-950 pl-9 pr-3 text-xs text-gray-100 placeholder:text-gray-500 outline-none focus:border-brand-600"
             />
           </label>
         </div>
         <QueueWorkbench
           key={jobsTableKey}
+          onRestoreView={restoreView}
           emptyAction={
             <>
-              <Link href={'/jobs/new'} className="operator-button-primary h-11 px-5">
+              <Link href={'/jobs/new'} className="operator-button-primary h-8 text-xs">
                 <Plus className="h-4 w-4" />
                 New training job
               </Link>
               <button
                 type="button"
-                className="operator-button h-11"
+                className="operator-button h-8 text-xs"
                 disabled={isImporting}
                 onClick={() => fileInputRef.current?.click()}
               >

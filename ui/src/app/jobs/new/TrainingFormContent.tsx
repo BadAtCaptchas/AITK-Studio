@@ -9,7 +9,8 @@ import {
 } from '@/utils/trainingValidation';
 import { useEffect, useRef, useState } from 'react';
 import { readTrainingDraft, restoreTrainingDraft, useTrainingDraft } from '@/hooks/useTrainingDraft';
-import { readStoredTrainingDraft, removeStoredTrainingDraft, type StoredTrainingDraft } from '@/utils/trainingDraftStorage';
+import { readStoredTrainingDraft, removeStoredTrainingDraft, type StoredTrainingDraft, type TrainingDraft } from '@/utils/trainingDraftStorage';
+import { parseTrainingSource } from '@/utils/trainingSource';
 import useHydrated from '@/hooks/useHydrated';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { defaultJobConfig, defaultDatasetConfig, migrateJobConfig } from './jobConfig';
@@ -25,11 +26,14 @@ import useDatasetList from '@/hooks/useDatasetList';
 import useWorkers from '@/hooks/useWorkers';
 import YAML from 'yaml';
 import path from 'path';
-import { TopBar, MainContent } from '@/components/layout';
-import { Button, Dialog, DialogPanel, DialogTitle } from '@headlessui/react';
-import { ChevronLeft, SlidersHorizontal, Sparkles, TerminalSquare, X } from 'lucide-react';
+import { TopBar } from '@/components/layout';
+import { Button } from '@headlessui/react';
+import { Activity, AlertCircle, CheckCircle2, ChevronLeft, Save, X } from 'lucide-react';
 import SimpleJob from './SimpleJob';
 import AdvancedConfigEditor from '@/components/AdvancedConfigEditor';
+import { TrainingAdvisorPanel } from '@/components/TrainingAdvisorPanel';
+import { clearConfigEditorSession, readConfigEditorSession } from '@/utils/configEditorSession';
+import styles from './trainingWorkspace.module.css';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { apiClient } from '@/utils/api';
 import type { SelectOption } from '@/types';
@@ -84,36 +88,63 @@ function TrainingDraftRecovery({ draftKey }: { draftKey: string }) {
       </div>
     </section>
   );
-  return <TrainingFormEditor draftKey={draftKey} />;
+  return <TrainingSourceLoader draftKey={draftKey} />;
 }
 
-function TrainingFormEditor({ draftKey }: { draftKey: string }) {
+function TrainingSourceLoader({ draftKey }: { draftKey: string }) {
+  const searchParams = useSearchParams();
+  const [rememberedDraft] = useState(() => readTrainingDraft(draftKey));
+  const mode = searchParams.get('id') ? 'edit' : 'clone';
+  const sourceID = searchParams.get('migrateId') ? null : searchParams.get('id') || searchParams.get('cloneId');
+  const [attempt, setAttempt] = useState(0);
+  const [source, setSource] = useState<
+    { phase: 'loading' } | { phase: 'ready'; draft: TrainingDraft } | { phase: 'error'; message: string }
+  >({ phase: 'loading' });
+  useEffect(() => {
+    if (!sourceID || rememberedDraft) return;
+    const controller = new AbortController();
+    apiClient.get<unknown>(`/api/jobs?id=${encodeURIComponent(sourceID)}`, { signal: controller.signal })
+      .then(({ data }) => {
+        if (!controller.signal.aborted) setSource({ phase: 'ready', draft: parseTrainingSource(data, mode) });
+      })
+      .catch((cause: unknown) => {
+        if (!controller.signal.aborted) setSource({ phase: 'error', message: cause instanceof Error ? cause.message : 'Could not load the source job.' });
+      });
+    return () => controller.abort();
+  }, [sourceID, rememberedDraft, mode, attempt]);
+  if (!sourceID || rememberedDraft) return <TrainingFormEditor draftKey={draftKey} />;
+  if (source.phase === 'ready') return <TrainingFormEditor draftKey={draftKey} initialDraft={source.draft} />;
+  return (
+    <div className="m-6 max-w-xl" role="status">
+      <PageNotice tone={source.phase === 'error' ? 'danger' : 'info'} title={source.phase === 'error' ? 'Source training job unavailable' : 'Loading source training job'}>
+        {source.phase === 'error' ? <>{source.message} <button type="button" className="underline" onClick={() => { setSource({ phase: 'loading' }); setAttempt(value => value + 1); }}>Retry source job</button></> : 'The editor will open when its saved configuration is ready.'}
+      </PageNotice>
+    </div>
+  );
+}
+
+function TrainingFormEditor({ draftKey, initialDraft }: { draftKey: string; initialDraft?: TrainingDraft }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const migrationId = searchParams.get('migrateId');
   const runId = migrationId ? null : searchParams.get('id');
   const cloneId = migrationId ? null : searchParams.get('cloneId');
   const appliedDataset = useRef<string | null>(null);
-  const [restoredDraft] = useState(() => readTrainingDraft(draftKey));
+  const [restoredDraft] = useState(() => readTrainingDraft(draftKey) ?? initialDraft);
   const [migration, setMigration] = useState<MigrationState>(() =>
     restoredDraft?.migration ? { phase: 'ready', draft: restoredDraft.migration } : { phase: 'loading' },
   );
   const [gpuIDs, setGpuIDs] = useState<string | null>(restoredDraft?.gpuIDs ?? null);
   const [workerID, setWorkerID] = useState(restoredDraft?.workerID || 'local');
   const { settings, isSettingsLoaded, settingsStatus, settingsError, refreshSettings } = useSettings();
-  const legacyView = settings.TRAINING_LEGACY_VIEW === 'true';
   const { workers, status: workerStatus, refreshWorkers } = useWorkers();
   const { gpuData, gpuList, isGPUInfoLoaded, status: gpuStatus, refreshGpuInfo } = useGPUInfo(null, null, workerID);
   const { datasets, status: datasetFetchStatus, refreshDatasets } = useDatasetList({ includeRemote: true });
   const [showAdvancedView, setShowAdvancedView] = useState(false);
-  const [rawEditorValid, setRawEditorValid] = useState(true);
-  const closeRawConfig = () => {
-    if (!rawEditorValid)
-      reportWorkflowError('Invalid raw changes were not applied. Your last valid configuration is retained.');
-    setRawConfigOpen(false);
-    setRawEditorValid(true);
-  };
-  const [rawConfigOpen, setRawConfigOpen] = useState(false);
+  const [rawEditorValid, setRawEditorValid] = useState(() => readConfigEditorSession(draftKey)?.valid ?? true);
+  const [rawEditorDirty, setRawEditorDirty] = useState(() => readConfigEditorSession(draftKey)?.dirty ?? false);
+  const [problemsOpen, setProblemsOpen] = useState(false);
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [jobConfig, setJobConfig] = useNestedState<JobConfig>(
     restoredDraft?.config || objectCopy(migrateJobConfig(defaultJobConfig)),
   );
@@ -122,10 +153,15 @@ function TrainingFormEditor({ draftKey }: { draftKey: string }) {
     workerID,
     gpuIDs,
     ...(migrationId && migration.phase === 'ready' ? { migration: migration.draft } : {}),
-  });
+  }, rawEditorDirty);
   const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [saveError, setSaveError] = useState<string | null>(null);
   const savingRef = useRef(false);
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   const [validationMessages, setValidationMessages] = useState<ValidationMessage[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const handleImportConfig = () => {
@@ -136,6 +172,7 @@ function TrainingFormEditor({ draftKey }: { draftKey: string }) {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
+      if (!mountedRef.current || savingRef.current || readConfigEditorSession(draftKey)?.valid === false) return;
       try {
         const text = reader.result as string;
         let parsed: unknown;
@@ -267,34 +304,6 @@ function TrainingFormEditor({ draftKey }: { draftKey: string }) {
     };
   }, [migrationId, restoredDraft, setJobConfig]);
 
-  useEffect(() => {
-    if (cloneId && !restoredDraft) {
-      apiClient
-        .get(`/api/jobs?id=${cloneId}`)
-        .then(res => res.data)
-        .then(data => {
-          setGpuIDs(data.gpu_ids);
-          setWorkerID(data.worker_id || 'local');
-          const newJobConfig = migrateJobConfig(JSON.parse(data.job_config));
-          newJobConfig.config.name = `${newJobConfig.config.name}_copy`;
-          setJobConfig(newJobConfig);
-        })
-        .catch(error => console.error('Error fetching training:', error));
-    }
-  }, [cloneId]);
-  useEffect(() => {
-    if (runId && !restoredDraft) {
-      apiClient
-        .get(`/api/jobs?id=${runId}`)
-        .then(res => res.data)
-        .then(data => {
-          setGpuIDs(data.gpu_ids);
-          setWorkerID(data.worker_id || 'local');
-          setJobConfig(migrateJobConfig(JSON.parse(data.job_config)));
-        })
-        .catch(error => console.error('Error fetching training:', error));
-    }
-  }, [runId]);
   if (isGPUInfoLoaded) {
     if (gpuIDs === null) {
       setGpuIDs(gpuList.length > 0 ? `${gpuList[0].index}` : '0');
@@ -500,6 +509,7 @@ function TrainingFormEditor({ draftKey }: { draftKey: string }) {
     setStatus('saving');
     try {
       const preparedJobConfig = await importRemoteDatasetsForJobConfig(jobConfigWithSettings, workerID);
+      if (!mountedRef.current) return;
       setJobConfig(preparedJobConfig);
       const saved = await saveTrainingJob({
         ...(migrationId ? {} : { id: runId }),
@@ -508,7 +518,10 @@ function TrainingFormEditor({ draftKey }: { draftKey: string }) {
         gpu_ids: gpuIDs,
         job_config: preparedJobConfig,
       });
+      if (!mountedRef.current) return;
       draft.markSaved();
+      clearConfigEditorSession(draftKey);
+      setRawEditorDirty(false);
       setStatus('success');
       setValidationMessages([]);
       if (runId) {
@@ -517,6 +530,7 @@ function TrainingFormEditor({ draftKey }: { draftKey: string }) {
         router.push(`/jobs/${encodeURIComponent(saved.id)}`);
       }
     } catch (error: unknown) {
+      if (!mountedRef.current) return;
       const failure = trainingJobSaveError(error);
       setStatus('error');
       setSaveError(failure.message);
@@ -570,10 +584,18 @@ function TrainingFormEditor({ draftKey }: { draftKey: string }) {
       return;
     }
     if (message.target.step === 'raw') {
-      setRawConfigOpen(true);
+      setShowAdvancedView(true);
       return;
     }
     setShowAdvancedView(false);
+    if (message.target.label === 'Compute' || message.target.label === 'GPU') {
+      requestAnimationFrame(() => {
+        const control = Array.from(document.querySelectorAll<HTMLElement>('[role="combobox"]'))
+          .find(element => element.getAttribute('aria-label') === message.target.label && element.getClientRects().length > 0);
+        control?.focus();
+      });
+      return;
+    }
     setFocusTarget(previous => ({ ...message.target, nonce: (previous?.nonce ?? 0) + 1 }));
   };
   const [validatedInput, setValidatedInput] = useState({ jobConfig, workerID, gpuIDs });
@@ -587,13 +609,12 @@ function TrainingFormEditor({ draftKey }: { draftKey: string }) {
   }
   const validationErrors = currentFindings.filter(message => message.level === 'error');
   const validationWarnings = currentFindings.filter(message => message.level === 'warning');
+  const editorLocked = status === 'saving' || status === 'success' || Boolean(migrationId && migration.phase !== 'ready');
   const workerOptions = [
     { value: 'local', label: 'Local worker' },
     ...workers.filter(worker => worker.enabled).map(worker => ({ value: worker.id, label: worker.name })),
   ];
   const trainerValue = `${jobConfig?.config.process[0].type}`;
-  const trainerLabel = jobTypeOptions.find(option => option.value === trainerValue)?.label || 'LoRA Trainer';
-  const workerLabel = workerOptions.find(option => option.value === workerID)?.label || 'Local worker';
   const handleJobTypeChange = (value: string) => {
     const currentOption = jobTypeOptions.find(option => option.value === jobConfig?.config.process[0].type);
     if (currentOption && currentOption.onDeactivate) {
@@ -631,14 +652,6 @@ function TrainingFormEditor({ draftKey }: { draftKey: string }) {
     }
     return migrationId ? parsed : migrateJobConfig(parsed);
   };
-  const renderAdvancedConfigEditor = () => (
-    <AdvancedConfigEditor
-      config={jobConfig}
-      setConfig={setJobConfig}
-      transformOnParse={transformAdvancedConfig}
-      onValidityChange={setRawEditorValid}
-    />
-  );
   const validationSummary =
     currentFindings.length > 0 ? (
       <PageNotice
@@ -692,6 +705,7 @@ function TrainingFormEditor({ draftKey }: { draftKey: string }) {
               <div className="mt-3 max-w-lg">
                 <SelectInput
                   label="Destination model"
+                  disabled={editorLocked}
                   value={jobConfig.config.process[0].model.arch}
                   options={migrationOptions}
                   onChange={changeMigrationModel}
@@ -718,236 +732,103 @@ function TrainingFormEditor({ draftKey }: { draftKey: string }) {
       </PageNotice>
     </div>
   ) : null;
+  const computeControls = (
+    <>
+      <SelectInput placeholder="Compute" value={workerID} disabled={!rawEditorValid || editorLocked}
+        onChange={value => { setWorkerID(value); setGpuIDs(null); }} options={workerOptions} />
+      <SelectInput placeholder="Trainer" value={trainerValue} disabled={!rawEditorValid || editorLocked}
+        onChange={handleJobTypeChange} options={jobTypeOptions} />
+      <SelectInput placeholder="GPU" value={`${gpuIDs}`} disabled={!rawEditorValid || editorLocked}
+        onChange={value => setGpuIDs(value)} options={gpuList.map(gpu => ({ value: `${gpu.index}`, label: `GPU #${gpu.index}` }))} />
+    </>
+  );
   return (
     <div className="contents" {...draft.formTracking}>
-      <TopBar className="training-topbar h-16 border-gray-900 bg-gray-950 px-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <Button
-            className="operator-icon-button h-9 w-9 flex-none"
-            onClick={() => draft.leaveSetup(() => router.back())}
-            title="Back"
-          >
-            <ChevronLeft className="h-5 w-5" />
-          </Button>
-          <h1 className="truncate text-sm font-semibold text-gray-100 sm:text-lg">
-            {migrationId ? 'Migrate Training Job' : runId ? 'Edit Training Job' : 'New Training Job'}
-          </h1>
+      <TopBar className={`training-topbar h-12 px-3 ${styles.toolbar}`}>
+        <Button className="operator-icon-button h-8 w-8 flex-none" onClick={() => draft.leaveSetup(() => router.back())} title="Back" aria-label="Back">
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        <h1 className={`${styles.toolbarTitle} truncate text-base font-semibold text-gray-100`}>
+          {migrationId ? 'Migrate Training Job' : runId ? 'Edit Training Job' : 'New Training Job'}
+        </h1>
+        <div className={styles.viewTabs} role="tablist" aria-label="Configuration view"
+          onKeyDown={event => {
+            if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+            event.preventDefault();
+            const next = event.key === 'Home' ? false : event.key === 'End' ? true : !showAdvancedView;
+            setShowAdvancedView(next);
+            document.getElementById(next ? 'training-config-tab' : 'training-form-tab')?.focus();
+          }}>
+          <button type="button" role="tab" id="training-form-tab" tabIndex={showAdvancedView ? -1 : 0} aria-selected={!showAdvancedView} aria-controls="training-form-view" onClick={() => setShowAdvancedView(false)}>Form</button>
+          <button type="button" role="tab" id="training-config-tab" tabIndex={showAdvancedView ? 0 : -1} aria-selected={showAdvancedView} aria-controls="training-config-view" onClick={() => setShowAdvancedView(true)}>Config</button>
         </div>
-        <div className="flex-1"></div>
-        {(showAdvancedView || legacyView) && (
-          <div className={legacyView ? 'min-w-40' : 'hidden min-w-40 md:block'}>
-            <SelectInput
-              value={workerID}
-              onChange={value => {
-                setWorkerID(value);
-                setGpuIDs(null);
-              }}
-              options={workerOptions}
-            />
-          </div>
-        )}
-        <div className="w-32 shrink-0 sm:w-44">
-          <SelectInput value={trainerValue} onChange={handleJobTypeChange} options={jobTypeOptions} />
-        </div>
-        {(showAdvancedView || legacyView) && (
-          <div className={legacyView ? 'min-w-32' : 'hidden min-w-32 lg:block'}>
-            <SelectInput
-              value={`${gpuIDs}`}
-              onChange={value => setGpuIDs(value)}
-              options={gpuList.map((gpu: any) => ({ value: `${gpu.index}`, label: `GPU #${gpu.index}` }))}
-            />
-          </div>
-        )}
-        {(showAdvancedView || legacyView) && (
-          <Button className="operator-button py-1" onClick={handleImportConfig}>
-            Import Config
-          </Button>
-        )}
-        <div className="flex-none">
-          <Button
-            className="operator-button h-9 border-gray-700 bg-gray-900 px-3 py-1 text-gray-100"
-            onClick={() => {
-              closeRawConfig();
-              setShowAdvancedView(!showAdvancedView);
-            }}
-            title={showAdvancedView ? 'Show Simple' : 'Show Advanced'}
-          >
-            <SlidersHorizontal className="h-4 w-4" />
-            <span className="hidden sm:inline">{showAdvancedView ? (legacyView ? 'Form' : 'Guided') : 'Advanced'}</span>
-          </Button>
-        </div>
-        {(showAdvancedView || legacyView) && (
-          <div className="flex-none">
-            <Button
-              className="operator-button-primary h-10 px-3 sm:px-5"
-              aria-label={runId ? 'Update Job' : 'Create Job'}
-              onClick={() => saveJob()}
-              disabled={status === 'saving' || validationErrors.length > 0}
-            >
-              <Sparkles className="h-4 w-4" />
-              <span className="hidden sm:inline">
-                {status === 'saving' ? 'Saving...' : runId ? 'Update Job' : 'Create Job'}
-              </span>
-            </Button>
-          </div>
-        )}
+        <div className={styles.computeControls}>{computeControls}</div>
+        <Button className={`operator-button h-8 px-3 text-xs ${styles.importButton}`} onClick={handleImportConfig} disabled={!rawEditorValid || editorLocked}>Import config</Button>
+        <Button className={`operator-button-primary h-8 px-3 text-xs ${styles.toolbarSave}`}
+          aria-label={runId ? 'Update Job' : 'Create Job'} onClick={() => void saveJob()}
+          disabled={editorLocked || validationErrors.length > 0}>
+          <Save className="h-3.5 w-3.5" />
+          {status === 'saving' ? 'Saving...' : runId ? 'Save' : 'Create Job'}
+        </Button>
       </TopBar>
-
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".yaml,.yml,.json,.jsonc"
-        style={{ display: 'none' }}
-        onChange={handleFileSelected}
-      />
-
-      {showAdvancedView ? (
-        <div className="training-content absolute top-0 left-0 h-full w-full overflow-auto pt-16">
-          {migrationNotice}
-          {saveError && (
-            <div role="alert" className="px-4 pt-4">
-              <PageNotice tone="danger" title="Could not save job">
-                {saveError}
-              </PageNotice>
-            </div>
-          )}
-          {validationSummary && <div className="px-3 pt-3 sm:px-4">{validationSummary}</div>}
-          {renderAdvancedConfigEditor()}
+      <input ref={fileInputRef} type="file" accept=".yaml,.yml,.json,.jsonc" hidden onChange={handleFileSelected} />
+      <div id="training-form-view" role="tabpanel" aria-labelledby="training-form-tab" hidden={showAdvancedView} className={styles.view}>
+        <div className={styles.mobileCompute}>{computeControls}</div>
+        {migrationNotice}
+        {!rawEditorValid && (
+          <div role="alert" className="border-b border-rose-900 px-4 py-2 text-sm text-rose-700 dark:text-rose-300">
+            Config contains unfinished changes. The form shows your last valid settings.{' '}
+            <button type="button" className="underline" onClick={() => setShowAdvancedView(true)}>Fix Config</button>
+          </div>
+        )}
+        {saveError && <div role="alert" className="px-4 py-3"><PageNotice tone="danger" title="Could not save job">{saveError} <button type="button" className="underline" onClick={() => void saveJob()}>Retry</button></PageNotice></div>}
+        {(settingsError || gpuStatus === 'error' || datasetFetchStatus === 'error' || workerStatus === 'error') && (
+          <div className="px-4 py-3">
+            <PageNotice tone="danger" title="Some setup information is unavailable">
+              {settingsError && <p>{settingsError} <button type="button" className="underline" onClick={() => void refreshSettings()}>Retry settings</button></p>}
+              {gpuStatus === 'error' && <p>Compute information could not be loaded. <button type="button" className="underline" onClick={() => void refreshGpuInfo()}>Retry compute</button></p>}
+              {datasetFetchStatus === 'error' && <p>Datasets could not be loaded. <button type="button" className="underline" onClick={() => refreshDatasets()}>Retry datasets</button></p>}
+              {workerStatus === 'error' && <p>Remote workers could not be loaded. <button type="button" className="underline" onClick={refreshWorkers}>Retry workers</button></p>}
+            </PageNotice>
+          </div>
+        )}
+        <ErrorBoundary fallback={<div className="p-6 text-sm text-amber-800 dark:text-amber-300">This configuration requires the Config editor. <button type="button" className="underline" onClick={() => setShowAdvancedView(true)}>Open Config</button></div>}>
+          <SimpleJob jobConfig={jobConfig} setJobConfig={setJobConfig} readOnly={!rawEditorValid || editorLocked}
+            handleSubmit={handleSubmit} runId={runId} datasetOptions={datasetOptions}
+            validationMessages={currentFindings} focusTarget={focusTarget} onOpenConfig={() => setShowAdvancedView(true)}
+            isLoading={settingsStatus === 'loading' || !isGPUInfoLoaded || workerStatus === 'loading' || ['idle', 'loading'].includes(datasetFetchStatus)}
+            comfyAutoInstall={settings.COMFY_AUTO_INSTALL === 'true'}
+            migrationModelOptions={migrationId ? migrationOptions : undefined}
+            onMigrationModelChange={migrationId ? changeMigrationModel : undefined} />
+        </ErrorBoundary>
+      </div>
+      <div id="training-config-view" role="tabpanel" aria-labelledby="training-config-tab" hidden={!showAdvancedView} className={`${styles.view} ${styles.configView}`}>
+        <div className={styles.mobileCompute}>{computeControls}</div>
+        {migrationNotice}
+        {saveError && <div role="alert" className="px-4 py-3"><PageNotice tone="danger" title="Could not save job">{saveError} <button type="button" className="underline" onClick={() => void saveJob()}>Retry</button></PageNotice></div>}
+        <div className="min-h-0 flex-1">
+          <AdvancedConfigEditor config={jobConfig} setConfig={setJobConfig} transformOnParse={transformAdvancedConfig}
+            onValidityChange={setRawEditorValid} onDirtyChange={setRawEditorDirty} sessionKey={draftKey} active={showAdvancedView} readOnly={editorLocked} ariaLabel="Training configuration YAML" />
         </div>
-      ) : (
-        <MainContent className="training-content bg-gray-950 px-0 pt-16 sm:px-0">
-          {migrationNotice}
-          {(settingsError || gpuStatus === 'error' || datasetFetchStatus === 'error' || workerStatus === 'error') && (
-            <div className="px-4 pb-4">
-              <PageNotice tone="danger" title="Some setup information is unavailable">
-                {settingsError && (
-                  <p>
-                    {settingsError}{' '}
-                    <button type="button" className="underline" onClick={() => void refreshSettings()}>
-                      Retry settings
-                    </button>
-                  </p>
-                )}
-                {gpuStatus === 'error' && (
-                  <p>
-                    Compute information could not be loaded.{' '}
-                    <button type="button" className="underline" onClick={() => void refreshGpuInfo()}>
-                      Retry compute
-                    </button>
-                  </p>
-                )}
-                {datasetFetchStatus === 'error' && (
-                  <p>
-                    Datasets could not be loaded.{' '}
-                    <button type="button" className="underline" onClick={() => refreshDatasets()}>
-                      Retry datasets
-                    </button>
-                  </p>
-                )}
-                {workerStatus === 'error' && (
-                  <p>
-                    Remote workers could not be loaded.{' '}
-                    <button type="button" className="underline" onClick={refreshWorkers}>
-                      Retry workers
-                    </button>
-                  </p>
-                )}
-              </PageNotice>
-            </div>
-          )}
-          <ErrorBoundary
-            fallback={
-              <div className="flex h-64 items-center justify-center border border-red-300 bg-red-100 text-lg font-medium text-red-600 dark:border-red-700 dark:bg-red-900/20 dark:text-red-400">
-                Advanced job detected. Please switch to advanced view to continue.
-              </div>
-            }
-          >
-            <SimpleJob
-              workerId={workerID}
-              legacyView={legacyView}
-              jobConfig={jobConfig}
-              setJobConfig={setJobConfig}
-              status={status}
-              saveError={saveError}
-              handleSubmit={handleSubmit}
-              runId={runId}
-              gpuIDs={gpuIDs}
-              setGpuIDs={setGpuIDs}
-              gpuList={gpuList}
-              datasetOptions={datasetOptions}
-              validationMessages={currentFindings}
-              focusTarget={focusTarget}
-              onRevealFinding={revealFinding}
-              computeControls={
-                <SelectInput
-                  label="Compute"
-                  value={workerID}
-                  onChange={value => {
-                    setWorkerID(value);
-                    setGpuIDs(null);
-                  }}
-                  options={workerOptions}
-                />
-              }
-              workerLabel={workerLabel}
-              trainerLabel={trainerLabel}
-              onOpenAdvanced={() => setShowAdvancedView(true)}
-              onOpenRawConfig={() => setRawConfigOpen(true)}
-              isLoading={
-                settingsStatus === 'loading' ||
-                !isGPUInfoLoaded ||
-                workerStatus === 'loading' ||
-                ['idle', 'loading'].includes(datasetFetchStatus)
-              }
-              comfyAutoInstall={settings.COMFY_AUTO_INSTALL === 'true'}
-              migrationModelOptions={migrationId ? migrationOptions : undefined}
-              onMigrationModelChange={migrationId ? changeMigrationModel : undefined}
-            />
-          </ErrorBoundary>
-
-          <div className="pt-20"></div>
-        </MainContent>
+      </div>
+      {(problemsOpen || diagnosticsOpen) && (
+        <section id="training-problems" aria-label={diagnosticsOpen ? 'Training diagnostics' : 'Configuration problems'} className={styles.problems}>
+          <div className="mb-3 flex items-center justify-between text-sm font-semibold">
+            {diagnosticsOpen ? 'Diagnostics' : 'Problems'}
+            <button type="button" aria-label="Close problems panel" onClick={() => { setProblemsOpen(false); setDiagnosticsOpen(false); }} className="operator-icon-button h-7 w-7"><X className="h-4 w-4" /></button>
+          </div>
+          {diagnosticsOpen ? <TrainingAdvisorPanel jobConfig={jobConfig} gpuIDs={gpuIDs} workerId={workerID} variant="inline" /> : validationSummary ?? <p className="text-sm text-gray-400">No configuration errors.</p>}
+        </section>
       )}
-
-      {rawConfigOpen && !showAdvancedView && (
-        <Dialog open onClose={closeRawConfig} className="fixed inset-0 z-50 flex bg-black/65 backdrop-blur-sm">
-          <button
-            type="button"
-            className="absolute inset-0 cursor-default"
-            onClick={closeRawConfig}
-            aria-label="Close raw config"
-          />
-          <DialogPanel
-            id="raw-config-drawer"
-            className="relative ml-auto flex h-full w-full flex-col border-l border-gray-800 bg-gray-950 shadow-2xl sm:w-[min(920px,calc(100vw-72px))]"
-          >
-            <header className="flex h-16 flex-none items-center gap-3 border-b border-gray-900 px-4">
-              <div className="flex h-9 w-9 items-center justify-center border border-gray-800 bg-gray-900 text-brand-200">
-                <TerminalSquare className="h-4 w-4" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <DialogTitle id="raw-config-title" className="truncate text-base font-semibold text-gray-100">
-                  Raw config
-                </DialogTitle>
-                <p className="truncate text-xs text-gray-500">
-                  Editing this YAML updates the current job draft. Close returns to the same workspace position.
-                </p>
-              </div>
-              <Button className="operator-button hidden h-9 px-3 py-1 sm:inline-flex" onClick={closeRawConfig}>
-                Close drawer
-              </Button>
-              <Button
-                className="operator-icon-button h-9 w-9 flex-none"
-                onClick={closeRawConfig}
-                title="Close raw config"
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </header>
-            <div className="min-h-0 flex-1">{renderAdvancedConfigEditor()}</div>
-          </DialogPanel>
-        </Dialog>
-      )}
+      <div className={styles.statusBar}>
+        <button type="button" className="flex items-center gap-2" aria-expanded={problemsOpen} aria-controls="training-problems" onClick={() => { setProblemsOpen(!problemsOpen); setDiagnosticsOpen(false); }}>
+          {validationErrors.length ? <AlertCircle className="h-3.5 w-3.5 text-rose-600 dark:text-rose-400" /> : <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-400" />}
+          {validationErrors.length ? `${validationErrors.length} configuration errors` : 'No configuration errors'}
+          {validationWarnings.length > 0 && ` ? ${validationWarnings.length} warnings`}
+        </button>
+        {rawEditorDirty && <span className="hidden text-gray-400 sm:inline">Config changes in memory</span>}
+        {settings.TRAINING_ADVISOR_ENABLED === 'true' && <button type="button" className="operator-button ml-auto h-7 px-2" aria-expanded={diagnosticsOpen} onClick={() => { setDiagnosticsOpen(!diagnosticsOpen); setProblemsOpen(false); }}><Activity className="h-3.5 w-3.5" />Diagnostics</button>}
+      </div>
     </div>
   );
 }

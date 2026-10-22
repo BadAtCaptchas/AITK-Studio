@@ -5,6 +5,7 @@ import ThemeToggle from '@/components/ThemeToggle';
 import { useEffect, useRef, useState } from 'react';
 import RuntimeDiagnostics from '@/components/RuntimeDiagnostics';
 import useSettings, { notifySettingsChanged } from '@/hooks/useSettings';
+import useCommittedRef from '@/hooks/useCommittedRef';
 import useWorkers from '@/hooks/useWorkers';
 import useRemoteOllamaWorkers from '@/hooks/useRemoteOllamaWorkers';
 import { TopBar, MainContent } from '@/components/layout';
@@ -29,6 +30,7 @@ import {
   Power,
   RefreshCw,
   Save,
+  Settings2,
   ServerCog,
   ShieldCheck,
   TerminalSquare,
@@ -207,11 +209,11 @@ function FieldShell({
   children: React.ReactNode;
 }) {
   return (
-    <div className="border-b border-gray-900 pb-4 last:border-b-0 last:pb-0">
+    <div className="border-b border-gray-800 pb-3 last:border-b-0 last:pb-0">
       <label htmlFor={id} className="block text-sm font-semibold text-gray-100">
         {label}
       </label>
-      <div className="mt-1 text-sm text-gray-500">{detail}</div>
+      <div className="mt-1 text-xs text-gray-400">{detail}</div>
       <div className="mt-2">{children}</div>
     </div>
   );
@@ -232,10 +234,12 @@ function StatusDot({ tone = 'ok' }: { tone?: 'ok' | 'warn' | 'idle' }) {
 }
 
 function SettingSwitch({
+  label,
   checked,
   onChange,
   disabled = false,
 }: {
+  label: string;
   checked: boolean;
   onChange: (checked: boolean) => void;
   disabled?: boolean;
@@ -244,6 +248,7 @@ function SettingSwitch({
     <button
       type="button"
       role="switch"
+      aria-label={label}
       aria-checked={checked}
       disabled={disabled}
       onClick={() => !disabled && onChange(!checked)}
@@ -251,7 +256,6 @@ function SettingSwitch({
         checked ? 'bg-brand-500/90' : 'bg-gray-700'
       } ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
     >
-      <span className="sr-only">Toggle setting</span>
       <span
         className={`h-5 w-5 rounded-full bg-white transition-transform ${
           checked ? 'translate-x-[1.3rem]' : 'translate-x-0.5'
@@ -262,7 +266,7 @@ function SettingSwitch({
 }
 
 export default function Settings() {
-  const { settings, setSettings, isSettingsLoaded } = useSettings();
+  const { settings, setSettings, isSettingsLoaded, settingsStatus, settingsError, refreshSettings } = useSettings();
   const { workers, setWorkers, refreshWorkers } = useWorkers();
   const { workers: ollamaWorkers, refreshWorkers: refreshOllamaWorkers } = useRemoteOllamaWorkers();
   const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
@@ -285,6 +289,7 @@ export default function Settings() {
   const comfyInstallPoll = useRef<number | null>(null);
   const loadedWorkerUpdaterIds = useRef<Set<string>>(new Set());
   const savedSettingsRef = useRef<string | null>(null);
+  const currentSettingsRef = useCommittedRef(settings);
 
   const updateWorkerUpdaterState = (
     workerID: string,
@@ -530,29 +535,42 @@ export default function Settings() {
 
   const saveSettings = async () => {
     if (!isSettingsLoaded || status === 'saving' || !hasUnsavedSettings) return;
+    const submittedSettings = settings;
     setStatus('saving');
 
     apiClient
-      .post('/api/settings', settings)
+      .post('/api/settings', submittedSettings)
       .then(() => {
         const sanitizedSettings = {
-          ...settings,
+          ...submittedSettings,
           HF_TOKEN: '',
-          HF_TOKEN_SET: settings.HF_TOKEN_SET || settings.HF_TOKEN.trim() !== '',
+          HF_TOKEN_SET: submittedSettings.HF_TOKEN_SET || submittedSettings.HF_TOKEN.trim() !== '',
           OPENROUTER_API_KEY: '',
-          OPENROUTER_API_KEY_SET: settings.OPENROUTER_API_KEY_SET || settings.OPENROUTER_API_KEY.trim() !== '',
+          OPENROUTER_API_KEY_SET:
+            submittedSettings.OPENROUTER_API_KEY_SET || submittedSettings.OPENROUTER_API_KEY.trim() !== '',
         };
-        setSettings(sanitizedSettings);
+        // Publish only the saved snapshot. Keep any edits made while the request was pending
+        // in this editor, including a newly entered token that has not been submitted yet.
+        const current = currentSettingsRef.current;
+        const nextDraft = {
+          ...current,
+          HF_TOKEN: current.HF_TOKEN === submittedSettings.HF_TOKEN ? '' : current.HF_TOKEN,
+          HF_TOKEN_SET: sanitizedSettings.HF_TOKEN_SET,
+          OPENROUTER_API_KEY:
+            current.OPENROUTER_API_KEY === submittedSettings.OPENROUTER_API_KEY ? '' : current.OPENROUTER_API_KEY,
+          OPENROUTER_API_KEY_SET: sanitizedSettings.OPENROUTER_API_KEY_SET,
+        };
         savedSettingsRef.current = JSON.stringify(sanitizedSettings);
-        setStatus('success');
+        // The shared hook also receives this synchronous event, so restore this editor's
+        // draft afterward instead of letting that broadcast replace newer local edits.
         notifySettingsChanged(sanitizedSettings);
+        setSettings(nextDraft);
+        setStatus('success');
+        setTimeout(() => setStatus(current => (current === 'success' ? 'idle' : current)), 2000);
       })
-      .catch(error => {
-        console.error('Error saving settings:', error);
+      .catch(() => {
+        // Axios errors can include the submitted configuration, including newly entered tokens.
         setStatus('error');
-      })
-      .finally(() => {
-        setTimeout(() => setStatus('idle'), 2000);
       });
   };
 
@@ -719,9 +737,11 @@ export default function Settings() {
           ? 'Unsaved'
           : status === 'success'
             ? 'Saved'
-            : isSettingsLoaded
-              ? 'No changes'
-              : 'Loading';
+            : settingsStatus === 'error'
+              ? 'Unavailable'
+              : isSettingsLoaded
+                ? 'No changes'
+                : 'Loading';
   const saveStatusTone =
     status === 'error'
       ? 'error'
@@ -736,25 +756,24 @@ export default function Settings() {
 
   return (
     <>
-      <TopBar className="h-24 !overflow-hidden border-gray-900 bg-gray-950 px-4 sm:px-7">
+      <TopBar>
+        <Settings2 size={16} className="text-gray-400" aria-hidden="true" />
         <div className="min-w-0 flex-1">
-          <h1 className="text-2xl font-semibold text-gray-100">Settings</h1>
-          <p className="mt-0.5 hidden truncate text-sm text-gray-500 sm:block">
-            Configure access, storage, workers, and managed runtimes.
-          </p>
+          <h1 className="text-base font-semibold text-gray-100">Settings</h1>
         </div>
         <div className="ml-auto flex flex-none items-center gap-2">
           <span
-            className={`hidden h-9 items-center gap-2 border px-3 text-sm sm:inline-flex ${
+            role="status"
+            className={`inline-flex items-center gap-1.5 text-xs ${
               saveStatusTone === 'error'
-                ? 'border-rose-500/35 bg-rose-950/20 text-rose-200'
+                ? 'text-rose-700 dark:text-rose-300'
                 : saveStatusTone === 'saving'
-                  ? 'border-brand-500/35 bg-brand-950/20 text-brand-100'
+                  ? 'text-brand-300'
                   : saveStatusTone === 'unsaved'
-                    ? 'border-amber-500/35 bg-amber-950/20 text-amber-100'
+                    ? 'text-amber-800 dark:text-amber-300'
                     : saveStatusTone === 'success'
-                      ? 'border-emerald-500/35 bg-emerald-950/20 text-emerald-100'
-                      : 'border-brand-500/25 bg-brand-950/20 text-gray-300'
+                      ? 'text-emerald-800 dark:text-emerald-300'
+                      : 'text-gray-400'
             }`}
           >
             {saveStatusTone === 'saving' ? (
@@ -772,19 +791,34 @@ export default function Settings() {
             disabled={status === 'saving' || !hasUnsavedSettings}
             aria-label="Save settings"
             title="Save settings"
-            className="operator-button-primary h-10 w-10 px-0 sm:w-auto sm:px-4"
+            className="operator-button-primary px-3"
           >
             {status === 'saving' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            <span className="hidden sm:inline">Save changes</span>
+            <span>Save</span>
           </button>
         </div>
       </TopBar>
 
-      <MainContent className="bg-gray-950 px-0 pt-24">
+      <MainContent>
         <div className="min-h-full">
-          <div className="grid min-h-[calc(100dvh-4rem)] grid-cols-1 xl:grid-cols-[210px_minmax(0,1fr)_360px]">
-            <aside className="hidden border-r border-gray-900 px-5 py-6 xl:block">
-              <nav className="sticky top-6 space-y-1">
+          {settingsError && (
+            <div
+              role="alert"
+              className="mb-3 flex items-center justify-between gap-3 border border-rose-800 px-3 py-2 text-sm text-rose-700 dark:text-rose-300"
+            >
+              <span>{settingsError}</span>
+              <button type="button" className="operator-button" onClick={() => void refreshSettings()}>
+                Retry
+              </button>
+            </div>
+          )}
+          <fieldset
+            disabled={!isSettingsLoaded}
+            aria-busy={settingsStatus === 'loading'}
+            className="grid min-w-0 grid-cols-1 md:grid-cols-[160px_minmax(0,1fr)] xl:grid-cols-[176px_minmax(0,1fr)_280px]"
+          >
+            <aside className="hidden border-r border-gray-800 pr-3 md:block">
+              <nav className="sticky top-0 space-y-1" aria-label="Settings sections">
                 {sectionNav.map(section => {
                   const active = activeSection === section.id;
                   return (
@@ -792,7 +826,8 @@ export default function Settings() {
                       key={section.id}
                       type="button"
                       onClick={() => jumpToSection(section.id)}
-                      className={`flex h-11 w-full items-center border-l-2 px-3 text-left text-sm transition-colors ${
+                      aria-current={active ? 'location' : undefined}
+                      className={`flex h-8 w-full items-center border-l-2 px-3 text-left text-sm transition-colors ${
                         active
                           ? 'border-brand-400 bg-gray-900/55 text-brand-200'
                           : 'border-transparent text-gray-400 hover:bg-gray-900/35 hover:text-gray-200'
@@ -805,15 +840,19 @@ export default function Settings() {
               </nav>
             </aside>
 
-            <div className="min-w-0 px-4 py-6 sm:px-6 xl:px-7">
-              <div className="mx-auto max-w-3xl xl:mx-0">
-                <div className="operator-scrollbar-none mb-5 flex gap-1 overflow-x-auto xl:hidden">
+            <div className="min-w-0 md:px-4">
+              <div className="max-w-3xl">
+                <nav
+                  className="operator-scrollbar-none sticky top-0 z-10 mb-3 flex gap-1 overflow-x-auto border-b border-gray-800 bg-gray-950 md:hidden"
+                  aria-label="Settings sections"
+                >
                   {sectionNav.map(section => (
                     <button
                       key={section.id}
                       type="button"
                       onClick={() => jumpToSection(section.id)}
-                      className={`h-9 flex-none border-b-2 px-3 text-sm ${
+                      aria-current={activeSection === section.id ? 'location' : undefined}
+                      className={`h-8 flex-none border-b-2 px-3 text-sm ${
                         activeSection === section.id
                           ? 'border-brand-400 text-brand-100'
                           : 'border-transparent text-gray-400'
@@ -822,23 +861,35 @@ export default function Settings() {
                       {section.label}
                     </button>
                   ))}
-                </div>
+                </nav>
 
-                <div className="mb-6">
+                <details className="mb-4 border-b border-gray-800 pb-2">
+                  <summary className="cursor-pointer text-sm text-gray-400">Runtime diagnostics</summary>
                   <RuntimeDiagnostics />
-                </div>
+                </details>
+                {status === 'error' && (
+                  <div
+                    role="alert"
+                    className="mb-3 flex items-center justify-between gap-3 border border-rose-800 px-3 py-2 text-sm text-rose-700 dark:text-rose-300"
+                  >
+                    <span>Settings could not be saved. Your edits are still here.</span>
+                    <button type="button" className="operator-button" onClick={saveSettings}>
+                      Retry
+                    </button>
+                  </div>
+                )}
                 <section id="appearance" className="scroll-mt-20">
-                  <h2 className="text-base font-semibold">Appearance</h2>
-                  <div className="mt-4 flex items-center justify-between rounded-lg border border-gray-800 p-4">
+                  <h2 className="border-b border-gray-800 pb-2 text-sm font-semibold">Appearance</h2>
+                  <div className="flex items-center justify-between py-3">
                     <div>
                       <h3 className="font-medium">Color theme</h3>
-                      <p className="mt-1 text-sm text-gray-400">Choose light or dark. Changes apply immediately.</p>
+                      <p className="mt-1 text-xs text-gray-400">Applies immediately.</p>
                     </div>
                     <ThemeToggle />
                   </div>
                 </section>
-                <section id="storage" className="mt-8 scroll-mt-20">
-                  <h2 className="mb-4 text-base font-semibold">Storage</h2>
+                <section id="storage" className="mt-6 scroll-mt-20">
+                  <h2 className="mb-3 border-b border-gray-800 pb-2 text-sm font-semibold">Storage</h2>
                   <div className="space-y-4">
                     {' '}
                     <FieldShell
@@ -846,7 +897,7 @@ export default function Settings() {
                       label="Training folder"
                       detail="Where training outputs and logs are stored."
                     >
-                      <div className="flex h-10 items-center border border-gray-800 bg-gray-950">
+                      <div className="flex h-8 items-center border border-gray-800 bg-gray-950">
                         <input
                           type="text"
                           id="TRAINING_FOLDER"
@@ -856,13 +907,12 @@ export default function Settings() {
                           className="min-w-0 flex-1 bg-transparent px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600"
                           placeholder="Enter training folder path"
                         />
-                        <button
-                          type="button"
-                          className="flex h-full w-12 items-center justify-center border-l border-gray-800 bg-gray-900/60 text-gray-300"
-                          title="Training folder"
+                        <span
+                          className="flex h-full w-8 items-center justify-center border-l border-gray-800 bg-gray-900/60 text-gray-300"
+                          aria-hidden="true"
                         >
                           <FolderOpen className="h-4 w-4" />
-                        </button>
+                        </span>
                       </div>
                     </FieldShell>
                     <FieldShell
@@ -870,7 +920,7 @@ export default function Settings() {
                       label="Models folder"
                       detail="Where shared base-model weights and first-load downloads are stored."
                     >
-                      <div className="flex h-10 items-center border border-gray-800 bg-gray-950">
+                      <div className="flex h-8 items-center border border-gray-800 bg-gray-950">
                         <input
                           type="text"
                           id="MODELS_PATH"
@@ -881,17 +931,17 @@ export default function Settings() {
                           className="min-w-0 flex-1 bg-transparent px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600 disabled:cursor-not-allowed disabled:text-gray-500"
                           placeholder="Enter models folder path"
                         />
-                        <button
-                          type="button"
-                          disabled={settings.MODELS_PATH_LOCKED === 'true'}
-                          className="flex h-full w-12 items-center justify-center border-l border-gray-800 bg-gray-900/60 text-gray-300 disabled:cursor-not-allowed disabled:text-gray-600"
-                          title="Models folder"
+                        <span
+                          className="flex h-full w-8 items-center justify-center border-l border-gray-800 bg-gray-900/60 text-gray-300"
+                          aria-hidden="true"
                         >
                           <FolderOpen className="h-4 w-4" />
-                        </button>
+                        </span>
                       </div>
                       {settings.MODELS_PATH_LOCKED === 'true' && (
-                        <p className="mt-2 text-xs text-amber-300">Locked by the MODELS_PATH environment variable.</p>
+                        <p className="mt-2 text-xs text-amber-800 dark:text-amber-300">
+                          Locked by the MODELS_PATH environment variable.
+                        </p>
                       )}
                     </FieldShell>
                     <FieldShell
@@ -899,7 +949,7 @@ export default function Settings() {
                       label="Dataset folder"
                       detail="Where datasets are stored and discovered."
                     >
-                      <div className="flex h-10 items-center border border-gray-800 bg-gray-950">
+                      <div className="flex h-8 items-center border border-gray-800 bg-gray-950">
                         <input
                           type="text"
                           id="DATASETS_FOLDER"
@@ -909,23 +959,22 @@ export default function Settings() {
                           className="min-w-0 flex-1 bg-transparent px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600"
                           placeholder="Enter datasets folder path"
                         />
-                        <button
-                          type="button"
-                          className="flex h-full w-12 items-center justify-center border-l border-gray-800 bg-gray-900/60 text-gray-300"
-                          title="Dataset folder"
+                        <span
+                          className="flex h-full w-8 items-center justify-center border-l border-gray-800 bg-gray-900/60 text-gray-300"
+                          aria-hidden="true"
                         >
                           <FolderOpen className="h-4 w-4" />
-                        </button>
+                        </span>
                       </div>
-                      <div className="mt-2 flex items-center gap-2 border border-amber-700/45 bg-amber-950/15 px-3 py-2 text-xs text-amber-200">
+                      <div className="mt-2 flex items-center gap-2 border border-amber-700/45 bg-amber-500/10 dark:bg-amber-950/15 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
                         <AlertTriangle className="h-4 w-4 flex-none" />
                         Keep a backup elsewhere. Changes to datasets by this software are not reversible.
                       </div>
                     </FieldShell>
                   </div>
                 </section>
-                <section id="compute" className="mt-8 scroll-mt-20 border-y border-gray-900 py-5">
-                  <h2 className="mb-4 text-base font-semibold">Compute</h2>
+                <section id="compute" className="mt-6 scroll-mt-20 border-y border-gray-900 py-5">
+                  <h2 className="mb-3 border-b border-gray-800 pb-2 text-sm font-semibold">Compute</h2>
                   <div className="mb-4">
                     <h2 className="text-base font-semibold text-gray-100">Remote Workers</h2>
                     <p className="mt-1 text-sm text-gray-500">
@@ -937,21 +986,21 @@ export default function Settings() {
                       type="text"
                       value={workerForm.name}
                       onChange={e => setWorkerForm(prev => ({ ...prev, name: e.target.value }))}
-                      className="h-10 border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600"
+                      className="h-8 border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600"
                       placeholder="Worker name"
                     />
                     <input
                       type="url"
                       value={workerForm.base_url}
                       onChange={e => setWorkerForm(prev => ({ ...prev, base_url: e.target.value }))}
-                      className="h-10 border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600"
+                      className="h-8 border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600"
                       placeholder="https://worker.example.com"
                     />
                     <input
                       type="password"
                       value={workerForm.api_token}
                       onChange={e => setWorkerForm(prev => ({ ...prev, api_token: e.target.value }))}
-                      className="h-10 border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600 sm:col-span-2"
+                      className="h-8 border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600 sm:col-span-2"
                       placeholder={
                         workerForm.id ? 'Leave blank to keep existing API token' : 'Worker AI_TOOLKIT_AUTH token'
                       }
@@ -975,7 +1024,7 @@ export default function Settings() {
                       Bypass offline mode
                     </label>
                     {workerForm.offline_bypass_enabled && (
-                      <p className="text-xs text-amber-300 sm:col-span-2">
+                      <p className="text-xs text-amber-800 dark:text-amber-300 sm:col-span-2">
                         This trusts the worker host even when offline mode is enabled.
                       </p>
                     )}
@@ -998,7 +1047,7 @@ export default function Settings() {
                       </button>
                     </div>
                     {workerStatus === 'error' && (
-                      <p className="text-sm text-rose-400 sm:col-span-2">Failed to save worker.</p>
+                      <p className="text-sm text-rose-700 dark:text-rose-400 sm:col-span-2">Failed to save worker.</p>
                     )}
                   </form>
 
@@ -1042,7 +1091,9 @@ export default function Settings() {
                                 {worker.last_error ? `: ${worker.last_error}` : ''}
                               </div>
                               {worker.offline_bypass_enabled && (
-                                <div className="mt-1 text-xs text-amber-300">Offline bypass enabled</div>
+                                <div className="mt-1 text-xs text-amber-800 dark:text-amber-300">
+                                  Offline bypass enabled
+                                </div>
                               )}
                               <div className="mt-2 text-xs text-gray-500">
                                 Updater: {updaterLabel} · {updaterDetail}
@@ -1073,7 +1124,7 @@ export default function Settings() {
                               </button>
                               <button
                                 type="button"
-                                className="h-8 border border-amber-800 px-2 text-xs text-amber-100 disabled:opacity-45"
+                                className="h-8 border border-amber-800 px-2 text-xs text-amber-800 dark:text-amber-100 disabled:opacity-45"
                                 onClick={() => updateRemoteWorker(worker.id)}
                                 disabled={!canApplyWorkerUpdate || updaterBusy}
                               >
@@ -1089,7 +1140,7 @@ export default function Settings() {
                               </button>
                               <button
                                 type="button"
-                                className="h-8 border border-rose-900 px-2 text-xs text-rose-200"
+                                className="h-8 border border-rose-900 px-2 text-xs text-rose-700 dark:text-rose-200"
                                 onClick={() => deleteWorker(worker.id)}
                               >
                                 Delete
@@ -1105,8 +1156,8 @@ export default function Settings() {
                   </div>
                 </section>
 
-                <section id="integrations" className="mt-8 scroll-mt-20">
-                  <h2 className="mb-4 text-base font-semibold">Integrations</h2>
+                <section id="integrations" className="mt-6 scroll-mt-20">
+                  <h2 className="mb-3 border-b border-gray-800 pb-2 text-sm font-semibold">Integrations</h2>
                   <div className="space-y-4">
                     {' '}
                     <FieldShell
@@ -1114,7 +1165,7 @@ export default function Settings() {
                       label="Hugging Face token"
                       detail="Required to access gated or private models."
                     >
-                      <div className="flex h-10 items-center border border-gray-800 bg-gray-950">
+                      <div className="flex h-8 items-center border border-gray-800 bg-gray-950">
                         <KeyRound className="ml-3 h-4 w-4 text-gray-600" />
                         <input
                           type={showSecrets.hf ? 'text' : 'password'}
@@ -1144,7 +1195,7 @@ export default function Settings() {
                       label="OpenRouter API key"
                       detail="Used for OpenRouter caption jobs."
                     >
-                      <div className="flex h-10 items-center border border-gray-800 bg-gray-950">
+                      <div className="flex h-8 items-center border border-gray-800 bg-gray-950">
                         <KeyRound className="ml-3 h-4 w-4 text-gray-600" />
                         <input
                           type={showSecrets.openRouter ? 'text' : 'password'}
@@ -1171,7 +1222,7 @@ export default function Settings() {
                     </FieldShell>
                   </div>{' '}
                   <section id="comfy" className="scroll-mt-20 border-y border-gray-900 py-5">
-                    <div className="mb-6 space-y-4 border-b border-gray-900 pb-5">
+                    <div className="mb-6 space-y-4 border-b border-gray-900 pb-3">
                       <FieldShell
                         id="COMFY_EXTERNAL_URL"
                         label="External ComfyUI URL"
@@ -1183,7 +1234,7 @@ export default function Settings() {
                           name="COMFY_EXTERNAL_URL"
                           value={settings.COMFY_EXTERNAL_URL}
                           onChange={handleChange}
-                          className="h-10 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600 focus:border-brand-700"
+                          className="h-8 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600 focus:border-brand-700"
                           placeholder="http://127.0.0.1:8188"
                         />
                       </FieldShell>
@@ -1198,7 +1249,7 @@ export default function Settings() {
                           name="COMFY_EXTERNAL_LORA_DIR"
                           value={settings.COMFY_EXTERNAL_LORA_DIR}
                           onChange={handleChange}
-                          className="h-10 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600 focus:border-brand-700"
+                          className="h-8 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600 focus:border-brand-700"
                           placeholder="E:\\ComfyUI\\models\\loras"
                         />
                       </FieldShell>
@@ -1244,9 +1295,11 @@ export default function Settings() {
                       <div className="truncate">Root: {comfyInstall?.root || 'Not set'}</div>
                       <div className="truncate">Log: {comfyInstall?.logPath || 'Not set'}</div>
                       {comfyInstall?.pid && <div>Installer PID: {comfyInstall.pid}</div>}
-                      {comfyInstall?.error && <div className="mt-2 text-rose-400">{comfyInstall.error}</div>}
+                      {comfyInstall?.error && (
+                        <div className="mt-2 text-rose-700 dark:text-rose-400">{comfyInstall.error}</div>
+                      )}
                       {comfyInstallAction === 'error' && (
-                        <div className="mt-2 text-rose-400">{comfyInstallActionError}</div>
+                        <div className="mt-2 text-rose-700 dark:text-rose-400">{comfyInstallActionError}</div>
                       )}
                     </div>
                     <div className="mt-3">
@@ -1256,41 +1309,12 @@ export default function Settings() {
                 </section>
                 <details
                   id="advanced"
-                  className="mt-8 scroll-mt-20"
+                  className="mt-6 scroll-mt-20"
                   open={advancedOpen}
                   onToggle={event => setAdvancedOpen(event.currentTarget.open)}
                 >
                   <summary className="cursor-pointer text-base font-semibold">Advanced</summary>{' '}
-                  <section className="mt-7 border-t border-gray-900 pt-6" aria-labelledby="training-view-title">
-                    <h2 id="training-view-title" className="text-base font-semibold text-gray-100">
-                      Training form
-                    </h2>
-                    <div className="mt-3 flex items-center gap-4 rounded-lg border border-gray-800 p-4">
-                      <div className="min-w-0 flex-1">
-                        <label htmlFor="training-legacy-view" className="text-sm font-semibold text-gray-100">
-                          Continuous form
-                        </label>
-                        <p id="training-legacy-view-detail" className="mt-1 text-sm text-gray-400">
-                          Show all training options on one page in a compact layout. Turn off to use the guided steps.
-                        </p>
-                      </div>
-                      <input
-                        id="training-legacy-view"
-                        type="checkbox"
-                        role="switch"
-                        aria-describedby="training-legacy-view-detail"
-                        checked={settings.TRAINING_LEGACY_VIEW === 'true'}
-                        onChange={event =>
-                          setSettings(prev => ({
-                            ...prev,
-                            TRAINING_LEGACY_VIEW: event.target.checked ? 'true' : 'false',
-                          }))
-                        }
-                        className="h-5 w-5 shrink-0 accent-brand-500"
-                      />
-                    </div>
-                  </section>
-                  <section className="mt-7 border-t border-gray-900 pt-6">
+                  <section className="mt-3 border-t border-gray-800 pt-3">
                     <div className="mb-3">
                       <h2 className="text-base font-semibold text-gray-100">Automation</h2>
                       <p className="mt-1 text-sm text-gray-500">Optional behaviors that streamline your workflow.</p>
@@ -1306,6 +1330,7 @@ export default function Settings() {
                           </div>
                         </div>
                         <SettingSwitch
+                          label="Offline mode"
                           checked={settings.OFFLINE_MODE === 'true'}
                           disabled={settings.OFFLINE_MODE_LOCKED === 'true'}
                           onChange={checked =>
@@ -1322,6 +1347,7 @@ export default function Settings() {
                           </div>
                         </div>
                         <SettingSwitch
+                          label="Training Advisor"
                           checked={settings.TRAINING_ADVISOR_ENABLED === 'true'}
                           onChange={checked =>
                             setSettings(prev => ({ ...prev, TRAINING_ADVISOR_ENABLED: checked ? 'true' : 'false' }))
@@ -1338,6 +1364,7 @@ export default function Settings() {
                           </div>
                         </div>
                         <SettingSwitch
+                          label="Library telemetry"
                           checked={settings.TELEMETRY_ENABLED === 'true'}
                           onChange={checked =>
                             setSettings(prev => ({ ...prev, TELEMETRY_ENABLED: checked ? 'true' : 'false' }))
@@ -1353,6 +1380,7 @@ export default function Settings() {
                           </div>
                         </div>
                         <SettingSwitch
+                          label="Auto-install managed ComfyUI"
                           checked={settings.COMFY_AUTO_INSTALL === 'true'}
                           onChange={checked =>
                             setSettings(prev => ({ ...prev, COMFY_AUTO_INSTALL: checked ? 'true' : 'false' }))
@@ -1372,21 +1400,21 @@ export default function Settings() {
                           type="text"
                           value={ollamaWorkerForm.name}
                           onChange={e => setOllamaWorkerForm(prev => ({ ...prev, name: e.target.value }))}
-                          className="h-10 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600"
+                          className="h-8 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600"
                           placeholder="Endpoint name"
                         />
                         <input
                           type="url"
                           value={ollamaWorkerForm.base_url}
                           onChange={e => setOllamaWorkerForm(prev => ({ ...prev, base_url: e.target.value }))}
-                          className="h-10 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600"
+                          className="h-8 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600"
                           placeholder="http://ollama-host:11434"
                         />
                         <input
                           type="password"
                           value={ollamaWorkerForm.auth_token}
                           onChange={e => setOllamaWorkerForm(prev => ({ ...prev, auth_token: e.target.value }))}
-                          className="h-10 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600"
+                          className="h-8 w-full border border-gray-800 bg-gray-950 px-3 text-sm text-gray-100 outline-none placeholder:text-gray-600"
                           placeholder={
                             ollamaWorkerForm.id ? 'Leave blank to keep existing bearer token' : 'Optional bearer token'
                           }
@@ -1434,12 +1462,14 @@ export default function Settings() {
                           </div>
                         </div>
                         {ollamaWorkerForm.offline_bypass_enabled && (
-                          <p className="text-xs text-amber-300">
+                          <p className="text-xs text-amber-800 dark:text-amber-300">
                             This trusts the endpoint host even when offline mode is enabled.
                           </p>
                         )}
                         {ollamaWorkerStatus === 'error' && (
-                          <p className="text-sm text-rose-400">Failed to save Remote Ollama endpoint.</p>
+                          <p className="text-sm text-rose-700 dark:text-rose-400">
+                            Failed to save Remote Ollama endpoint.
+                          </p>
                         )}
                       </form>
                       <div className="mt-4 divide-y divide-gray-900 border-y border-gray-900">
@@ -1456,7 +1486,9 @@ export default function Settings() {
                                 {worker.last_error ? `: ${worker.last_error}` : ''}
                               </div>
                               {worker.offline_bypass_enabled && (
-                                <div className="mt-1 text-xs text-amber-300">Offline bypass enabled</div>
+                                <div className="mt-1 text-xs text-amber-800 dark:text-amber-300">
+                                  Offline bypass enabled
+                                </div>
                               )}
                             </div>
                             <div className="flex flex-none gap-2">
@@ -1476,7 +1508,7 @@ export default function Settings() {
                               </button>
                               <button
                                 type="button"
-                                className="h-8 border border-rose-900 px-2 text-xs text-rose-200"
+                                className="h-8 border border-rose-900 px-2 text-xs text-rose-700 dark:text-rose-200"
                                 onClick={() => deleteOllamaWorker(worker.id)}
                               >
                                 Delete
@@ -1507,9 +1539,11 @@ export default function Settings() {
                           {cloudflared?.publicUrl || (cloudflared?.running ? 'Waiting for cloudflared' : 'Not set')}
                         </div>
                         <div className="truncate">Target URL: {cloudflared?.targetUrl || 'Not set'}</div>
-                        {cloudflared?.error && <div className="mt-2 text-rose-400">{cloudflared.error}</div>}
+                        {cloudflared?.error && (
+                          <div className="mt-2 text-rose-700 dark:text-rose-400">{cloudflared.error}</div>
+                        )}
                         {cloudflaredAction === 'error' && (
-                          <div className="mt-2 text-rose-400">{cloudflaredActionError}</div>
+                          <div className="mt-2 text-rose-700 dark:text-rose-400">{cloudflaredActionError}</div>
                         )}
                       </div>
                       <div className="mt-3 flex items-center justify-between gap-3 border border-gray-900 px-3 py-3">
@@ -1519,14 +1553,18 @@ export default function Settings() {
                             Use the official Cloudflare release for this OS.
                           </div>
                         </div>
-                        <SettingSwitch checked={cloudflaredAutoDownload} onChange={setAutoDownloadCloudflared} />
+                        <SettingSwitch
+                          label="Auto-download Cloudflared"
+                          checked={cloudflaredAutoDownload}
+                          onChange={setAutoDownloadCloudflared}
+                        />
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <button
                           type="button"
                           onClick={startCloudflared}
                           disabled={cloudflaredAction === 'starting' || cloudflaredAction === 'downloading'}
-                          className="h-9 border border-emerald-800 px-3 text-sm text-emerald-100 disabled:opacity-50"
+                          className="h-9 border border-emerald-800 px-3 text-sm text-emerald-800 dark:text-emerald-100 disabled:opacity-50"
                         >
                           {cloudflaredAction === 'starting' ? 'Starting' : 'Start'}
                         </button>
@@ -1550,7 +1588,7 @@ export default function Settings() {
                         <button
                           type="button"
                           onClick={() => apiClient.delete('/api/cloudflared').finally(refreshCloudflared)}
-                          className="h-9 border border-rose-900 px-3 text-sm text-rose-200"
+                          className="h-9 border border-rose-900 px-3 text-sm text-rose-700 dark:text-rose-200"
                         >
                           Stop
                         </button>
@@ -1568,13 +1606,12 @@ export default function Settings() {
               </div>
             </div>
 
-            <aside className="hidden border-l border-gray-900 px-6 py-6 xl:block">
-              <div className="sticky top-6">
-                <h2 className="text-base font-semibold text-gray-100">System status</h2>
-                <p className="mt-1 text-sm text-gray-500">Overview of key services and runtimes.</p>
+            <aside className="hidden border-l border-gray-800 pl-4 xl:block">
+              <div className="sticky top-0">
+                <h2 className="border-b border-gray-800 pb-2 text-sm font-semibold text-gray-100">System status</h2>
 
-                <div className="mt-8 space-y-6">
-                  <div className="border-b border-gray-900 pb-5">
+                <div className="mt-3 space-y-3">
+                  <div className="border-b border-gray-900 pb-3">
                     <div className="flex items-center gap-3">
                       <Box className="h-5 w-5 text-gray-300" />
                       <div className="min-w-0 flex-1 text-sm font-semibold text-gray-100">Managed ComfyUI</div>
@@ -1583,7 +1620,7 @@ export default function Settings() {
                         {comfyInstall?.installed ? 'Installed' : 'Not installed'}
                       </span>
                     </div>
-                    <div className="mt-4 grid grid-cols-[6rem_1fr] gap-y-2 pl-8 text-sm">
+                    <div className="mt-4 grid grid-cols-[6rem_1fr] gap-y-1 text-xs">
                       <div className="text-gray-500">Backend</div>
                       <div className="truncate text-right text-gray-300">aitk_comfy</div>
                       <div className="text-gray-500">Root</div>
@@ -1591,29 +1628,27 @@ export default function Settings() {
                     </div>
                   </div>
 
-                  <div className="border-b border-gray-900 pb-5">
+                  <div className="border-b border-gray-900 pb-3">
                     <div className="flex items-center gap-3">
                       <UsersRound className="h-5 w-5 text-gray-300" />
                       <div className="min-w-0 flex-1 text-sm font-semibold text-gray-100">Remote workers</div>
                       <StatusDot tone={activeWorkers > 0 ? 'ok' : 'idle'} />
-                      <span className="text-xs text-gray-400">
-                        {activeWorkers > 0 ? 'Connected' : 'Not configured'}
-                      </span>
+                      <span className="text-xs text-gray-400">{activeWorkers > 0 ? 'Enabled' : 'Not configured'}</span>
                     </div>
-                    <div className="mt-4 grid grid-cols-[7rem_1fr] gap-y-2 pl-8 text-sm">
+                    <div className="mt-4 grid grid-cols-[7rem_1fr] gap-y-1 text-xs">
                       <div className="text-gray-500">Active workers</div>
                       <div className="text-right text-gray-300">{activeWorkers}</div>
                     </div>
                   </div>
 
-                  <div className="border-b border-gray-900 pb-5">
+                  <div className="border-b border-gray-900 pb-3">
                     <div className="flex items-center gap-3">
                       <ServerCog className="h-5 w-5 text-gray-300" />
                       <div className="min-w-0 flex-1 text-sm font-semibold text-gray-100">Ollama endpoint</div>
                       <StatusDot tone={hasHealthyOllama ? 'ok' : 'idle'} />
                       <span className="text-xs text-gray-400">{hasHealthyOllama ? 'Healthy' : 'Not configured'}</span>
                     </div>
-                    <div className="mt-4 grid grid-cols-[5rem_1fr] gap-y-2 pl-8 text-sm">
+                    <div className="mt-4 grid grid-cols-[5rem_1fr] gap-y-1 text-xs">
                       <div className="text-gray-500">Endpoint</div>
                       <div className="truncate text-right text-gray-300">
                         {firstOllamaWorker?.base_url || 'Not set'}
@@ -1630,7 +1665,7 @@ export default function Settings() {
                       <StatusDot tone="ok" />
                       <span className="text-xs text-gray-400">Ready</span>
                     </div>
-                    <div className="mt-4 grid grid-cols-[5rem_1fr] gap-y-2 pl-8 text-sm">
+                    <div className="mt-4 grid grid-cols-[5rem_1fr] gap-y-1 text-xs">
                       <div className="text-gray-500">AI Toolkit</div>
                       <div className="text-right text-gray-300">v{appVersion}</div>
                       <div className="text-gray-500">Settings</div>
@@ -1639,19 +1674,19 @@ export default function Settings() {
                   </div>
                 </div>
 
-                <div className="mt-8 space-y-2">
+                <div className="mt-6 space-y-2">
                   <button
                     type="button"
                     onClick={installComfyNow}
                     disabled={comfyInstallAction === 'installing' || comfyInstall?.installing}
-                    className="inline-flex h-10 w-full items-center justify-center gap-2 border border-gray-800 text-sm text-gray-200 hover:bg-gray-900 disabled:opacity-50"
+                    className="inline-flex h-8 w-full items-center justify-center gap-2 border border-gray-800 text-sm text-gray-200 hover:bg-gray-900 disabled:opacity-50"
                   >
                     {comfyInstallAction === 'installing' || comfyInstall?.installing ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
                       <RefreshCw className="h-4 w-4" />
                     )}
-                    Refresh install
+                    Install / repair ComfyUI
                   </button>
                   <button
                     type="button"
@@ -1661,7 +1696,7 @@ export default function Settings() {
                       refreshOllamaWorkers();
                       refreshCloudflared();
                     }}
-                    className="inline-flex h-10 w-full items-center justify-center gap-2 border border-gray-800 text-sm text-gray-200 hover:bg-gray-900"
+                    className="inline-flex h-8 w-full items-center justify-center gap-2 border border-gray-800 text-sm text-gray-200 hover:bg-gray-900"
                   >
                     <RefreshCw className="h-4 w-4" />
                     Refresh status
@@ -1669,7 +1704,7 @@ export default function Settings() {
                 </div>
               </div>
             </aside>
-          </div>
+          </fieldset>
         </div>
       </MainContent>
     </>

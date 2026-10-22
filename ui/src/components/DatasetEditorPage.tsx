@@ -403,9 +403,11 @@ export default function DatasetEditorPage({
 
   return (
     <>
-      <TopBar className="h-[69px] gap-3 border-gray-800 bg-gray-950 px-4">
+      <TopBar>
         <div className="flex flex-shrink-0 items-center gap-3">
-          <h1 className="whitespace-nowrap font-semibold text-gray-100">Caption Studio</h1>
+          <h1 className="whitespace-nowrap font-semibold text-gray-100" aria-label="Caption Studio">
+            <span className="hidden sm:inline">Caption </span>Studio
+          </h1>
         </div>
 
         <button
@@ -418,14 +420,15 @@ export default function DatasetEditorPage({
               history.back();
             }
           }}
-          className="ml-3 inline-flex h-8 flex-shrink-0 items-center gap-2 rounded-[4px] border border-gray-800 bg-gray-950 px-2.5 text-[12px] text-gray-400 hover:border-gray-600 hover:text-gray-100"
+          className="inline-flex h-8 flex-shrink-0 items-center gap-2 rounded-[4px] border border-gray-800 bg-gray-950 px-2.5 text-[12px] text-gray-400 hover:border-gray-600 hover:text-gray-100 lg:ml-3"
           title="Back to AITK Studio"
+          aria-label="Back to AITK Studio"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
           <span className="hidden lg:inline">Back to AITK Studio</span>
         </button>
 
-        <div className="ml-2 flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-[12px]">
+        <div className="ml-2 hidden min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-[12px] md:flex">
           <span className="max-w-[180px] truncate text-gray-600">{'Global datasets'}</span>
           <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-gray-800" />
           <span className="text-gray-500">Datasets</span>
@@ -439,7 +442,7 @@ export default function DatasetEditorPage({
           )}
         </div>
 
-        <div className="flex flex-shrink-0 items-center gap-2">
+        <div className="ml-auto flex flex-shrink-0 items-center gap-2 md:ml-0">
           <button
             type="button"
             className="operator-button h-8 px-3 text-xs"
@@ -520,7 +523,7 @@ export default function DatasetEditorPage({
         </div>
       )}
 
-      <MainContent className="!top-[69px] !h-[calc(100%-69px)] overflow-hidden !px-0 !pt-0 pb-0 sm:!px-0">
+      <MainContent className="!top-[var(--studio-page-toolbar-height)] !h-[calc(100%-var(--studio-page-toolbar-height))] overflow-hidden !px-0 !pt-0 pb-0 sm:!px-0">
         {datasetActionError && (
           <PageNotice tone="danger" title="Dataset action failed" className="mx-auto mt-4 max-w-xl">
             {datasetActionError}

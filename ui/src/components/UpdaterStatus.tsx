@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { MenuItem } from '@headlessui/react';
 import classNames from 'classnames';
 import {
   AlertCircle,
@@ -323,7 +324,15 @@ function isRepoUpdateStatus(value: unknown): value is RepoUpdateStatus {
   return Boolean(value && typeof value === 'object' && 'state' in value && 'message' in value);
 }
 
-export default function UpdaterStatus({ compact = false, minimal = false }: { compact?: boolean; minimal?: boolean }) {
+export default function UpdaterStatus({
+  compact = false,
+  minimal = false,
+  menuItem = false,
+}: {
+  compact?: boolean;
+  minimal?: boolean;
+  menuItem?: boolean;
+}) {
   const [status, setStatus] = useState<RepoUpdateStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [requesting, setRequesting] = useState(false);
@@ -525,19 +534,20 @@ export default function UpdaterStatus({ compact = false, minimal = false }: { co
   );
 
   if (compact && minimal) {
-    return (
+    const statusLink = (
       <Link
         href="/updates"
         title={title}
         aria-label={meta.label}
         className={classNames(
-          'inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-gray-400 transition-colors hover:border-gray-800 hover:bg-gray-900 hover:text-gray-100',
+          'inline-flex h-8 w-8 items-center justify-center rounded-md border border-transparent text-gray-400 transition-colors hover:border-gray-800 hover:bg-gray-900 hover:text-gray-100 data-[focus]:bg-gray-800',
           meta.textClass,
         )}
       >
         <Icon className={classNames('h-4 w-4', spinning ? 'animate-spin' : '')} />
       </Link>
     );
+    return menuItem ? <MenuItem>{statusLink}</MenuItem> : statusLink;
   }
 
   if (compact) {

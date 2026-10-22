@@ -11,10 +11,11 @@ import {
 } from '@/domain/generationConfig';
 import { configContractErrors, CAPABILITY_VERSION } from '@/domain/configContract';
 import { reportWorkflowError } from '@/components/WorkflowFeedback';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@headlessui/react';
-import { FileJson, ImagePlus, Layers, Loader2, Upload, Wand2, X } from 'lucide-react';
+import { FileJson, ImagePlus, Layers, Loader2, PanelRightClose, PanelRightOpen, Upload, Wand2, X } from 'lucide-react';
+import workspace from './generate-workspace.module.css';
 import { TopBar, MainContent } from '@/components/layout';
 import {
   Checkbox,
@@ -234,10 +235,59 @@ function promptHasAnyTrigger(prompt: string, triggerWords: string[]) {
   return triggerWords.some(word => lowerPrompt.includes(word.toLowerCase()));
 }
 
+function subscribePanelPreferences(listener: () => void) {
+  window.addEventListener('storage', listener);
+  return () => window.removeEventListener('storage', listener);
+}
+
+function readPanelWidth(): number {
+  try {
+    const width = Number(window.localStorage.getItem('aitk.generate.panelWidth'));
+    return width >= 280 && width <= 480 ? width : 352;
+  } catch {
+    return 352;
+  }
+}
+
+function readPanelOpen(): boolean {
+  try {
+    return window.localStorage.getItem('aitk.generate.panelOpen') !== 'false';
+  } catch {
+    return true;
+  }
+}
+
 export function GeneratePageContent() {
   const { archs, groupedModelOptions } = useModelArchs();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const storedPanelWidth = useSyncExternalStore(subscribePanelPreferences, readPanelWidth, () => 352);
+  const storedPanelOpen = useSyncExternalStore(subscribePanelPreferences, readPanelOpen, () => true);
+  const [selectedPanelOpen, setSettingsOpen] = useState<boolean | null>(null);
+  const [selectedPanelWidth, setSettingsWidth] = useState<number | null>(null);
+  const settingsOpen = selectedPanelOpen ?? storedPanelOpen;
+  const settingsWidth = selectedPanelWidth ?? storedPanelWidth;
+  const panelDrag = useRef({ startX: 0, startWidth: 352 });
+  const resizeSettings = (width: number) => {
+    const nextWidth = Math.max(280, Math.min(480, Math.round(width)));
+    setSettingsWidth(nextWidth);
+    try {
+      window.localStorage.setItem('aitk.generate.panelWidth', String(nextWidth));
+    } catch {
+      /* Optional layout preference. */
+    }
+  };
+  const toggleSettings = () => {
+    setSettingsOpen(!settingsOpen);
+    try {
+      window.localStorage.setItem('aitk.generate.panelOpen', String(!settingsOpen));
+    } catch {
+      /* Optional layout preference. */
+    }
+  };
+  const panelStyle: CSSProperties & { '--generation-panel-width': string } = {
+    '--generation-panel-width': `${settingsWidth}px`,
+  };
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const loraFileInputRef = useRef<HTMLInputElement | null>(null);
   const inlineAbortControllerRef = useRef<AbortController | null>(null);
@@ -263,7 +313,9 @@ export function GeneratePageContent() {
   const [width, setWidth] = useState<number | null>(() => getDefaultGenerationSettings('flux').width);
   const [height, setHeight] = useState<number | null>(() => getDefaultGenerationSettings('flux').height);
   const [seed, setSeed] = useState<number | null>(-1);
-  const [guidanceScale, setGuidanceScale] = useState<number | null>(() => getDefaultGenerationSettings('flux').guidanceScale);
+  const [guidanceScale, setGuidanceScale] = useState<number | null>(
+    () => getDefaultGenerationSettings('flux').guidanceScale,
+  );
   const [sampleSteps, setSampleSteps] = useState<number | null>(() => getDefaultGenerationSettings('flux').sampleSteps);
   const [numRepeats, setNumRepeats] = useState<number | null>(1);
   const [sampler, setSampler] = useState(() => getDefaultGenerationSettings('flux').sampler);
@@ -816,21 +868,37 @@ export function GeneratePageContent() {
         <div className="flex shrink-0 items-center gap-2">
           <Wand2 className="h-4 w-4 text-brand-300" />
           <h1 className="text-base font-semibold">Generate</h1>
-          <Link href="/generate/live" className="operator-button text-xs">
-            Live inference
+          <Link href="/generate/live" className="operator-button text-xs" title="Live inference">
+            <span className="sm:hidden">Live</span>
+            <span className="hidden sm:inline">Live inference</span>
           </Link>
-          <span className="hidden text-sm text-gray-400 sm:inline">/ {'Local workspace'}</span>
         </div>
         <div className="flex-1"></div>
         {gpuList.length > 0 && (
-          <div className="mr-2 min-w-32">
+          <div className="w-32 shrink-0">
             <SelectInput
+              placeholder="GPU"
               value={`${gpuIDs}`}
               onChange={value => setGpuIDs(value)}
               options={gpuList.map((gpu: any) => ({ value: `${gpu.index}`, label: `GPU #${gpu.index}` }))}
             />
           </div>
         )}
+        <button
+          type="button"
+          className="operator-button"
+          onClick={toggleSettings}
+          aria-label="Settings"
+          aria-expanded={settingsOpen}
+          aria-controls="generation-settings"
+        >
+          {settingsOpen ? (
+            <PanelRightClose size={15} aria-hidden="true" />
+          ) : (
+            <PanelRightOpen size={15} aria-hidden="true" />
+          )}
+          <span className="hidden sm:inline">Settings</span>
+        </button>
       </TopBar>
 
       <MainContent>
@@ -843,9 +911,12 @@ export function GeneratePageContent() {
             </ul>
           </PageNotice>
         )}
-        <div className="studio-generation-layout">
-          <div className="studio-generation-main">
-            <div className="studio-generation-canvas">
+        <div className={`${workspace.layout} ${settingsOpen ? '' : workspace.collapsed}`} style={panelStyle}>
+          <div className={workspace.main}>
+            <div className={workspace.canvas}>
+              <div className="flex h-9 items-center border-b border-gray-800 px-3 text-xs font-medium text-gray-400">
+                Output
+              </div>
               {status === 'generating' && (
                 <div className="flex min-h-[420px] flex-col items-center justify-center gap-3 border border-gray-800 bg-gray-950 px-4 text-sm text-gray-300">
                   <div className="flex items-center">
@@ -888,10 +959,9 @@ export function GeneratePageContent() {
               )}
 
               {status !== 'generating' && !inlineImagePath && !inlineError && !inlineMessage && (
-                <div className="studio-canvas-empty">
-                  <ImagePlus className="mb-6 h-16 w-16 text-gray-600" strokeWidth={1} />
-                  <h2 className="text-2xl font-medium text-gray-100">Room for your next idea.</h2>
-                  <p className="mt-3 text-sm text-gray-400">Write a prompt to create your first image.</p>
+                <div className={workspace.empty}>
+                  <ImagePlus className="mb-3 h-7 w-7 text-gray-600" strokeWidth={1.5} aria-hidden="true" />
+                  <h2 className="text-sm font-medium text-gray-400">No output</h2>
                 </div>
               )}
 
@@ -909,7 +979,7 @@ export function GeneratePageContent() {
             </div>
 
             <form
-              className="operator-panel studio-prompt-composer"
+              className={workspace.composer}
               onSubmit={event => {
                 event.preventDefault();
                 void handleGenerate();
@@ -940,7 +1010,7 @@ export function GeneratePageContent() {
                   </Button>
                 </div>
                 <TextAreaInput
-                  label="Describe your image"
+                  label="Prompt text"
                   value={prompts}
                   onChange={handlePromptTextChange}
                   rows={3}
@@ -967,7 +1037,7 @@ export function GeneratePageContent() {
                 </span>
                 <Button
                   type="submit"
-                  className="operator-button-primary h-11 px-5"
+                  className="operator-button-primary px-4"
                   disabled={isBusy || !isSettingsLoaded || !isGPUInfoLoaded}
                 >
                   {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
@@ -976,8 +1046,51 @@ export function GeneratePageContent() {
               </div>
             </form>
           </div>
-          <aside className="operator-panel studio-generation-settings" aria-label="Generation settings">
-            <div className="space-y-5">
+          <div
+            className={workspace.resize}
+            hidden={!settingsOpen}
+            role="separator"
+            aria-label="Resize generation settings"
+            aria-orientation="vertical"
+            aria-controls="generation-settings"
+            aria-valuemin={280}
+            aria-valuemax={480}
+            aria-valuenow={settingsWidth}
+            tabIndex={0}
+            onPointerDown={event => {
+              if (event.button !== 0) return;
+              event.preventDefault();
+              panelDrag.current = { startX: event.clientX, startWidth: settingsWidth };
+              event.currentTarget.setPointerCapture(event.pointerId);
+            }}
+            onPointerMove={event => {
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                resizeSettings(panelDrag.current.startWidth + panelDrag.current.startX - event.clientX);
+              }
+            }}
+            onPointerUp={event => {
+              if (event.currentTarget.hasPointerCapture(event.pointerId))
+                event.currentTarget.releasePointerCapture(event.pointerId);
+            }}
+            onKeyDown={event => {
+              if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+              event.preventDefault();
+              resizeSettings(
+                event.key === 'Home'
+                  ? 280
+                  : event.key === 'End'
+                    ? 480
+                    : settingsWidth + (event.key === 'ArrowLeft' ? 16 : -16),
+              );
+            }}
+          />
+          <aside
+            id="generation-settings"
+            className={workspace.settings}
+            hidden={!settingsOpen}
+            aria-label="Generation settings"
+          >
+            <div className="space-y-4">
               <div className="mb-3 flex items-center gap-2 border-b border-gray-800 pb-2">
                 <Layers className="h-5 w-5 text-brand-400" />
                 <h2 className="font-medium text-gray-100">Generation settings</h2>
@@ -1374,10 +1487,8 @@ export function GeneratePageContent() {
               </div>
             </div>
           </aside>
-          <details className="operator-panel studio-generation-jobs studio-disclosure">
-            <summary>
-              Generation jobs <span className="ml-auto text-xs font-normal text-gray-400">View jobs</span>
-            </summary>
+          <details className={workspace.jobs}>
+            <summary className="cursor-pointer px-3 py-2 text-sm font-medium">Generation jobs</summary>
             <div>
               <JobsTable job_type="generate" />
             </div>

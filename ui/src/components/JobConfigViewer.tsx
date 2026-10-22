@@ -2,6 +2,7 @@
 
 import YAML from 'yaml';
 import Editor from '@monaco-editor/react';
+import { useTheme } from './ThemeProvider';
 
 import type { Job } from '@/types';
 
@@ -21,7 +22,7 @@ const yamlConfig: YAML.DocumentOptions &
   directives: true,
 };
 
-function toYaml(obj: any): string {
+function toYaml(obj: unknown): string {
   const doc = new YAML.Document(obj, yamlConfig);
   YAML.visit(doc, {
     Scalar(_key, node) {
@@ -34,6 +35,7 @@ function toYaml(obj: any): string {
 }
 
 export default function JobConfigViewer({ job }: Props) {
+  const { theme } = useTheme();
   const editorValue = job?.job_config ? toYaml(JSON.parse(job.job_config)) : '';
   return (
     <>
@@ -42,9 +44,9 @@ export default function JobConfigViewer({ job }: Props) {
         width="100%"
         defaultLanguage="yaml"
         value={editorValue}
-        theme="vs-dark"
+        theme={theme === 'dark' ? 'vs-dark' : 'light'}
         options={{
-          minimap: { enabled: true },
+          minimap: { enabled: false },
           scrollBeyondLastLine: false,
           automaticLayout: true,
           readOnly: true,

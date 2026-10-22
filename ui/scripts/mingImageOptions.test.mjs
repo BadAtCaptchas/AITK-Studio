@@ -183,3 +183,33 @@ test('Ming config accepts both supported arches and rejects invalid layer counts
     assert.ok(configContractErrors(value).length);
   }
 });
+
+test('Omni uses its dedicated adapter, reference controls and exclusive D-OPSD setting', () => {
+  const preset = modelArchs.find(model => model.name === 'minimax_h3_omni');
+  assert.equal(preset.defaults['config.process[0].sample.sample_steps'][0], 8);
+  assert.equal(preset.defaults['config.process[0].model.name_or_path'][0], 'FastVideo/FastH3-Omni-Comfy');
+  assert.match(preset.defaults['config.process[0].model.assistant_lora_path'][0], /fasth3_omni_training_adapter_v1/);
+  assert.deepEqual(preset.allowedNetworkTypes, ['lora']);
+  assert.ok(preset.additionalSections.includes('datasets.multi_control_paths'));
+  assert.ok(preset.additionalSections.includes('sample.multi_ctrl_imgs'));
+  assert.equal(preset.defaults['config.process[0].train.train_text_encoder'][0], false);
+  const job = { config: { process: [{ model: { assistant_lora_path: 'old', model_kwargs: { image_refs_as_video: true } }, train: {} }] } };
+  const changes = new Map();
+  const control = preset.customModelSelectOptions[0];
+  control.onChange('dopsd', job, (value, key) => changes.set(key, value));
+  assert.equal(changes.get('config.process[0].model.assistant_lora_path'), undefined);
+  assert.equal(changes.get('config.process[0].train.do_guidance_loss'), undefined);
+  assert.equal(changes.get('config.process[0].model.model_kwargs').dopsd, true);
+  assert.equal(changes.get('config.process[0].model.model_kwargs').image_refs_as_video, true);
+  job.config.process[0].model.model_kwargs.dopsd = true;
+  changes.clear();
+  control.onChange('ta', job, (value, key) => changes.set(key, value));
+  assert.equal(changes.get('config.process[0].model.model_kwargs').dopsd, undefined);
+  assert.equal(changes.get('config.process[0].model.assistant_lora_path'), preset.defaults['config.process[0].model.assistant_lora_path'][0]);
+  const contract = JSON.parse(fs.readFileSync('src/domain/modelCapabilities.json', 'utf8'));
+  assert.equal(contract.models.find(model => model.arch === preset.name).className, 'MinimaxH3OmniModel');
+  const choice = contract.choices.find(model => model.arch === preset.name);
+  assert.deepEqual(choice.additionalSections, preset.additionalSections);
+  assert.deepEqual(choice.disableSections, preset.disableSections);
+  assert.equal(choice.offloading.layers, false);
+});

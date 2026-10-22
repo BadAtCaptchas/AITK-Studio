@@ -186,8 +186,7 @@
       "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
     },
     "testing.test_jpegxl_dataset": {
-      "group": "manual",
-      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+      "group": "runtime"
     },
     "testing.test_jul10_upstream_ports": {
       "group": "manual",
@@ -262,8 +261,7 @@
       "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
     },
     "testing.test_minimax_h3_quant": {
-      "group": "manual",
-      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+      "group": "runtime"
     },
     "testing.test_minimax_h3_smoke": {
       "group": "manual",
@@ -377,6 +375,9 @@
       "group": "manual",
       "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
     },
+    "testing.test_trainer_reporting": {
+      "group": "runtime"
+    },
     "testing.test_training_monitor_metrics": {
       "group": "manual",
       "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
@@ -384,16 +385,13 @@
     "testing.test_training_numerics": {
       "group": "runtime"
     },
-    "testing.test_trainer_reporting": {
-      "group": "runtime"
-    },
     "testing.test_training_oom_state": {
       "group": "runtime"
     },
-    "testing.test_training_resume": {
+    "testing.test_training_phases": {
       "group": "runtime"
     },
-    "testing.test_training_phases": {
+    "testing.test_training_resume": {
       "group": "runtime"
     },
     "testing.test_ui_progress": {
@@ -446,8 +444,7 @@
       "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
     },
     "testing.test_webp_dataset": {
-      "group": "manual",
-      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+      "group": "runtime"
     },
     "testing.test_z_image_sega": {
       "group": "manual",
@@ -479,6 +476,12 @@
       "group": "lightweight"
     },
     "tests.test_dataset_caption_loading": {
+      "group": "runtime"
+    },
+    "tests.test_fast_image_orientation": {
+      "group": "runtime"
+    },
+    "tests.test_fasth3_omni": {
       "group": "runtime"
     },
     "tests.test_flux3_moss": {

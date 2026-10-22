@@ -106,3 +106,20 @@ Browse the model integrations included in AITK Studio. Available training modes 
 
 - [inclusionAI/Ming-Image-0.1-Design](https://huggingface.co/inclusionAI/Ming-Image-0.1-Design) and [Ming-Image-0.1-Design-Layer](https://huggingface.co/inclusionAI/Ming-Image-0.1-Design-Layer) (native transformer LoRA and RGBA layer decomposition; [setup, document imports and validation status](ming-image.md)).
 - [lodestones/Zeta-Chroma](https://huggingface.co/lodestones/Zeta-Chroma) (Zeta Chroma)
+
+### FastH3 Omni
+
+`minimax_h3_omni` uses the eight-step reference-conditioned video/audio DiT from
+`FastVideo/FastH3-Omni-Comfy` with 32 PDD output heads and the matching
+`ostris/minimax_h3_training_adapter/fastvideo_fasth3_omni_training_adapter_v1.safetensors`.
+Sample with eight steps and guidance 1. Existing H3 encoders and VAEs are reusable.
+Attention defaults to dense: this integration does not implement the release's
+128-token multi-region sparse policy. Optional VSA uses the existing 4×4×4 policy.
+Image/video references and image-as-video cache identity follow Ref2VA. Training
+requires LoRA and a frozen text encoder; D-OPSD and the training adapter are mutually
+exclusive. The original four-step `minimax_h3_vsa` and eight-step
+`minimax_h3_vsa_v2` retain their separate checkpoints and schedules.
+
+Opt-in fast image sizing now honors EXIF orientation for JPEG, PNG (including
+metadata after IDAT), and WebP. Existing still-image size entries are refreshed
+once; content/reference cache identity and JPEG XL decoding remain unchanged.

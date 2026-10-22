@@ -845,7 +845,7 @@ class TrainConfig:
         self.moe_aux_loss_alpha: float = kwargs.get("moe_aux_loss_alpha", 0.01)
 
 
-ModelArch = Literal['sd1', 'sd2', 'sd3', 'sdxl', 'pixart', 'pixart_sigma', 'auraflow', 'flux', 'flex1', 'flex2', 'lumina2', 'vega', 'ssd', 'wan21', 'flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'asymflux2_klein_9b', 'zimage', 'ltx2', 'ltx2.3', 'ideogram4', 'i1', 'prx_pixel', 'boogu_image', 'boogu_image_edit', 'boogu_image_turbo', 'anima', 'mageflow', 'mageflow_edit', 'minimax_h3']
+ModelArch = Literal['sd1', 'sd2', 'sd3', 'sdxl', 'pixart', 'pixart_sigma', 'auraflow', 'flux', 'flex1', 'flex2', 'lumina2', 'vega', 'ssd', 'wan21', 'flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'asymflux2_klein_9b', 'zimage', 'ltx2', 'ltx2.3', 'ideogram4', 'i1', 'prx_pixel', 'boogu_image', 'boogu_image_edit', 'boogu_image_turbo', 'anima', 'mageflow', 'mageflow_edit', 'minimax_h3', 'minimax_h3_ref2va', 'minimax_h3_vsa', 'minimax_h3_vsa_v2', 'minimax_h3_omni']
 LayerOffloadingBackend = Literal['block', 'legacy']
 QuantizationKernel = Literal['auto', 'triton', 'torch']
 
@@ -2140,7 +2140,7 @@ def validate_configs(
             # bypass the embedding
             train_config.bypass_guidance_embedding = True
 
-    minimax_h3_arches = {'minimax_h3', 'minimax_h3_ref2va', 'minimax_h3_vsa', 'minimax_h3_vsa_v2'}
+    minimax_h3_arches = {'minimax_h3', 'minimax_h3_ref2va', 'minimax_h3_vsa', 'minimax_h3_vsa_v2', 'minimax_h3_omni'}
     if model_config.arch in minimax_h3_arches:
         if train_config.train_text_encoder:
             raise ValueError("MiniMax H3 text-encoder training is not supported; keep it frozen.")
@@ -2148,7 +2148,8 @@ def validate_configs(
             raise ValueError("MiniMax H3 training currently requires network.type lora.")
 
         partition = str(model_config.model_kwargs.get('partition', 'fl2va_pruned')).lower()
-        if model_config.arch == 'minimax_h3' and partition in {'ref2va', 'ref2va_pruned'}:
+        if (model_config.arch in {'minimax_h3_ref2va', 'minimax_h3_omni'}
+                or (model_config.arch == 'minimax_h3' and partition in {'ref2va', 'ref2va_pruned'})):
             if any(dataset.do_i2v and (dataset.num_frames > 1 or dataset.auto_frame_count)
                    and not dataset.control_path for dataset in dataset_configs):
                 raise ValueError(
@@ -2158,8 +2159,8 @@ def validate_configs(
                 )
 
         dopsd = bool(model_config.model_kwargs.get('dopsd', False))
-        if dopsd and model_config.arch != 'minimax_h3_ref2va':
-            raise ValueError("D-OPSD is only supported by the minimax_h3_ref2va architecture.")
+        if dopsd and model_config.arch not in {'minimax_h3_ref2va', 'minimax_h3_omni'}:
+            raise ValueError("D-OPSD is only supported by the minimax_h3_ref2va and minimax_h3_omni architectures.")
         if dopsd and (train_config.diff_output_preservation or train_config.blank_prompt_preservation):
             raise ValueError(
                 "MiniMax H3 D-OPSD cannot be combined with differential-output or blank-prompt preservation."

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import archiver from 'archiver';
 import { randomUUID } from 'crypto';
 const origin = 'http://127.0.0.1:15875';
@@ -6,13 +6,38 @@ const png = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZtsAAAAASUVORK5CYII=',
   'base64',
 );
-test.beforeEach(async ({ page }) => {
+async function login(page: Page) {
   await page.goto('/');
   await page.getByLabel('Password', { exact: true }).fill('browser-fixture-local-only');
+  const response = page.waitForResponse(response =>
+    response.url() === `${origin}/api/auth` && response.request().method() === 'POST',
+  );
   await page.getByRole('button', { name: 'Check Password' }).click();
+  expect((await response).status()).toBe(200);
+  await expect(page.getByLabel('Password', { exact: true })).toHaveCount(0);
+}
+
+// Workflow tests use isolated contexts with one shared session, so their speed
+// cannot exhaust the production login limiter's per-minute client budget.
+let sessionCookies: Awaited<ReturnType<BrowserContext['cookies']>> = [];
+test.beforeAll(async ({ browser }) => {
+  const context = await browser.newContext({ baseURL: origin });
+  try {
+    await login(await context.newPage());
+    sessionCookies = await context.cookies();
+  } finally {
+    await context.close();
+  }
+});
+test.beforeEach(async ({ page, context }) => {
+  await context.addCookies(sessionCookies);
+  await page.goto('/');
   await expect(page.getByLabel('Password', { exact: true })).toHaveCount(0);
 });
 test('fresh production stack authenticates, protects commands, and revokes the cookie', async ({ page, context }) => {
+  // Exercise a fresh UI login and revoke only this test's session.
+  await context.clearCookies();
+  await login(page);
   const cookies = await context.cookies();
   const session = cookies.find(cookie => cookie.name === 'aitk_session');
   expect(session?.httpOnly).toBe(true);

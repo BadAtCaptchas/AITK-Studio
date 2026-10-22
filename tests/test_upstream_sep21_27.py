@@ -113,8 +113,12 @@ class SeptemberPortsTests(unittest.TestCase):
         self.assertEqual(BaseModel.encode_prompt(owner, 'caption', control_images='ref', target_size=(64, 96)), (64, 96))
 
     def test_reference_cache_identity_follows_bucket_and_keeps_text_only_reusable(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        reference = Path(directory.name) / 'reference.png'
+        reference.write_bytes(b'reference-content')
         item = SimpleNamespace(caption='test', text_embedding_space_version='qwen_image_2_test',
-            text_embedding_version=1, control_path='reference.png', encode_control_in_text_embeddings=True,
+            text_embedding_version=1, control_path=str(reference), encode_control_in_text_embeddings=True,
             text_embedding_uses_target_size=True, crop_width=64, crop_height=96)
         info = TextEmbeddingFileItemDTOMixin.get_text_embedding_info_dict
         first, plain = info(item), info(item, text_only=True)

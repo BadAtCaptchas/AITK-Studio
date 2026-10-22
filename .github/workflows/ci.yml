@@ -103,6 +103,8 @@ jobs:
         env:
           CUDA_VISIBLE_DEVICES: ''
         run: .venv/bin/python -m unittest -v tests.test_flux3_moss tests.test_moss_text_batching
+      - name: FastH3 Omni and oriented image sizing CPU regressions
+        run: .venv/bin/python -m unittest -v tests.test_fasth3_omni tests.test_fast_image_orientation testing.test_minimax_h3_quant testing.test_webp_dataset testing.test_jpegxl_dataset
       - run: .venv/bin/python -m unittest tests.test_dataset_caption_loading
       # Keep these groups in separate processes: framework stubs and Astroid
       # inference caches must not leak into unrelated runtime suites.

@@ -54,6 +54,12 @@ class FakeSD:
         self.use_raw_control_images = False
         self.vae = SimpleNamespace()
 
+    def get_latent_space_version(self):
+        return self.latent_space_version
+
+    def get_text_embedding_space_version(self):
+        return self.text_embedding_space_version
+
     def get_bucket_divisibility(self):
         return 32
 

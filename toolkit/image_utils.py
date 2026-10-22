@@ -41,6 +41,118 @@ TIFF = types['TIFF'] = 'TIFF'
 WEBP = types['WEBP'] = 'WEBP'
 JPEGXL = types['JPEGXL'] = 'JPEGXL'
 
+# TIFF IFD0 has at most 65535 entries. Bound metadata reads even when an
+# untrusted container declares a multi-gigabyte EXIF chunk.
+_MAX_EXIF_BYTES = 1024 * 1024
+_EXIF_SWAP_ORIENTATIONS = (5, 6, 7, 8)
+_JPEG_SOF_MARKERS = frozenset(range(0xC0, 0xD0)) - {0xC4, 0xC8, 0xCC}
+
+
+def _exif_orientation(exif):
+    """Read only a valid inline TIFF IFD0 orientation; ignore malformed EXIF."""
+    if exif.startswith(b"Exif\x00\x00"):
+        exif = exif[6:]
+    if len(exif) < 8 or exif[:2] not in (b"II", b"MM"):
+        return None
+    bo = "<" if exif[:2] == b"II" else ">"
+    if struct.unpack_from(bo + "H", exif, 2)[0] != 42:
+        return None
+    offset = struct.unpack_from(bo + "I", exif, 4)[0]
+    if offset < 8 or offset + 2 > len(exif):
+        return None
+    count = struct.unpack_from(bo + "H", exif, offset)[0]
+    if offset + 2 + count * 12 + 4 > len(exif):
+        return None
+    for pos in range(offset + 2, offset + 2 + count * 12, 12):
+        tag, typ, count = struct.unpack_from(bo + "HHI", exif, pos)
+        if tag == 0x0112:
+            if typ != 3 or count != 1:
+                return None
+            orientation = struct.unpack_from(bo + "H", exif, pos + 8)[0]
+            return orientation if 1 <= orientation <= 8 else None
+    return None
+
+
+def _container_exif_orientation(input, size, webp=False):
+    """Seek past image data, respecting container/chunk bounds and padding.
+
+    PNG permits eXIf after IDAT too; do not stop at the compressed pixels.
+    """
+    pos = 12 if webp else 8
+    if webp:
+        input.seek(4)
+        raw = input.read(4)
+        if len(raw) != 4:
+            return None
+        size = min(size, 8 + struct.unpack("<I", raw)[0])
+    while pos + 8 <= size:
+        input.seek(pos)
+        header = input.read(8)
+        if len(header) != 8:
+            return None
+        if webp:
+            kind, length = struct.unpack("<4sI", header)
+            end = pos + 8 + length + (length & 1)
+        else:
+            length, kind = struct.unpack(">I4s", header)
+            end = pos + 12 + length
+        if end > size:
+            return None
+        if kind == (b"EXIF" if webp else b"eXIf"):
+            if length > _MAX_EXIF_BYTES:
+                return None
+            return _exif_orientation(input.read(length))
+        if kind == b"IEND":
+            return None
+        pos = end
+    return None
+
+
+def _read_jpeg_dimensions(input, size):
+    input.seek(2)
+    dimensions = None
+    orientation = None
+    while input.tell() < size:
+        byte = input.read(1)
+        if byte != b"\xff":
+            if not byte:
+                break
+            continue
+        marker = input.read(1)
+        while marker == b"\xff":
+            marker = input.read(1)
+        if not marker:
+            break
+        marker = marker[0]
+        if marker in (0xDA, 0xD9):
+            break
+        if marker in range(0xD0, 0xD9) or marker in (0, 1):
+            continue
+        raw = input.read(2)
+        if len(raw) != 2:
+            raise UnknownImageFormat("Truncated JPEG segment")
+        length = struct.unpack(">H", raw)[0] - 2
+        end = input.tell() + length
+        if length < 0 or end > size:
+            raise UnknownImageFormat("Invalid JPEG segment bounds")
+        if marker in _JPEG_SOF_MARKERS:
+            if length < 6:
+                raise UnknownImageFormat("Truncated JPEG SOF")
+            raw = input.read(5)
+            if len(raw) != 5:
+                raise UnknownImageFormat("Truncated JPEG SOF")
+            height, width = struct.unpack(">HH", raw[1:])
+            dimensions = (width, height)
+        elif marker == 0xE1 and orientation is None:
+            raw = input.read(length)
+            if raw.startswith(b"Exif\x00\x00"):
+                orientation = _exif_orientation(raw)
+        input.seek(end)
+    if dimensions is None:
+        raise UnknownImageFormat("No JPEG SOF marker")
+    return dimensions, orientation
+
+
 image_fields = ['path', 'type', 'file_size', 'width', 'height']
 
 
@@ -50,6 +162,10 @@ def _read_webp_dimensions(input, size):
     if len(header) < 12 or header[:4] != b"RIFF" or header[8:12] != b"WEBP":
         raise UnknownImageFormat(FILE_UNKNOWN)
 
+    riff_end = 8 + struct.unpack("<I", header[4:8])[0]
+    if riff_end > size or riff_end < 12:
+        raise UnknownImageFormat("Invalid WebP RIFF bounds")
+    size = riff_end
     offset = 12
     while offset + 8 <= size:
         input.seek(offset)
@@ -60,27 +176,27 @@ def _read_webp_dimensions(input, size):
         fourcc = chunk_header[:4]
         chunk_size = struct.unpack("<I", chunk_header[4:8])[0]
         payload_offset = offset + 8
-        if payload_offset + chunk_size > size:
+        if payload_offset + chunk_size + (chunk_size & 1) > size:
             raise UnknownImageFormat("Truncated WebP chunk")
 
         input.seek(payload_offset)
         if fourcc == b"VP8X":
             payload = input.read(10)
-            if len(payload) < 10:
+            if chunk_size < 10 or len(payload) < 10:
                 raise UnknownImageFormat("Truncated WebP VP8X chunk")
             width = 1 + int.from_bytes(payload[4:7], "little")
             height = 1 + int.from_bytes(payload[7:10], "little")
             return width, height
         if fourcc == b"VP8 ":
             payload = input.read(10)
-            if len(payload) < 10 or payload[3:6] != b"\x9d\x01\x2a":
+            if chunk_size < 10 or len(payload) < 10 or payload[3:6] != b"\x9d\x01\x2a":
                 raise UnknownImageFormat("Invalid WebP VP8 chunk")
             width = struct.unpack("<H", payload[6:8])[0] & 0x3FFF
             height = struct.unpack("<H", payload[8:10])[0] & 0x3FFF
             return width, height
         if fourcc == b"VP8L":
             payload = input.read(5)
-            if len(payload) < 5 or payload[0] != 0x2F:
+            if chunk_size < 5 or len(payload) < 5 or payload[0] != 0x2F:
                 raise UnknownImageFormat("Invalid WebP VP8L chunk")
             b1, b2, b3, b4 = payload[1], payload[2], payload[3], payload[4]
             width = 1 + b1 + ((b2 & 0x3F) << 8)
@@ -188,8 +304,9 @@ def get_image_metadata_from_bytesio(input, size, file_path=None):
     """
     height = -1
     width = -1
+    input.seek(0)
     data = input.read(26)
-    msg = " raised while trying to decode as JPEG."
+    orientation = None
 
     if (size >= 10) and data[:6] in (b'GIF87a', b'GIF89a'):
         # GIFs
@@ -204,40 +321,10 @@ def get_image_metadata_from_bytesio(input, size, file_path=None):
         w, h = struct.unpack(">LL", data[16:24])
         width = int(w)
         height = int(h)
-    elif (size >= 16) and data.startswith(b'\211PNG\r\n\032\n'):
-        # older PNGs
-        imgtype = PNG
-        w, h = struct.unpack(">LL", data[8:16])
-        width = int(w)
-        height = int(h)
+        orientation = _container_exif_orientation(input, size)
     elif (size >= 2) and data.startswith(b'\377\330'):
-        # JPEG
         imgtype = JPEG
-        input.seek(0)
-        input.read(2)
-        b = input.read(1)
-        try:
-            while (b and ord(b) != 0xDA):
-                while (ord(b) != 0xFF):
-                    b = input.read(1)
-                while (ord(b) == 0xFF):
-                    b = input.read(1)
-                if (ord(b) >= 0xC0 and ord(b) <= 0xC3):
-                    input.read(3)
-                    h, w = struct.unpack(">HH", input.read(4))
-                    break
-                else:
-                    input.read(
-                        int(struct.unpack(">H", input.read(2))[0]) - 2)
-                b = input.read(1)
-            width = int(w)
-            height = int(h)
-        except struct.error:
-            raise UnknownImageFormat("StructError" + msg)
-        except ValueError:
-            raise UnknownImageFormat("ValueError" + msg)
-        except Exception as e:
-            raise UnknownImageFormat(e.__class__.__name__ + msg)
+        (width, height), orientation = _read_jpeg_dimensions(input, size)
     elif (size >= 26) and data.startswith(b'BM'):
         # BMP
         imgtype = 'BMP'
@@ -317,6 +404,7 @@ def get_image_metadata_from_bytesio(input, size, file_path=None):
     elif size >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         imgtype = WEBP
         width, height = _read_webp_dimensions(input, size)
+        orientation = _container_exif_orientation(input, size, webp=True)
     elif is_jpegxl_header(data):
         imgtype = JPEGXL
         width, height = _read_pillow_dimensions(input, size, file_path, "JPEG XL")
@@ -341,6 +429,9 @@ def get_image_metadata_from_bytesio(input, size, file_path=None):
         height = ord(h)
     else:
         raise UnknownImageFormat(FILE_UNKNOWN)
+
+    if orientation in _EXIF_SWAP_ORIENTATIONS:
+        width, height = height, width
 
     return Image(path=file_path,
                  type=imgtype,

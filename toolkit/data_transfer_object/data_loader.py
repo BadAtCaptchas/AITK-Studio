@@ -161,6 +161,10 @@ class FileItemDTO(
         if file_signature is None:
             raise Exception("Error: Could not get file signature for {self.path}")
         self.file_signature = file_signature
+        # Invalidate sizes recorded before EXIF-aware fast sizing, without
+        # changing content/reference cache identities or encrypted signatures.
+        if not (self.is_encrypted or self.is_layered or self.is_video or self.is_audio_model):
+            file_signature = f"{file_signature}:oriented-size-v1"
 
         use_db_entry = False
         if file_key in size_database:
@@ -219,7 +223,7 @@ class FileItemDTO(
             size_database[file_key] = (width, height, file_signature)
         else:
             if self.dataset_config.fast_image_size:
-                # original method is significantly faster, but some images are read sideways. Not sure why. Do slow method by default.
+                # Header-only sizing honors JPEG, PNG and WebP EXIF orientation.
                 try:
                     w, h = image_utils.get_image_size(self.path)
                 except image_utils.UnknownImageFormat:

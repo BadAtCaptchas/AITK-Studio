@@ -45,6 +45,12 @@ class FakeSD:
         self.use_raw_control_images = False
         self.vae = SimpleNamespace()
 
+    def get_latent_space_version(self):
+        return self.latent_space_version
+
+    def get_text_embedding_space_version(self):
+        return self.text_embedding_space_version
+
     def get_bucket_divisibility(self):
         return 32
 
@@ -136,8 +142,9 @@ class WebPDatasetTest(unittest.TestCase):
             sd=FakeSD(),
         )
 
-        with self.assertRaisesRegex(Exception, "alpha channel"):
+        with self.assertRaisesRegex(RuntimeError, "No compatible replacement") as caught:
             dataset._get_single_item(0)
+        self.assertIn("alpha channel", str(caught.exception.__context__))
 
     def test_encrypted_webp_opens_from_detached_bytes(self):
         encrypted_root = os.path.join(self.root, "encrypted")

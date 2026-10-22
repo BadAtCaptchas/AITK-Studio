@@ -113,7 +113,10 @@ scheduler_config = {
 # in place when present and downloaded to exactly these locations only when
 # missing.
 COMFY_REPO = "Comfy-Org/MiniMax-H3"
+FASTH3_OMNI_REPO = "FastVideo/FastH3-Omni-Comfy"
+
 COMFY_FILES = {
+    "dit_fasth3_omni": "diffusion_models/fasth3_omniref_8step_pruned_int8_convrot.safetensors",
     "dit_fl2va": "diffusion_models/minimax_h3_fl2va_int8_convrot.safetensors",
     "dit_fl2va_pruned": "diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors",
     "dit_ref2va": "diffusion_models/minimax_h3_ref2va_int8_convrot.safetensors",
@@ -316,14 +319,10 @@ class MinimaxH3Model(BaseModel):
     ) -> MiniMaxH3TransformerParams:
         """Select the released pruned or non-pruned AdaLN topology from the
         checkpoint itself without relying on a filename convention."""
-        params = MiniMaxH3TransformerParams()
         table = state_dict.get("adaln_t_table")
-        if table is not None:
-            if not isinstance(table, torch.Tensor) or table.ndim != 2:
-                raise ValueError("adaln_t_table must be a two-dimensional tensor")
-            params.adaln_t_table_size = table.shape[0]
-            params.time_embed_dim = table.shape[1]
-        return params
+        if table is not None and (not isinstance(table, torch.Tensor) or table.ndim != 2):
+            raise ValueError("adaln_t_table must be a two-dimensional tensor")
+        return MiniMaxH3Transformer.aitk_config_from_state_dict(state_dict)
 
     def load_training_adapter(self, transformer: MiniMaxH3Transformer):
         """Load an assistant LoRA (e.g. a de-distillation adapter) as a LIVE
@@ -1113,6 +1112,7 @@ class MinimaxH3Model(BaseModel):
             text_indices=text_indices.to(device),
             # target-video token grid (patch 1x2x2); consumed only by VSA models
             vsa_video_grid=(t_lat, h_lat // 2, w_lat // 2),
+            pdd_weights=self._pdd_weights(sigma_v),
         )
 
         if num_cond_audio > 0:
@@ -1132,6 +1132,19 @@ class MinimaxH3Model(BaseModel):
                 audio_sigma=sigma_a,
             )
         return -noise_pred
+
+    def _pdd_weights(self, sigma_v, sigma_v_next=None):
+        """Head weights for PDD checkpoints (None otherwise). Training passes a
+        single sigma: the one 1/n interval containing it."""
+        n = unwrap_model(self.model).params.pdd_steps
+        if n <= 1:
+            return None
+        return packing.build_pdd_weights(
+            sigma_v.flatten().tolist(),
+            n,
+            self.video_sigma_shift,
+            sigma_v_next=None if sigma_v_next is None else sigma_v_next.flatten().tolist(),
+        )
 
     def get_loss_target(self, *args, **kwargs):
         noise = kwargs.get("noise")
@@ -1839,3 +1852,59 @@ class MinimaxH3FastV2Model(MinimaxH3FastModel):
 
     def get_base_model_version(self):
         return self.arch
+
+
+class MinimaxH3OmniModel(MinimaxH3Ref2VAModel):
+    """FastH3 Omni: FastVideo's 8-step ref2va distill. References work exactly
+    like ``minimax_h3_ref2va`` (control images/videos as reference blocks).
+
+    The DiT carries 32 PDD output heads per stream (see
+    MiniMaxH3TransformerParams.pdd_steps): sampling blends the heads each
+    step spans, training uses the head of the interval containing its sigma.
+    Video/audio shifts stay 12/3.
+
+    It was distilled with FastVideo's VSA (tile 128, ``p2_multi_region``
+    reference policy), which src/vsa.py does not implement, so attention runs
+    dense like native ComfyUI. ``model_kwargs.vsa`` (default false) opts into
+    the (4,4,4) tile VSA with references as dense prefix, at
+    ``vsa_sparsity`` (default 0.9).
+
+    Sample with 8 steps and guidance_scale 1.
+    """
+
+    arch = "minimax_h3_omni"
+    comfy_repo = FASTH3_OMNI_REPO
+    # trained ladder: [999, 874, ..., 125] -> PDD spans [0, 4, ..., 32]
+    t1000_sample_ladder = True
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        kw = self.model_config.model_kwargs
+        self.vsa_sparsity: Optional[float] = None
+        if bool(kw.get("vsa", False)):
+            self.vsa_sparsity = float(kw.get("vsa_sparsity", 0.9))
+
+    def _dit_component(self) -> str:
+        return "dit_fasth3_omni"
+
+    def _load_transformer(self) -> MiniMaxH3Transformer:
+        transformer = super()._load_transformer()
+        if transformer.params.pdd_steps <= 1:
+            raise ValueError(
+                "minimax_h3_omni needs the FastH3 Omni checkpoint with stacked "
+                "PDD output heads; this file has a single head. Use arch "
+                "minimax_h3_ref2va for the base ref2va checkpoints."
+            )
+        transformer.vsa_sparsity = self.vsa_sparsity
+        return transformer
+
+    def get_base_model_version(self):
+        return "minimax_h3_omni"
+
+    @property
+    def text_embedding_space_version(self):
+        # same Qwen3-VL reference presentation as ref2va: share its embed cache
+        n = self._image_ref_video_frames()
+        if n:
+            return f"minimax_h3_ref2va:img_as_vid{n}"
+        return "minimax_h3_ref2va"

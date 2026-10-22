@@ -14,6 +14,9 @@ import type {
   ProcessConfig,
 } from '../types';
 import { getFluxGuidanceBypassPolicy } from '../utils/fluxGuidancePolicy';
+import { DATASET_MEDIA_EXTENSIONS } from './datasetImages';
+import { isEncryptedDatasetFolder } from './encryptedDatasets';
+import { parseRemoteDatasetRef } from '../utils/remoteDatasetRefs';
 
 export type AdvisorMetricPoint = {
   step: number;
@@ -42,9 +45,11 @@ export type AnalyzeTrainingAdvisorOptions = {
   metrics?: AdvisorMetricsInput | null;
   scanDatasets?: boolean;
   scanFileLimit?: number;
+  datasetChecks?: Record<number, DatasetScanSummary>;
+  skipControlPaths?: boolean;
 };
 
-type DatasetScanSummary = {
+export type DatasetScanSummary = {
   index: number;
   path: string;
   captionExt: string;
@@ -57,29 +62,11 @@ type DatasetScanSummary = {
   truncated: boolean;
   inaccessible: boolean;
   placeholder: boolean;
+  unknownReason?: string;
 };
 
 const DEFAULT_SCAN_FILE_LIMIT = 300;
-const MEDIA_EXTENSIONS = new Set([
-  '.png',
-  '.jpg',
-  '.jpeg',
-  '.webp',
-  '.jxl',
-  '.bmp',
-  '.gif',
-  '.mp4',
-  '.avi',
-  '.mov',
-  '.mkv',
-  '.wmv',
-  '.m4v',
-  '.flv',
-  '.mp3',
-  '.wav',
-  '.flac',
-  '.ogg',
-]);
+const MEDIA_EXTENSIONS = new Set(DATASET_MEDIA_EXTENSIONS);
 const CAPTION_EXTENSIONS = ['.txt', '.caption', '.json', '.sdxl', '.md'];
 const CAPTION_MISMATCH_LOW_COVERAGE_RATIO = 0.5;
 const CAPTION_MISMATCH_DOMINANT_ALT_RATIO = 0.8;
@@ -167,7 +154,7 @@ function walkMediaFiles(root: string, limit: number) {
   return { mediaFiles, truncated };
 }
 
-function scanDataset(dataset: DatasetConfig, index: number, limit: number): DatasetScanSummary {
+export function scanAdvisorDataset(dataset: Pick<DatasetConfig, 'folder_path' | 'caption_ext' | 'encrypted'>, index: number, limit = DEFAULT_SCAN_FILE_LIMIT, unknownReason?: string): DatasetScanSummary {
   const folderPath = dataset.folder_path || '';
   const captionExt = normalizeCaptionExt(dataset.caption_ext);
   const summary: DatasetScanSummary = {
@@ -185,7 +172,16 @@ function scanDataset(dataset: DatasetConfig, index: number, limit: number): Data
     placeholder: isPlaceholderPath(folderPath),
   };
 
+  if (unknownReason || parseRemoteDatasetRef(folderPath)) {
+    summary.unknownReason = unknownReason || 'This dataset belongs to another worker and has not been checked here.';
+    return summary;
+  }
   if (summary.placeholder) return summary;
+
+  if (dataset.encrypted || isEncryptedDatasetFolder(folderPath)) {
+    summary.unknownReason = 'Encrypted dataset contents were not inspected. Unlock or decrypt through the dataset workflow to verify media and captions.';
+    return summary;
+  }
 
   const stat = safeStat(folderPath);
   if (!stat?.isDirectory()) {
@@ -235,6 +231,7 @@ function summarizeDatasets(scans: DatasetScanSummary[]): AdvisorDatasetStats {
       acc.inaccessibleDatasets += scan.inaccessible ? 1 : 0;
       acc.placeholderDatasets += scan.placeholder ? 1 : 0;
       acc.truncated = acc.truncated || scan.truncated;
+      acc.uncheckedDatasets = (acc.uncheckedDatasets || 0) + (scan.unknownReason ? 1 : 0);
       return acc;
     },
     {
@@ -248,6 +245,7 @@ function summarizeDatasets(scans: DatasetScanSummary[]): AdvisorDatasetStats {
       inaccessibleDatasets: 0,
       placeholderDatasets: 0,
       truncated: false,
+      uncheckedDatasets: 0,
     },
   );
 }
@@ -267,9 +265,9 @@ function getDominantAlternateCaptionExtension(scan: DatasetScanSummary) {
   return { extension, count };
 }
 
-function analyzeDatasets(findings: AdvisorFinding[], processConfig: ProcessConfig, scanFileLimit: number) {
+function analyzeDatasets(findings: AdvisorFinding[], processConfig: ProcessConfig, scanFileLimit: number, overrides: Record<number, DatasetScanSummary> = {}) {
   const datasets = processConfig.datasets ?? [];
-  const scans = datasets.map((dataset, index) => scanDataset(dataset, index, scanFileLimit));
+  const scans = datasets.map((dataset, index) => overrides[index] || scanAdvisorDataset(dataset, index, scanFileLimit));
 
   if (datasets.length === 0) {
     addFinding(
@@ -288,6 +286,11 @@ function analyzeDatasets(findings: AdvisorFinding[], processConfig: ProcessConfi
 
   for (const scan of scans) {
     const prefix = `config.process[0].datasets[${scan.index}]`;
+    if (scan.unknownReason) {
+      addFinding(findings, 'info', 'preflight', 'dataset', `dataset.${scan.index}.unchecked`, 'Dataset check incomplete',
+        scan.unknownReason, 'Verify this dataset on its owning worker before starting training.', undefined, [`${prefix}.folder_path`]);
+      continue;
+    }
     if (scan.placeholder) {
       addFinding(
         findings,
@@ -1129,8 +1132,8 @@ export function analyzeTrainingAdvisor(
   }
 
   const scanFileLimit = Math.max(1, Number(options.scanFileLimit ?? DEFAULT_SCAN_FILE_LIMIT));
-  const datasetStats = options.scanDatasets === false ? undefined : analyzeDatasets(findings, processConfig, scanFileLimit);
-  analyzeControlPaths(findings, processConfig);
+  const datasetStats = options.scanDatasets === false ? undefined : analyzeDatasets(findings, processConfig, scanFileLimit, options.datasetChecks);
+  if (!options.skipControlPaths) analyzeControlPaths(findings, processConfig);
   analyzeConfig(findings, processConfig, options.gpuIds);
   analyzePhases(findings, processConfig);
   analyzeLiveMetrics(findings, processConfig, options);

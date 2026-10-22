@@ -4,6 +4,7 @@ import path from 'path';
 import { TOOLKIT_ROOT } from '../paths';
 import type { DatasetSummary } from '../types';
 import { parseRemoteDatasetRef } from '../utils/remoteDatasetRefs';
+import { CHECKPOINT_GENERATIONS, selectCheckpointExport, type CheckpointExportFile } from './checkpointExport';
 
 export const TRAINING_JOB_EXPORT_FORMAT = 'ai-toolkit-training-job-export';
 export const TRAINING_JOB_EXPORT_VERSION = 1;
@@ -352,6 +353,8 @@ export function shouldIncludeTrainingExportPath(_absolutePath: string, relativeP
   if (basename.endsWith('.tmp')) return false;
   if (basename === 'samples.zip') return false;
   if (basename.startsWith('.aitk-export-')) return false;
+  if (normalized.split('/').some(segment => segment.startsWith('.tmp-') || segment.startsWith('.checkpoint-export-')
+    || segment.startsWith('.checkpoint-old-export-') || segment.startsWith('.checkpoint-write-') || segment.startsWith('.checkpoint-names-'))) return false;
   return true;
 }
 
@@ -361,32 +364,25 @@ export function isCheckpointExportPath(relativePath: string) {
 }
 
 export async function findLatestCheckpoint(trainingFolder: string, dbStep: number) {
-  if (!fs.existsSync(trainingFolder)) {
-    return { relativePath: null as string | null, step: null as number | null };
+  const selection = await selectCheckpointExport(trainingFolder, dbStep, 'latest');
+  return { relativePath: selection.relativePath, step: selection.step };
+}
+
+/** Shared by downloads and remote-start bundles so their resume state is identical. */
+export async function collectTrainingExportFiles(
+  trainingFolder: string, dbStep: number, mode: TrainingJobCheckpointExportMode, checkCanceled: () => void = () => {},
+) {
+  const selection = await selectCheckpointExport(trainingFolder, dbStep, mode, checkCanceled);
+  const ordinary = await listFilesRecursive(trainingFolder, (absolute, relative) =>
+    shouldIncludeTrainingExportPath(absolute, relative)
+    && !selection.excludedTopLevelNames.has(relative.replace(/\\/g, '/').split('/')[0]));
+  const files: CheckpointExportFile[] = [...selection.files];
+  for (const relative of ordinary) {
+    checkCanceled();
+    const sourcePath = path.join(trainingFolder, relative);
+    files.push({ sourcePath, relativePath: relative.replace(/\\/g, '/'), size: (await fsp.stat(sourcePath)).size });
   }
-
-  const entries = await fsp.readdir(trainingFolder, { withFileTypes: true });
-  const candidates: { relativePath: string; mtimeMs: number; step: number | null }[] = [];
-
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith('.safetensors')) continue;
-    const absolutePath = path.join(trainingFolder, entry.name);
-    const stat = await fsp.stat(absolutePath);
-    const stepMatch = entry.name.match(/_(\d{1,9})(?:\D|$)/);
-    candidates.push({
-      relativePath: entry.name,
-      mtimeMs: stat.mtimeMs,
-      step: stepMatch ? Number(stepMatch[1]) : dbStep || null,
-    });
-  }
-
-  if (candidates.length === 0) {
-    return { relativePath: null, step: null };
-  }
-
-  candidates.sort((a, b) => a.mtimeMs - b.mtimeMs);
-  const latest = candidates[candidates.length - 1];
-  return { relativePath: latest.relativePath, step: latest.step };
+  return { ...selection, files };
 }
 
 function parseConfigPath(configPath: string) {
@@ -444,6 +440,17 @@ export function rewriteJobConfigForTarget(
 export async function renameImportedTrainingFiles(trainingFolder: string, sourceName: string, targetName: string) {
   if (sourceName === targetName || !fs.existsSync(trainingFolder)) return;
 
+  if (fs.existsSync(path.join(trainingFolder, CHECKPOINT_GENERATIONS))) {
+    // Generation internals are immutable; retain their source prefix for Python resume matching.
+    const historyPath = path.join(trainingFolder, '.checkpoint_names.json');
+    const history: unknown = fs.existsSync(historyPath) ? JSON.parse(await fsp.readFile(historyPath, 'utf8')) : [];
+    const validName = (value: unknown): value is string => typeof value === 'string' && !!value
+      && value !== '.' && value !== '..' && !/[<>:"/\\|?*\x00-\x1f]/.test(value);
+    if (!Array.isArray(history) || history.length > 1000 || !history.every(validName) || !validName(sourceName) || !validName(targetName))
+      throw new Error('Invalid imported checkpoint name history');
+    await fsp.writeFile(historyPath, JSON.stringify([...new Set([...history, sourceName, targetName])]));
+  }
+
   const entries = await fsp.readdir(trainingFolder);
   for (const entry of entries) {
     let replacement: string | null = null;
@@ -494,8 +501,12 @@ export async function refreshImportedLatestCheckpoint(
 
   const relativePath = latestCheckpointArchivePath.replace(/^training[\\/]/, '');
   const finalRelativePath = renameImportedTopLevelName(relativePath, sourceName, targetName);
-  const checkpointPath = path.join(trainingFolder, ...finalRelativePath.split('/'));
+  const checkpointPath = path.resolve(trainingFolder, ...finalRelativePath.split('/'));
+  if (!isPathInside(trainingFolder, checkpointPath)) throw new Error('Imported checkpoint escapes training folder');
+  if (finalRelativePath.split('/')[0] === CHECKPOINT_GENERATIONS) return;
   if (!fs.existsSync(checkpointPath) || !fs.statSync(checkpointPath).isFile()) return;
+  if (!isPathInside(await fsp.realpath(trainingFolder), await fsp.realpath(checkpointPath)))
+    throw new Error('Imported checkpoint escapes training folder');
 
   const tempPath = `${checkpointPath}.aitk-latest.tmp`;
   await fsp.copyFile(checkpointPath, tempPath);

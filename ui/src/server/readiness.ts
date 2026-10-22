@@ -9,6 +9,7 @@ import { getDatasetsRoot, getTrainingFolder } from './settings';
 import { getModelsRoot } from './settings';
 import { db } from './db';
 import { isRecord } from './commandInput';
+import { getExecutionHealth } from './executionHealth';
 const execute = promisify(execFile);
 type Check = { name: string; ok: boolean; detail: string; action?: string | null };
 let cached: { key: string; expires: number; promise: Promise<Check[]> } | undefined;
@@ -89,13 +90,11 @@ export async function getReadiness() {
       });
     }
   }
-  const heartbeat = await db.runtime.get('worker-heartbeat');
-  const value = heartbeat?.value;
-  const fresh = isRecord(value) && typeof value.at === 'number' && Date.now() - value.at < 15_000;
+  const { executionReady: fresh, executionDetail } = await getExecutionHealth();
   checks.push({
     name: 'Queue worker',
     ok: fresh,
-    detail: fresh ? 'Supervisor heartbeat is current.' : 'No recent supervisor heartbeat.',
+    detail: executionDetail,
     action: fresh ? null : 'Start the managed app stack; inspect worker startup logs.',
   });
   return {

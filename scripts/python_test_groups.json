@@ -1,0 +1,567 @@
+{
+  "version": 1,
+  "suites": {
+    "testing.test_adafactor_optimizer": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_adapter_checkpoint_roundtrip": {
+      "group": "runtime"
+    },
+    "testing.test_anima_support": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_asymflux2_klein": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_base_captioner": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_base_lora": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_base_model_device_state_presets": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_block_offload": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_boogu_image_support": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_bucket_batch_indices": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_bucket_dataloader": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_checkpoint_cleanup": {
+      "group": "windows-runtime"
+    },
+    "testing.test_checkpoint_transaction": {
+      "group": "windows-runtime"
+    },
+    "testing.test_civitai": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_comfy_backend": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_config_modules": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_config_security": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_convrot_cuda": {
+      "group": "gpu",
+      "reason": "Requires a CUDA GPU with ConvRot FP4/INT8 kernels and writable compiler caches; run explicitly on supported hardware."
+    },
+    "testing.test_convrot_quant": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_core_runtime_compat": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_cuda_compat": {
+      "group": "lightweight"
+    },
+    "testing.test_cuda_phase_telemetry": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_dataloader_batch_dto": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_dataset_cache_identity": {
+      "group": "runtime"
+    },
+    "testing.test_dfe_hidream_attention_updates": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_dfe_video_contract_static": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_ema_scheduler_lifecycle": {
+      "group": "runtime"
+    },
+    "testing.test_encrypted_dataset": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_extension_optional_imports": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_flux2_klein": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_flux2_mistral_source": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_flux2_sampling_device": {
+      "group": "runtime"
+    },
+    "testing.test_flux2_sega": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_glm_image_support": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_hf_download_progress": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_hf_model_paths": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_hf_offline": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_hidream_moe": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_hidream_o1_conditioning": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_hidream_o1_lora_keys": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_hidream_o1_loss_weight": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_i1_support": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_ideogram4_nvfp4": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_ideogram4_support": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_inference_adapter_parity": {
+      "group": "runtime"
+    },
+    "testing.test_inference_engine": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_job_lifecycle": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_jobs_process_contracts": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_jpegxl_dataset": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_jul10_upstream_ports": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_jul24_aug9_media_contract_static": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_k_diffusion_cleanup": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_latent_cache_reuse": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_layered_dataset": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_layered_output": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_llm_adapter": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_lokr": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_lora_compile_scalars": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_lora_special_filters": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_ltx_dataloader": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_ltx_training_update": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_mageflow_runtime": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_mageflow_support": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_ming_cache_identity": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_ming_components": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_ming_integration": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_ming_trainer": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_minimax_h3_quant": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_minimax_h3_smoke": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_model_lint_contracts": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_model_load_save": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_model_loading": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_model_registry": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_models_path_precedence": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_network_policy": {
+      "group": "lightweight"
+    },
+    "testing.test_ollama_captioner": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_openrouter_captioner": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_optimal_noise_pairing": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_optimizer_checkpoint": {
+      "group": "runtime"
+    },
+    "testing.test_orbit_quant": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_orbit_quant_workspace": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_orbit_staged_load_paths": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_prefetch_hf_models": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_pretrained_lora_security": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_print_logger": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_progress_bar": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_prx_pixel_support": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_quantized_cache": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_sample_generation_offload": {
+      "group": "lightweight"
+    },
+    "testing.test_sample_memory_coordinator": {
+      "group": "runtime"
+    },
+    "testing.test_sample_metadata": {
+      "group": "runtime"
+    },
+    "testing.test_sample_thumbnails": {
+      "group": "runtime"
+    },
+    "testing.test_sd_trainer_functional_paths": {
+      "group": "runtime"
+    },
+    "testing.test_sega_trainer": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_selective_upstream_ports": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_shared_training_batch_math": {
+      "group": "runtime"
+    },
+    "testing.test_telemetry": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_tipsv2": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_training_monitor_metrics": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_training_numerics": {
+      "group": "runtime"
+    },
+    "testing.test_trainer_reporting": {
+      "group": "runtime"
+    },
+    "testing.test_training_oom_state": {
+      "group": "runtime"
+    },
+    "testing.test_training_resume": {
+      "group": "runtime"
+    },
+    "testing.test_training_phases": {
+      "group": "runtime"
+    },
+    "testing.test_ui_progress": {
+      "group": "lightweight"
+    },
+    "testing.test_uintx_quant": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_uintx_registry_static": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_unloader": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_upstream_jul11_14_behavior": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_upstream_jul14_17_behavior": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_upstream_jul18_23_training": {
+      "group": "runtime"
+    },
+    "testing.test_upstream_jul24_dataloader": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_upstream_sep4_10_training": {
+      "group": "runtime"
+    },
+    "testing.test_user_facing_errors": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_vae": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_vae_cache_identity": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_vae_cycle": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_webp_dataset": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_z_image_sega": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_z_image_single_file": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "testing.test_z_image_ui_config": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "tests.test_attempt_process": {
+      "group": "lightweight"
+    },
+    "tests.test_authenlora_watermark": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "tests.test_cli_batch": {
+      "group": "lightweight"
+    },
+    "tests.test_comfy_weight_resolver": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "tests.test_config_contract": {
+      "group": "lightweight"
+    },
+    "tests.test_dataset_caption_loading": {
+      "group": "runtime"
+    },
+    "tests.test_flux3_moss": {
+      "group": "runtime"
+    },
+    "tests.test_iris3b": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "tests.test_kroma": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "tests.test_kromoss": {
+      "group": "runtime"
+    },
+    "tests.test_kromoss_distillation": {
+      "group": "runtime"
+    },
+    "tests.test_kromoss_examples": {
+      "group": "runtime"
+    },
+    "tests.test_legacy_sample_residency": {
+      "group": "gpu",
+      "reason": "Real CUDA phase parking, quantized MOSS adapter residency, and storage restoration require a GPU; no pretrained weights are downloaded."
+    },
+    "tests.test_manager_natten": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "tests.test_manager_python": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "tests.test_model_component_sources": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "tests.test_model_preset_registry": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "tests.test_model_registry": {
+      "group": "lightweight"
+    },
+    "tests.test_moss_text_batching": {
+      "group": "runtime"
+    },
+    "tests.test_pylint_regressions": {
+      "group": "runtime"
+    },
+    "tests.test_python_test_groups": {
+      "group": "lightweight"
+    },
+    "tests.test_qwen_image_2": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "tests.test_qwen_image_2_loading": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "tests.test_qwen_image_2_sources": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "tests.test_runtime_profiles": {
+      "group": "lightweight"
+    },
+    "tests.test_september_upstream": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "tests.test_toolkit_lint_contracts": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    },
+    "tests.test_training_config_controls": {
+      "group": "runtime"
+    },
+    "tests.test_upstream_sep21_27": {
+      "group": "manual",
+      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+    }
+  }
+}

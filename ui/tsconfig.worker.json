@@ -21,6 +21,7 @@
     },
     "include": [
         "src/utils/trainingValidation.ts",
+        "src/utils/trainingDraftStorage.ts",
         "src/utils/homeJourney.ts",
         "cron/**/*.ts",
         "src/paths.ts",
@@ -95,6 +96,8 @@
         "src/server/randomPromptCaptions.ts",
         "src/server/remoteRandomPrompt.ts",
         "src/server/trainingAdvisor.ts",
+        "src/server/trainingPreflight.ts",
+        "src/server/executionHealth.ts",
         "src/server/remoteStartProgress.ts",
         "src/server/remoteDatasetSync.ts",
         "src/server/queueReorder.ts",

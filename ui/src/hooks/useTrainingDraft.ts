@@ -3,20 +3,14 @@ import useCommittedRef from './useCommittedRef';
 import { useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { openConfirm } from '@/components/ConfirmModal';
-import type { JobConfig } from '@/types';
-import type { TrainingMigrationDraft } from '@/domain/trainingModelMigration';
-
-export type TrainingDraft = {
-  config: JobConfig;
-  gpuIDs: string | null;
-  workerID: string;
-  migration?: TrainingMigrationDraft;
-};
+import { saveStoredTrainingDraft, removeStoredTrainingDraft, type StoredTrainingDraft, type TrainingDraft } from '@/utils/trainingDraftStorage';
+export type { TrainingDraft } from '@/utils/trainingDraftStorage';
 type StoredDraft = { draft: TrainingDraft; baseline: string };
 const drafts = new Map<string, StoredDraft>();
 let returnPath = '/jobs/new';
 export const getTrainingReturnPath = () => returnPath;
 export const readTrainingDraft = (key: string) => drafts.get(key)?.draft;
+export const restoreTrainingDraft = (key: string, value: StoredTrainingDraft) => drafts.set(key, value);
 const serialize = (draft: TrainingDraft) => JSON.stringify(draft);
 type NavigateEvent = Event & {
   canIntercept: boolean;
@@ -38,7 +32,12 @@ export function useTrainingDraft(key: string, draft: TrainingDraft) {
   useEffect(() => {
     if (!interacted.current) baseline.current = serialize(draft);
     dirty.current = serialize(draft) !== baseline.current;
-  }, [draft.config, draft.workerID, draft.gpuIDs]);
+    if (!dirty.current) return;
+    const timer = window.setTimeout(() => {
+      if (dirty.current && !allowing.current) saveStoredTrainingDraft(key, { draft: current.current, baseline: baseline.current });
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [draft.config, draft.workerID, draft.gpuIDs, draft.migration, key, current]);
   const leaveSetup = useCallback(
     (onLeave: () => void) => {
       if (allowing.current || !dirty.current) {
@@ -47,11 +46,12 @@ export function useTrainingDraft(key: string, draft: TrainingDraft) {
       }
       if (confirming.current) return;
       drafts.set(key, { draft: current.current, baseline: baseline.current });
+      saveStoredTrainingDraft(key, { draft: current.current, baseline: baseline.current });
       confirming.current = true;
       openConfirm({
         title: 'Leave training setup?',
         message:
-          'Your changes have not been saved as a run. Your draft stays available in this tab until it is reloaded.',
+          'Your changes have not been saved as a run. Your draft stays available in this tab, with reload recovery when browser storage is available.',
         confirmText: 'Leave setup',
         onCancel: () => {
           confirming.current = false;
@@ -81,6 +81,7 @@ export function useTrainingDraft(key: string, draft: TrainingDraft) {
     };
     const beforeUnload = (event: BeforeUnloadEvent) => {
       if (dirty.current && !allowing.current) {
+        saveStoredTrainingDraft(key, { draft: current.current, baseline: baseline.current });
         event.preventDefault();
         event.returnValue = '';
       }
@@ -130,7 +131,10 @@ export function useTrainingDraft(key: string, draft: TrainingDraft) {
     window.addEventListener('popstate', popstate, true);
     window.addEventListener('beforeunload', beforeUnload);
     return () => {
-      if (dirty.current) drafts.set(key, { draft: current.current, baseline: baseline.current });
+      if (dirty.current) {
+        drafts.set(key, { draft: current.current, baseline: baseline.current });
+        saveStoredTrainingDraft(key, { draft: current.current, baseline: baseline.current });
+      }
       document.removeEventListener('click', navigate, true);
       navigation?.removeEventListener('navigate', browserNavigate);
       window.removeEventListener('popstate', popstate, true);
@@ -152,6 +156,7 @@ export function useTrainingDraft(key: string, draft: TrainingDraft) {
       baseline.current = serialize(current.current);
       dirty.current = false;
       drafts.delete(key);
+      removeStoredTrainingDraft(key);
       allowing.current = true;
     },
   };

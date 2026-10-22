@@ -11,6 +11,7 @@ import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 import { isRequestAuthenticated } from '@/utils/authSession';
 import { deleteLayeredImageForPath } from '@/server/layeredImages';
 import { deleteSampleLayers } from '@/server/sampleLayers';
+import { deleteSampleMetadata } from '@/server/sampleMetadata';
 import { isLayeredImageAssetPath } from '@/domain/layeredImages';
 
 async function postCommand(request: Request) {
@@ -74,6 +75,7 @@ async function postCommand(request: Request) {
     // delete it and return success
     if (!await deleteLayeredImageForPath(normalizedImgPath, datasetsPath)) {
       await deleteSampleLayers(normalizedImgPath);
+      await deleteSampleMetadata(normalizedImgPath);
       await fs.promises.unlink(normalizedImgPath);
     }
 

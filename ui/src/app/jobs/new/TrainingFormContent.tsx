@@ -8,7 +8,9 @@ import {
   type TrainingFieldTarget,
 } from '@/utils/trainingValidation';
 import { useEffect, useRef, useState } from 'react';
-import { readTrainingDraft, useTrainingDraft } from '@/hooks/useTrainingDraft';
+import { readTrainingDraft, restoreTrainingDraft, useTrainingDraft } from '@/hooks/useTrainingDraft';
+import { readStoredTrainingDraft, removeStoredTrainingDraft, type StoredTrainingDraft } from '@/utils/trainingDraftStorage';
+import useHydrated from '@/hooks/useHydrated';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { defaultJobConfig, defaultDatasetConfig, migrateJobConfig } from './jobConfig';
 import { jobTypeOptions, modelArchs } from './options';
@@ -58,12 +60,39 @@ type MigrationState =
   | { phase: 'error'; message: string };
 const isDev = process.env.NODE_ENV === 'development';
 export function TrainingFormContent() {
+  const hydrated = useHydrated();
+  const searchParams = useSearchParams();
+  const migrationId = searchParams.get('migrateId');
+  const runId = migrationId ? null : searchParams.get('id');
+  const cloneId = migrationId ? null : searchParams.get('cloneId');
+  const key = migrationId ? `migrate:${migrationId}` : runId ? `edit:${runId}` : cloneId ? `clone:${cloneId}` : 'new';
+  return hydrated ? <TrainingDraftRecovery key={key} draftKey={key} /> : <div className="p-6 text-gray-400">Loading training setup…</div>;
+}
+
+function TrainingDraftRecovery({ draftKey }: { draftKey: string }) {
+  const [recovery, setRecovery] = useState<{ phase: 'ready' } | { phase: 'recover'; stored: StoredTrainingDraft }>(() => {
+    const stored = readTrainingDraft(draftKey) ? undefined : readStoredTrainingDraft(draftKey);
+    return stored ? { phase: 'recover', stored } : { phase: 'ready' };
+  });
+  if (recovery.phase === 'recover') return (
+    <section className="m-6 max-w-xl rounded-lg border border-gray-700 bg-gray-900 p-6" aria-label="Recover training draft">
+      <h1 className="text-lg font-semibold">Recover unsaved training setup?</h1>
+      <p className="mt-2 text-gray-300">A draft for {recovery.stored.draft.config.config.name || 'this run'} is available from this tab. Credentials and unlocked dataset contents are not stored.</p>
+      <div className="mt-5 flex gap-3">
+        <button className="rounded bg-emerald-600 px-4 py-2" onClick={() => { restoreTrainingDraft(draftKey, recovery.stored); setRecovery({ phase: 'ready' }); }}>Restore draft</button>
+        <button className="rounded border border-gray-600 px-4 py-2" onClick={() => { removeStoredTrainingDraft(draftKey); setRecovery({ phase: 'ready' }); }}>Discard draft</button>
+      </div>
+    </section>
+  );
+  return <TrainingFormEditor draftKey={draftKey} />;
+}
+
+function TrainingFormEditor({ draftKey }: { draftKey: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const migrationId = searchParams.get('migrateId');
   const runId = migrationId ? null : searchParams.get('id');
   const cloneId = migrationId ? null : searchParams.get('cloneId');
-  const draftKey = migrationId ? `migrate:${migrationId}` : runId || (cloneId ? `clone:${cloneId}` : 'new');
   const appliedDataset = useRef<string | null>(null);
   const [restoredDraft] = useState(() => readTrainingDraft(draftKey));
   const [migration, setMigration] = useState<MigrationState>(() =>
@@ -834,6 +863,7 @@ export function TrainingFormContent() {
             }
           >
             <SimpleJob
+              workerId={workerID}
               legacyView={legacyView}
               jobConfig={jobConfig}
               setJobConfig={setJobConfig}

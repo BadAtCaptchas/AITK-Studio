@@ -91,6 +91,7 @@ function fixture(t, kind, { onResolve, onOpen } = {}) {
       '@/server/sampleThumbnails': {},
       '@/server/audioArtwork': {},
       '@/server/sampleLayers': {},
+      '@/server/sampleMetadata': {},
     });
     serve = request => GET(request, { params: Promise.resolve({ jobID: 'test-job', samplePath: ['sample.txt'] }) });
   } else {

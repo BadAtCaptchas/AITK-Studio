@@ -9,10 +9,12 @@ import {
   remoteJson,
 } from '@/server/remoteClient';
 import { makeRemoteAssetRef } from '@/server/remoteAssets';
-import { listJobSampleUrls } from '@/server/jobSamples';
+import { listJobSampleUrls, listJobSampleMetadata } from '@/server/jobSamples';
+import { parseSampleMetadataMap } from '@/utils/sampleMetadata';
 
-export async function GET(_request: Request, { params }: { params: Promise<{ jobID: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ jobID: string }> }) {
   const { jobID } = await params;
+  const includeMetadata = new URL(request.url).searchParams.get('metadata') === '1';
 
   const job = await db.jobs.findById(jobID);
 
@@ -26,13 +28,17 @@ export async function GET(_request: Request, { params }: { params: Promise<{ job
     }
     try {
       const worker = await getRemoteWorker(job.worker_id);
-      const data = await remoteJson<{ samples: string[] }>(
+      const data = await remoteJson<unknown>(
         worker,
-        `/api/jobs/${encodeURIComponent(job.remote_job_id)}/samples`,
+        `/api/jobs/${encodeURIComponent(job.remote_job_id)}/samples${includeMetadata ? '?metadata=1' : ''}`,
       );
-      return NextResponse.json({
-        samples: (data.samples || []).map(sample => makeRemoteAssetRef(job.id, 'img', sample)),
-      });
+      if (!data || typeof data !== 'object' || !('samples' in data) || !Array.isArray(data.samples) ||
+          !data.samples.every((sample: unknown): sample is string => typeof sample === 'string')) throw new Error('Invalid remote samples');
+      const samples = data.samples.map(sample => makeRemoteAssetRef(job.id, 'img', sample));
+      if (!includeMetadata) return NextResponse.json({ samples });
+      const metadata = parseSampleMetadataMap('metadata' in data ? data.metadata : undefined, data.samples);
+      return NextResponse.json({ samples,
+        metadata: Object.fromEntries(Object.entries(metadata).map(([sample, value]) => [makeRemoteAssetRef(job.id, 'img', sample), value])) });
     } catch (error) {
       if (isRemoteJobMissingError(error)) {
         await markRemoteJobMissing(job);
@@ -45,5 +51,5 @@ export async function GET(_request: Request, { params }: { params: Promise<{ job
 
   const samples = await listJobSampleUrls(job);
 
-  return NextResponse.json({ samples });
+  return NextResponse.json(includeMetadata ? { samples, metadata: await listJobSampleMetadata(job, samples) } : { samples });
 }

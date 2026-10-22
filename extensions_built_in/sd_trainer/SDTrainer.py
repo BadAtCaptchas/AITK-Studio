@@ -42,6 +42,7 @@ from toolkit.util.losses import wavelet_loss, stepped_loss, band_loss
 from toolkit.watermarking import AuthenLoRAController
 from toolkit.unloader import unload_text_encoder
 from toolkit.memory_management import sync_grad_transfers
+from toolkit.training_numerics import require_finite_tensors, require_finite_gradients
 from PIL import Image
 from torchvision.transforms import functional as TF
 from toolkit.basic import flush
@@ -168,6 +169,25 @@ class SDTrainer(BaseSDTrainProcess):
         metrics = OrderedDict(getattr(self, '_monitor_metrics', OrderedDict()))
         self._monitor_metrics = OrderedDict()
         return metrics
+
+    def _require_finite_loss(self, loss, stage='loss'):
+        require_finite_tensors(
+            [loss], stage, step=getattr(self, 'step_num', None),
+            accelerator=getattr(self, 'accelerator', None),
+        )
+
+    def _checked_backward(self, loss):
+        # Called after all weights/scales in diffusion, LLM, mean-flow and guidance.
+        self._require_finite_loss(loss)
+        self.accelerator.backward(loss)
+
+    def _require_finite_gradients(self):
+        # Offloaded host buffers may still have an asynchronous copy in flight.
+        sync_grad_transfers()
+        require_finite_gradients(
+            self.optimizer, step=getattr(self, 'step_num', None),
+            accelerator=getattr(self, 'accelerator', None),
+        )
 
     def apply_model_loss_weight(
         self,
@@ -1220,15 +1240,12 @@ class SDTrainer(BaseSDTrainProcess):
                 batch=batch,
                 loss_target=loss_target,
             )
-            if not torch.isfinite(prior_loss).all():
-                print_acc("Prior loss is non-finite")
-                prior_loss = None
+            self._require_finite_loss(prior_loss, 'prior loss')
+            if len(noise_pred.shape) == 5:
+                # video B,C,T,H,W
+                prior_loss = prior_loss.mean([1, 2, 3, 4])
             else:
-                if len(noise_pred.shape) == 5:
-                    # video B,C,T,H,W
-                    prior_loss = prior_loss.mean([1, 2, 3, 4])
-                else:
-                    prior_loss = prior_loss.mean([1, 2, 3])
+                prior_loss = prior_loss.mean([1, 2, 3])
                 # loss = loss + prior_loss
                 # loss = loss + prior_loss
             # loss = loss + prior_loss
@@ -1356,7 +1373,7 @@ class SDTrainer(BaseSDTrainProcess):
             sd=self.sd,
             unconditional_embeds=unconditional_embeds,
             train_config=self.train_config,
-            backward_fn=self.accelerator.backward,
+            backward_fn=self._checked_backward,
             **kwargs
         )
 
@@ -1482,7 +1499,7 @@ class SDTrainer(BaseSDTrainProcess):
         if loss.item() > 1e3:
             pass
         with self.cuda_memory_phase("backward"):
-            self.accelerator.backward(loss * kwargs.get('backward_scale', 1.0))
+            self._checked_backward(loss * kwargs.get('backward_scale', 1.0))
         return pure_loss
 
 
@@ -1953,13 +1970,10 @@ class SDTrainer(BaseSDTrainProcess):
             with self.timer('llm_loss'):
                 loss = self.sd.get_llm_loss(batch)
             self.additional_logs.update(getattr(self.sd, "additional_loss_logs", None) or {})
-            if not torch.isfinite(loss):
-                print_acc("loss is nan")
-                loss = torch.zeros_like(loss).requires_grad_(True)
             with self.timer('backward'):
                 loss = loss * loss_multiplier.mean()
                 # backward stays inside the network context (see the note in the diffusion path)
-                self.accelerator.backward(loss)
+                self._checked_backward(loss)
         return loss.detach()
 
     def train_single_accumulation(self, batch: DataLoaderBatchDTO):
@@ -2884,11 +2898,6 @@ class SDTrainer(BaseSDTrainProcess):
                             )
                         loss = loss + preservation_loss
 
-                # A positive or negative infinity is just as unusable as NaN.
-                if not torch.isfinite(loss).all():
-                    print_acc("loss is non-finite")
-                    loss = torch.zeros_like(loss).requires_grad_(True)
-
                 with self.timer('backward'):
                     # todo we have multiplier seperated. works for now as res are not in same batch, but need to change
                     loss = loss * backward_scale
@@ -2902,7 +2911,7 @@ class SDTrainer(BaseSDTrainProcess):
                     # loss.backward()
                     # else:
                     with self.cuda_memory_phase("backward"):
-                        self.accelerator.backward(loss)
+                        self._checked_backward(loss)
                     self._clear_authenlora_batch(network)
                     total_loss = loss.detach() if total_loss is None else total_loss + loss.detach()
 
@@ -2935,6 +2944,8 @@ class SDTrainer(BaseSDTrainProcess):
                             # if this boundary is trainable, we can stop looking
                             break
             loss = self.train_single_accumulation(batch)
+            self._require_finite_loss(loss)
+            self._require_finite_gradients()
             self._accumulated_microbatches += 1
             self.steps_this_boundary += 1
             if total_loss is None:
@@ -2945,6 +2956,7 @@ class SDTrainer(BaseSDTrainProcess):
                 torch.cuda.empty_cache()
 
 
+        self._require_finite_loss(total_loss, 'accumulated loss')
         if not self.is_grad_accumulation_step:
             # CPU gradient clipping and optimizers must not read host gradients
             # while the asynchronous D2H staging stream is still writing them.
@@ -2979,10 +2991,14 @@ class SDTrainer(BaseSDTrainProcess):
                 # group unscales twice under AMP and clips the wrong joint norm.
                 clip_params = list({id(param): param for group in self.optimizer.param_groups for param in group['params']}.values())
                 grad_norm = self.accelerator.clip_grad_norm_(clip_params, self.train_config.max_grad_norm)
+                if grad_norm is not None:
+                    self._require_finite_loss(torch.as_tensor(grad_norm), 'gradient norm')
                 if getattr(self.logging_config, 'monitor_grad_stats', True) and grad_norm is not None:
                     self._record_monitor_metric('train/grad_norm', grad_norm)
                     self._record_monitor_metric('train/grad_norm_mean', grad_norm)
                     self._record_monitor_metric('train/grad_norm_limit', self.train_config.max_grad_norm)
+            # Also covers Adafactor and values changed by merging/unscaling/clipping.
+            self._require_finite_gradients()
             # only step if we are not accumulating
             with self.timer('optimizer_step'):
                 with self.cuda_memory_phase("optimizer"):

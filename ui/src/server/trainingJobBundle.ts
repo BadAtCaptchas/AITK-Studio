@@ -13,13 +13,11 @@ import {
   TRAINING_JOB_EXPORT_VERSION,
   collectDatasetArchiveMappings,
   collectModelReferences,
-  findLatestCheckpoint,
-  isCheckpointExportPath,
+  collectTrainingExportFiles,
   listFilesRecursive,
   makeExportFileName,
   resolveConfigPath,
   shouldIncludeDatasetExportPath,
-  shouldIncludeTrainingExportPath,
   type TrainingJobExportManifest,
 } from './trainingJobTransfer';
 
@@ -57,10 +55,23 @@ async function writeZip(
   await new Promise<void>((resolve, reject) => {
     const output = fs.createWriteStream(outputPath);
     const archive = archiver('zip', { zlib: { level: 9 } });
+    let settled = false;
+    const fail = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      archive.abort();
+      output.once('close', () => reject(error));
+      output.destroy();
+    };
 
-    output.on('close', resolve);
-    output.on('error', reject);
-    archive.on('error', reject);
+    output.on('close', () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    });
+    output.on('error', fail);
+    archive.on('error', fail);
+    archive.on('warning', fail);
     archive.pipe(output);
 
     for (const entry of jsonEntries) {
@@ -75,7 +86,10 @@ async function writeZip(
       archive.file(entry.sourcePath, { name: entry.archivePath });
     }
 
-    archive.finalize().catch(reject);
+    archive.finalize().catch(fail);
+  }).catch(async error => {
+    await fsp.rm(outputPath, { force: true });
+    throw error;
   });
 }
 
@@ -113,7 +127,8 @@ export async function createRemoteTrainingJobBundle(
   const jobFolder = path.join(trainingRoot, jobStorageKey(job));
   const warnings: string[] = [];
 
-  const latestCheckpoint = await findLatestCheckpoint(jobFolder, job.step);
+  const latestCheckpoint = await collectTrainingExportFiles(jobFolder, job.step, checkpointMode);
+  warnings.push(...latestCheckpoint.warnings);
   const latestCheckpointRelativePath = latestCheckpoint.relativePath?.replace(/\\/g, '/') ?? null;
   if (!fs.existsSync(jobFolder)) {
     warnings.push('Training folder does not exist yet; remote bundle will start from an empty training state.');
@@ -150,7 +165,7 @@ export async function createRemoteTrainingJobBundle(
         ? path.posix.join('training', latestCheckpointRelativePath)
         : null,
       latestCheckpointStep: latestCheckpoint.step,
-      optimizerIncluded: fs.existsSync(path.join(jobFolder, 'optimizer.pt')),
+      optimizerIncluded: latestCheckpoint.optimizerIncluded,
       status: job.status,
     },
     datasets: {
@@ -163,11 +178,9 @@ export async function createRemoteTrainingJobBundle(
     warnings,
   };
 
-  const trainingFiles = await collectFilesForArchive(jobFolder, 'training', true, (_absolutePath, relativePath) => {
-    if (!shouldIncludeTrainingExportPath(_absolutePath, relativePath)) return false;
-    if (checkpointMode === 'all' || !isCheckpointExportPath(relativePath)) return true;
-    return relativePath.replace(/\\/g, '/') === latestCheckpointRelativePath;
-  });
+  const trainingFiles = latestCheckpoint.files.map(entry => ({
+    sourcePath: entry.sourcePath, archivePath: toArchivePath('training', entry.relativePath),
+  }));
 
   const datasetFiles = (
     await Promise.all(
@@ -184,6 +197,7 @@ export async function createRemoteTrainingJobBundle(
 
   const jobJson = {
     id: job.id,
+    storage_key: jobStorageKey(job),
     name: job.name,
     gpu_ids: job.gpu_ids,
     created_at: job.created_at,

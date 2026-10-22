@@ -11,6 +11,62 @@ import {
 } from '../dist/src/server/operations.js';
 import { withProcessLease } from '../dist/src/server/processLease.js';
 
+test('free operation slots take shared work and admit new requests while another operation is blocked', async () => {
+  const fixture = installMemoryRuntime();
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  let firstStarted;
+  const started = new Promise(resolve => { firstStarted = resolve; });
+  const executed = [];
+  const input = jobID => ({ kind: 'remote-start', jobID, configHash: 'same', durableKeys: false, needsEphemeralKeys: false });
+  let running;
+  try {
+    const first = await enqueueOperation(input('held'));
+    running = runPendingOperations(async operation => {
+      executed.push(operation.input.jobID);
+      if (operation.id === first.id) { firstStarted(); await held; }
+      return {};
+    });
+    await started;
+    for (const name of ['second', 'third', 'fourth']) await enqueueOperation(input(name));
+    const deadline = Date.now() + 5000;
+    while (executed.length < 4 && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(executed.length, 4, 'new work must use the available slot before the held job completes');
+  } finally { release(); await running; fixture.restore(); }
+});
+
+test('a held operation does not starve retry deadlines or cancellation in the free slot', async () => {
+  const fixture = installMemoryRuntime();
+  let release, signalStarted;
+  const held = new Promise(resolve => { release = resolve; });
+  const started = new Promise(resolve => { signalStarted = resolve; });
+  const input = jobID => ({ kind: 'remote-start', jobID, configHash: 'same', durableKeys: false, needsEphemeralKeys: false });
+  let running, attempts = 0, active = 0, maxActive = 0;
+  try {
+    const first = await enqueueOperation(input('held'));
+    running = runPendingOperations(async operation => {
+      active++; maxActive = Math.max(maxActive, active);
+      try {
+        if (operation.id === first.id) { signalStarted(); await held; }
+        else if (operation.input.jobID === 'retry' && attempts++ === 0) throw new Error('transient');
+        return {};
+      } finally { active--; }
+    });
+    await started;
+    const retry = await enqueueOperation(input('retry'));
+    const canceled = await enqueueOperation(input('cancel'));
+    await updateOperation(canceled.id, { nextAttemptAt: Date.now() + 60_000 });
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    await updateOperation(canceled.id, { cancelRequested: true });
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline && ((await getOperation(retry.id)).state !== 'completed' || (await getOperation(canceled.id)).state !== 'canceled'))
+      await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal((await getOperation(retry.id)).state, 'completed');
+    assert.equal((await getOperation(canceled.id)).state, 'canceled');
+    assert.equal(maxActive, 2);
+  } finally { release(); await running; fixture.restore(); }
+});
+
 test('acceptance attaches retries, repairs pending links, and does not repeat completed work', async () => {
   const fixture = installMemoryRuntime();
   let effects = 0;

@@ -116,7 +116,7 @@ class ComfyClient:
                 image_type=image_ref.get('type', 'output'),
             )
             image = open_static_image_from_bytes(image_bytes, source=image_ref['filename'], mode='RGB')
-            gen_config.save_image(image, count=count, max_count=max_count)
+            gen_config.save_image_atomic(image, count=count, max_count=max_count)
             gen_config.log_image(image, count=count, max_count=max_count)
             saved_paths.append(gen_config.get_image_path(count=count, max_count=max_count))
         return saved_paths

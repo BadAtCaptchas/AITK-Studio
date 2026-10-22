@@ -13,6 +13,7 @@ import classNames from 'classnames';
 import { FaCaretDown, FaCaretUp } from 'react-icons/fa';
 import SampleImageViewer from './SampleImageViewer';
 import { openConfirm } from './ConfirmModal';
+import { groupSampleRows } from '@/utils/sampleMetadata';
 
 interface SampleImagesMenuProps {
   job?: Job | null;
@@ -114,7 +115,7 @@ export default function SampleImages({ job, layout = 'page' }: SampleImagesProps
 }
 
 function JobSampleImages({ job, layout = 'page' }: SampleImagesProps) {
-  const { sampleImages, status, refreshSampleImages } = useSampleImages(job.id, 5000);
+  const { sampleImages, sampleMetadata, status, refreshSampleImages } = useSampleImages(job.id, 5000, true);
   const [selectedSamplePath, setSelectedSamplePath] = useState<string | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
   // multi-select for bulk delete: shift-click ranges from the anchor, ctrl/cmd-click toggles
@@ -138,14 +139,7 @@ function JobSampleImages({ job, layout = 'page' }: SampleImagesProps) {
     return 10;
   }, [job]);
 
-  // Group samples into rows of `numSamples` for the virtualized list — one row per sample iteration.
-  const rows = useMemo(() => {
-    const out: string[][] = [];
-    for (let i = 0; i < sampleImages.length; i += numSamples) {
-      out.push(sampleImages.slice(i, i + numSamples));
-    }
-    return out;
-  }, [sampleImages, numSamples]);
+  const rows = useMemo(() => groupSampleRows(sampleImages, sampleMetadata), [sampleImages, sampleMetadata]);
 
   const selectedPaths = useMemo(() => sampleImages.filter(sample => selectedSet.has(sample)), [sampleImages, selectedSet]);
   const isSelecting = selectionMode || selectedPaths.length > 0;
@@ -154,11 +148,11 @@ function JobSampleImages({ job, layout = 'page' }: SampleImagesProps) {
     anchorIdxRef.current = null;
     baseSetRef.current = new Set();
   }, []);
-  const toggleSample = useCallback((sample: string) => {
+  const setSampleSelected = useCallback((sample: string, checked: boolean) => {
     setSelectedSet(previous => {
       const next = new Set(previous);
-      if (next.has(sample)) next.delete(sample);
-      else next.add(sample);
+      if (checked) next.add(sample);
+      else next.delete(sample);
       return next;
     });
     anchorIdxRef.current = null;
@@ -323,7 +317,7 @@ function JobSampleImages({ job, layout = 'page' }: SampleImagesProps) {
     );
   }, [status, sampleImages.length]);
 
-  const gridCols = Math.max(numSamples, 3);
+  const gridCols = rows.reduce((maximum, row) => Math.max(maximum, row.length), 3);
 
   const sampleConfig = useMemo(() => {
     if (job?.job_config) {
@@ -355,6 +349,7 @@ function JobSampleImages({ job, layout = 'page' }: SampleImagesProps) {
           </span>
           <Button
             onClick={() => {
+              setSelectedSamplePath(null);
               clearSelection();
               setSelectionMode(!isSelecting);
             }}
@@ -434,7 +429,7 @@ function JobSampleImages({ job, layout = 'page' }: SampleImagesProps) {
               return (
                 // pb-1 recreates the vertical gap between rows that the original single CSS grid provided via `gap-1`.
                 <div className="grid gap-1 pb-1" style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))` }}>
-                  {row.map((sample, sampleIndex) => (
+                  {row.map(sample => (
                     <SampleImageCard
                       key={sample}
                       imageUrl={sample}
@@ -443,8 +438,9 @@ function JobSampleImages({ job, layout = 'page' }: SampleImagesProps) {
                       alt="Sample Image"
                       onClick={e => handleCardClick(sample, e)}
                       selected={selectedSet.has(sample) || selectedSamplePath === sample}
-                      onSelect={isSelecting ? () => toggleSample(sample) : undefined}
-                      selectionLabel={`Select sample ${index * numSamples + sampleIndex + 1}`}
+                      selectionChecked={selectedSet.has(sample)}
+                      onSelect={isSelecting ? checked => setSampleSelected(sample, checked) : undefined}
+                      selectionLabel={`Select sample ${sampleImages.indexOf(sample) + 1}`}
                       observerRoot={scrollParent}
                     />
                   ))}
@@ -480,10 +476,11 @@ function JobSampleImages({ job, layout = 'page' }: SampleImagesProps) {
         </div>
       </Dialog>
       <SampleImageViewer
+        sampleMetadata={sampleMetadata}
         imgPath={selectedSamplePath}
         numSamples={numSamples}
         sampleImages={sampleImages}
-        onChange={setPath => setSelectedSamplePath(setPath)}
+        onChange={setSelectedSamplePath}
         sampleConfig={sampleConfig}
         refreshSampleImages={refreshSampleImages}
       />

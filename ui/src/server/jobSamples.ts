@@ -5,6 +5,8 @@ import { db } from './db';
 import { getJobTrainingRoot } from './trainingPaths';
 import { resolveSampleThumbnail } from './sampleThumbnails';
 import type { Job } from '@/types';
+import { readSampleMetadata } from './sampleMetadata';
+import type { SampleMetadata } from '../utils/sampleMetadata';
 
 export const sampleContentTypeMap: Record<string, string> = {
   '.txt': 'text/plain; charset=utf-8',
@@ -142,4 +144,23 @@ export async function resolveJobSampleFile(job: Job, filename: string, options?:
   }
 
   return null;
+}
+
+export async function listJobSampleMetadata(job: Job, samples: string[]): Promise<Record<string, SampleMetadata>> {
+  const roots = await getJobSampleRoots(job);
+  const result: Record<string, SampleMetadata> = {};
+  for (let index = 0; index < samples.length; index += 16) {
+    await Promise.all(samples.slice(index, index + 16).map(async sample => {
+      const filename = decodeURIComponent(sample.split('/').pop() || '');
+      if (!isSafeSampleName(filename)) return;
+      for (const root of roots) {
+        const mediaPath = await realpathIfExists(path.join(root, filename));
+        if (!mediaPath || !isPathInsideRoot(root, mediaPath)) continue;
+        const metadata = await readSampleMetadata(mediaPath);
+        if (metadata) result[sample] = metadata;
+        break;
+      }
+    }));
+  }
+  return result;
 }

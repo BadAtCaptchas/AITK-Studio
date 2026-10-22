@@ -1589,6 +1589,10 @@ class GenerateImageConfig:
             ctrl_idx: int = 0,
             do_cfg_norm: bool = False,
             ctrl_imgs: Optional[List[str]] = None,
+            sample_step: Optional[int] = None,
+            sample_prompt_index: Optional[int] = None,
+            sample_sampler: Optional[str] = None,
+            sample_iteration_id: Optional[str] = None,
     ):
         self.width: int = width
         self.height: int = height
@@ -1613,6 +1617,10 @@ class GenerateImageConfig:
         self.output_tail: str = output_tail
         self.gen_time: int = int(time.time() * 1000)
         self._sample_write_lock = threading.Lock()
+        self.sample_step = sample_step
+        self.sample_prompt_index = sample_prompt_index
+        self.sample_sampler = sample_sampler
+        self.sample_iteration_id = sample_iteration_id
         self.adapter_image_path: str = adapter_image_path
         self.adapter_conditioning_scale: float = adapter_conditioning_scale
         self.extra_kwargs = extra_kwargs if extra_kwargs is not None else {}
@@ -1705,6 +1713,7 @@ class GenerateImageConfig:
 
     def save_image_atomic(self, image, count: int = 0, max_count=0):
         from toolkit.layered_output import LayeredImageOutput, publish_layered_output
+        from toolkit.sample_metadata import publish_sample_files
         layered_output = isinstance(image, LayeredImageOutput)
         # Stage each save in a unique directory on the destination filesystem,
         # then publish the thumbnail and sidecars before the media file. The lock
@@ -1735,35 +1744,20 @@ class GenerateImageConfig:
 
                 tmp_media_path = os.path.join(tmp_folder, media_filename)
                 tmp_thumb_path = os.path.join(tmp_folder, media_filename + '.thumb')
-                layered_thumbnail = None
+                staged_thumbnail = None
                 try:
                     thumb_ext = self._generate_thumbnail(tmp_media_path, tmp_thumb_path)
                     if thumb_ext:
-                        if layered_output:
-                            layered_thumbnail = (tmp_thumb_path, os.path.join('.thumbs', media_filename + thumb_ext))
-                        else:
-                            thumbs_folder = os.path.join(real_folder, '.thumbs')
-                            os.makedirs(thumbs_folder, exist_ok=True)
-                            os.replace(
-                                tmp_thumb_path,
-                                os.path.join(thumbs_folder, media_filename + thumb_ext),
-                            )
+                        staged_thumbnail = (tmp_thumb_path, os.path.join('.thumbs', media_filename + thumb_ext))
                 except Exception as e:
                     print(f"Failed to generate thumbnail for {media_filename}: {e}")
 
                 # Publish the media last so sample watchers never observe a
                 # partially written file or a media file before its thumbnail.
                 if layered_output:
-                    publish_layered_output(tmp_folder, real_folder, media_filename, thumbnail=layered_thumbnail)
+                    publish_layered_output(tmp_folder, real_folder, media_filename, thumbnail=staged_thumbnail)
                     return
-                for filename in generated_files:
-                    if filename == media_filename:
-                        continue
-                    os.replace(
-                        os.path.join(tmp_folder, filename),
-                        os.path.join(real_folder, filename),
-                    )
-                os.replace(tmp_media_path, os.path.join(real_folder, media_filename))
+                publish_sample_files(tmp_folder, real_folder, media_filename, thumbnail=staged_thumbnail)
             finally:
                 self.output_folder = real_folder
                 # Keep the shared parent: another save may be about to create
@@ -1871,15 +1865,18 @@ class GenerateImageConfig:
             if self.output_ext == 'mp3':
                 add_album_artwork(audio_path)
         else:
-            # TODO save image gen header info for A1111 and us, our seeds probably wont match
             save_static_image(image, self.get_image_path(count, max_count))
             # do prompt file
             if self.add_prompt_file:
                 self.save_prompt_file(count, max_count)
 
+        from toolkit.sample_metadata import write_sample_metadata
+        media_path = self.get_prompt_path(count, max_count) if isinstance(image, str) else self.get_image_path(count, max_count)
+        write_sample_metadata(self, media_path, count)
+
     def save_prompt_file(self, count: int = 0, max_count=0):
         # save prompt file
-        with open(self.get_prompt_path(count, max_count), 'w') as f:
+        with open(self.get_prompt_path(count, max_count), 'w', encoding='utf-8') as f:
             prompt = self.prompt
             if self.prompt_2 is not None:
                 prompt += ' --p2 ' + self.prompt_2
@@ -1897,7 +1894,7 @@ class GenerateImageConfig:
 
             # get gen info
             try:
-                f.write(self.prompt)
+                f.write(prompt)
             except Exception as e:
                 print(f"Error writing prompt file. Prompt contains non-unicode characters. {e}")
 

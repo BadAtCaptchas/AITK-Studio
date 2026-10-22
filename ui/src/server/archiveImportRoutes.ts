@@ -46,6 +46,8 @@ export async function readArchiveImport(request: ArchiveRequest, kind: ArchiveIn
         uploadID: upload.uploadID,
         state: upload.state,
         receivedBytes: upload.receivedBytes,
+        chunksTotal: upload.chunksTotal,
+        expectedBytes: upload.expectedBytes,
         chunks: upload.chunks,
         expiresAt: upload.expiresAt,
       });

@@ -143,7 +143,7 @@ function AdvisorResultPanel({
   const infoCount = result?.summary.info ?? 0;
 
   if (variant === 'rail') {
-    const clean = result && !criticalCount && !warningCount;
+    const clean = result && !criticalCount && !warningCount && !stats?.uncheckedDatasets && result.target?.state !== 'unknown';
     const title = initialLoading
       ? 'Running advisor checks'
       : error
@@ -205,8 +205,10 @@ function AdvisorResultPanel({
           <div className="mt-3 border-t border-gray-900 pt-3 text-xs text-gray-500">
             {stats.mediaFiles.toLocaleString()} media scanned
             {stats.missingCaptions > 0 ? `, ${stats.missingCaptions.toLocaleString()} missing captions` : ''}
+            {!!stats.uncheckedDatasets && `, ${stats.uncheckedDatasets} datasets unchecked`}
           </div>
         )}
+        {result?.target && <p role="status" className="mt-2 text-xs text-gray-400">{result.target.detail}</p>}
 
         {hasFindings && (
           <div className="mt-3 space-y-2">
@@ -302,10 +304,12 @@ function AdvisorResultPanel({
           <span>{stats.missingCaptions.toLocaleString()} missing captions</span>
           <span>{stats.emptyCaptions.toLocaleString()} empty captions</span>
           {stats.truncated && <span>scan capped</span>}
+          {!!stats.uncheckedDatasets && <span>{stats.uncheckedDatasets} datasets unchecked</span>}
         </div>
       )}
 
-      {!initialLoading && result && !hasFindings && (
+      {result?.target && <p role="status" className="mt-2 text-xs text-gray-400">{result.target.detail}</p>}
+      {!initialLoading && result && !hasFindings && result.target?.state !== 'unknown' && (
         <div className="mt-3 flex items-center gap-2 rounded-sm border border-emerald-800 bg-emerald-950/25 px-3 py-2 text-sm text-emerald-100">
           <CheckCircle2 className="h-4 w-4" />
           No training quality issues found.
@@ -335,22 +339,25 @@ function AdvisorResultPanel({
 export function TrainingAdvisorPanel({
   jobConfig,
   gpuIDs,
+  workerId = 'local',
   variant = 'card',
 }: {
   jobConfig: JobConfig;
   gpuIDs: string | null;
+  workerId?: string;
   variant?: Variant;
 }) {
-  const [result, setResult] = useState<AdvisorResult | null>(null);
-  const [status, setStatus] = useState<AdvisorStatus>('idle');
-  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useScopedState<AdvisorResult | null>(workerId, null);
+  const [status, setStatus] = useScopedState<AdvisorStatus>(workerId, 'idle');
+  const [error, setError] = useScopedState<string | null>(workerId, null);
   const advisorVisibility = useTrainingAdvisorVisibility();
   const mountedRef = useRef(true);
   const requestIdRef = useRef(0);
-  const lastCompletedPayloadRef = useRef<string | null>(null);
-  const payload = useMemo(() => JSON.stringify({ job_config: jobConfig, gpu_ids: gpuIDs }), [jobConfig, gpuIDs]);
+  const [lastCompletedPayload, setLastCompletedPayload] = useScopedState<string | null>(workerId, null);
+  const payload = useMemo(() => JSON.stringify({ job_config: jobConfig, gpu_ids: gpuIDs, worker_id: workerId }), [jobConfig, gpuIDs, workerId]);
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
     };
@@ -358,7 +365,7 @@ export function TrainingAdvisorPanel({
 
   const runPreflight = useCallback(
     (payloadSnapshot = payload, options: { force?: boolean } = {}) => {
-      if (!options.force && lastCompletedPayloadRef.current === payloadSnapshot) return;
+      if (!options.force && lastCompletedPayload === payloadSnapshot) return;
 
       const requestId = requestIdRef.current + 1;
       requestIdRef.current = requestId;
@@ -369,7 +376,7 @@ export function TrainingAdvisorPanel({
         .post('/api/training-advisor/preflight', JSON.parse(payloadSnapshot))
         .then(res => {
           if (!mountedRef.current || requestId !== requestIdRef.current) return;
-          lastCompletedPayloadRef.current = payloadSnapshot;
+          setLastCompletedPayload(payloadSnapshot);
           setResult(res.data as AdvisorResult);
           setStatus('success');
         })
@@ -380,7 +387,7 @@ export function TrainingAdvisorPanel({
           setStatus('error');
         });
     },
-    [payload, setStatus, setError, setResult],
+    [payload, lastCompletedPayload, setLastCompletedPayload, setStatus, setError, setResult],
   );
 
   useEffect(() => {

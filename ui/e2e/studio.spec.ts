@@ -182,6 +182,24 @@ test('training drafts ignore unchanged interactions and guard edited navigation'
   await expect(name).toHaveValue('unsaved browser draft');
 });
 
+test('training drafts recover after reload with explicit restore and discard', async ({ page }) => {
+  await page.goto('/jobs/new');
+  const name = page.getByLabel('Training name', { exact: true });
+  await expect(name).toBeVisible();
+  await name.fill('recover this training setup');
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('aitk:training-draft:v1:new'))).toContain('recover this training setup');
+  page.once('dialog', dialog => dialog.accept());
+  await page.reload();
+  await expect(page.getByRole('region', { name: 'Recover training draft' })).toBeVisible();
+  await page.getByRole('button', { name: 'Restore draft', exact: true }).click();
+  await expect(name).toHaveValue('recover this training setup');
+  page.once('dialog', dialog => dialog.accept());
+  await page.reload();
+  await page.getByRole('button', { name: 'Discard draft', exact: true }).click();
+  await expect(name).not.toHaveValue('recover this training setup');
+  expect(await page.evaluate(() => sessionStorage.getItem('aitk:training-draft:v1:new'))).toBeNull();
+});
+
 test('streamed media and captions stay paired and collisions leave existing content untouched', async ({ page }) => {
   const datasetName = `paired-${randomUUID()}`;
   const upload = (filename: string, data: Buffer, group: string) =>

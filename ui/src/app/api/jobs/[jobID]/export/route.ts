@@ -12,13 +12,11 @@ import {
   TRAINING_JOB_EXPORT_VERSION,
   collectDatasetArchiveMappings,
   collectModelReferences,
-  findLatestCheckpoint,
-  isCheckpointExportPath,
+  collectTrainingExportFiles,
   listFilesRecursive,
   makeExportFileName,
   resolveConfigPath,
   shouldIncludeDatasetExportPath,
-  shouldIncludeTrainingExportPath,
   type TrainingJobCheckpointExportMode,
   type TrainingJobExportManifest,
 } from '@/server/trainingJobTransfer';
@@ -201,10 +199,11 @@ async function performTrainingJobExport(
     throw error;
   }
 
-  const latestCheckpoint = await findLatestCheckpoint(jobFolder, job.step);
+  const latestCheckpoint = await collectTrainingExportFiles(jobFolder, job.step, checkpointMode, () => throwIfExportCanceled(shouldCancel));
+  warnings.push(...latestCheckpoint.warnings);
   throwIfExportCanceled(shouldCancel);
   const latestCheckpointRelativePath = latestCheckpoint.relativePath?.replace(/\\/g, '/') ?? null;
-  const optimizerIncluded = fs.existsSync(path.join(jobFolder, 'optimizer.pt'));
+  const optimizerIncluded = latestCheckpoint.optimizerIncluded;
   if (job.status === 'running') {
     warnings.push('Job is running; export includes only the latest checkpoint and optimizer already saved to disk.');
     if (latestCheckpoint.step !== null && job.step > latestCheckpoint.step) {
@@ -266,17 +265,9 @@ async function performTrainingJobExport(
     warnings,
   };
 
-  const trainingFiles = await collectArchiveFilesForPath(
-    jobFolder,
-    'training',
-    true,
-    (_absolutePath, relativePath) => {
-      if (!shouldIncludeTrainingExportPath(_absolutePath, relativePath)) return false;
-      if (checkpointMode === 'all' || !isCheckpointExportPath(relativePath)) return true;
-      return relativePath.replace(/\\/g, '/') === latestCheckpointRelativePath;
-    },
-    shouldCancel,
-  );
+  const trainingFiles = latestCheckpoint.files.map(entry => ({
+    sourcePath: entry.sourcePath, archivePath: toArchivePath('training', entry.relativePath), size: entry.size,
+  }));
   throwIfExportCanceled(shouldCancel);
   const datasetFiles = (
     await Promise.all(
@@ -295,6 +286,7 @@ async function performTrainingJobExport(
 
   const jobJson = {
     id: job.id,
+    storage_key: jobStorageKey(job),
     name: job.name,
     gpu_ids: job.gpu_ids,
     created_at: job.created_at,
@@ -355,7 +347,11 @@ async function performTrainingJobExport(
         callback();
       };
       const resolveOnce = () => settle(resolve);
-      const rejectOnce = (error: unknown) => settle(() => reject(error));
+      const rejectOnce = (error: unknown) => settle(() => {
+        archive.abort();
+        output.once('close', () => reject(error));
+        output.destroy();
+      });
       const cancelArchive = () => {
         if (settled) return;
         const error = new TrainingJobExportCanceledError();
@@ -374,6 +370,7 @@ async function performTrainingJobExport(
       output.on('close', resolveOnce);
       output.on('error', rejectOnce);
       archive.on('error', rejectOnce);
+      archive.on('warning', rejectOnce);
       archive.on('progress', progress => {
         if (shouldCancel()) {
           cancelArchive();
@@ -446,11 +443,9 @@ async function performTrainingJobExport(
       warnings,
     };
   } catch (error) {
-    if (isTrainingJobExportCanceledError(error)) {
-      await unlinkIfExists(tempPath);
-      if (outputRenamed) {
-        await unlinkIfExists(outputPath);
-      }
+    await unlinkIfExists(tempPath);
+    if (outputRenamed) {
+      await unlinkIfExists(outputPath);
     }
     throw error;
   }

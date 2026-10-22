@@ -2,6 +2,7 @@ import { jobStorageKey } from '../../../../../utils/jobIdentity';
 import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import { analyzeTrainingAdvisor } from '@/server/trainingAdvisor';
+import { isAdvisorJobConfig, runTrainingPreflight } from '@/server/trainingPreflight';
 import { db } from '@/server/db';
 import { getJobTrainingRoot } from '@/server/trainingPaths';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
@@ -28,7 +29,8 @@ function isValidJobId(jobID: string) {
 
 function parseJobConfig(raw: string): JobConfig | null {
   try {
-    return JSON.parse(raw) as JobConfig;
+    const value: unknown = JSON.parse(raw);
+    return isAdvisorJobConfig(value) ? value : null;
   } catch {
     return null;
   }
@@ -52,7 +54,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     if (!job.remote_job_id) {
       const jobConfig = parseJobConfig(job.job_config);
       if (!jobConfig) return NextResponse.json({ error: 'Invalid job config' }, { status: 400 });
-      return NextResponse.json(analyzeTrainingAdvisor(jobConfig, { gpuIds: job.gpu_ids, job }));
+      return NextResponse.json(await runTrainingPreflight(jobConfig, job.gpu_ids, job.worker_id));
     }
     try {
       const worker = await getRemoteWorker(job.worker_id);

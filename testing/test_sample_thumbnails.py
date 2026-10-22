@@ -1,4 +1,5 @@
 import ast
+import importlib
 import os
 import shutil
 import sys
@@ -129,8 +130,12 @@ class SampleAtomicWriteTests(unittest.TestCase):
             self.assertEqual(list(Path(root, ".tmp").iterdir()), [])
 
     def test_concurrent_cleanup_preserves_pending_save_staging_parent(self):
+        # Lazy dependencies may themselves create temporary directories during
+        # import. Complete real initialization before pausing sample staging.
+        importlib.import_module('toolkit.layered_output')
+        importlib.import_module('toolkit.sample_metadata')
         with tempfile.TemporaryDirectory() as root:
-            before_mkdtemp = threading.Event()
+            ready_or_failed = threading.Event()
             resume_save = threading.Event()
             errors = []
             original_mkdtemp = tempfile.mkdtemp
@@ -142,9 +147,9 @@ class SampleAtomicWriteTests(unittest.TestCase):
             second = AtomicSaveHarness(root, save_image)
 
             def pause_before_mkdtemp(*args, **kwargs):
-                if threading.current_thread() is worker:
+                if threading.current_thread() is worker and kwargs.get('dir') == os.path.join(root, '.tmp'):
                     self.assertTrue(Path(kwargs["dir"]).is_dir())
-                    before_mkdtemp.set()
+                    ready_or_failed.set()
                     self.assertTrue(resume_save.wait(10), "Pending save was not resumed")
                 return original_mkdtemp(*args, **kwargs)
 
@@ -153,12 +158,15 @@ class SampleAtomicWriteTests(unittest.TestCase):
                     first.save_image_atomic(object(), 1)
                 except Exception as error:
                     errors.append(error)
+                    ready_or_failed.set()
 
             worker = threading.Thread(target=save_first)
             with patch.object(tempfile, "mkdtemp", side_effect=pause_before_mkdtemp):
                 worker.start()
                 try:
-                    self.assertTrue(before_mkdtemp.wait(5), "Pending save did not reach mkdtemp")
+                    self.assertTrue(ready_or_failed.wait(5), "Pending save did not reach mkdtemp")
+                    if errors:
+                        raise errors[0]
                     second.save_image_atomic(object(), 2)
                 finally:
                     resume_save.set()

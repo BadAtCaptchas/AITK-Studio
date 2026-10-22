@@ -1,19 +1,14 @@
 from collections import OrderedDict
 import os
-import asyncio
-import concurrent.futures
 from extensions_built_in.sd_trainer.SDTrainer import SDTrainer
-from typing import Literal, Optional
 import threading
 import time
 import signal
 from toolkit.exceptions import JobStopRequested
 from toolkit.ui_database import UIJobStore
+from toolkit.ui_progress import UIReportingMixin
 
-AITK_Status = Literal["running", "stopped", "error", "completed"]
-
-
-class UITrainer(SDTrainer):
+class UITrainer(UIReportingMixin, SDTrainer):
     def __init__(self, process_id: int, job, config: OrderedDict, **kwargs):
         super(UITrainer, self).__init__(process_id, job, config, **kwargs)
         self.sqlite_db_path = self.config.get("sqlite_db_path", "./aitk_db.db")
@@ -27,12 +22,8 @@ class UITrainer(SDTrainer):
         if self.job_id is None:
             raise Exception("AITK_JOB_ID not set")
         self.is_stopping = False
-        # Create a thread pool for database operations
-        self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        # Track all async tasks
-        self._async_tasks = []
-        # Initialize the status
-        self._run_async_operation(self._update_status("running", "Starting"))
+        self._init_ui_reporting()
+        self.update_status("running", "Starting")
         self._stop_watcher_started = False
         # self.start_stop_watcher(interval_sec=2.0)
 
@@ -55,19 +46,8 @@ class UITrainer(SDTrainer):
                 if self.should_stop():
                     # Mark and update status (non-blocking; uses existing infra)
                     self.is_stopping = True
-                    self._run_async_operation(
-                        self._update_status("stopped", "Job stopped (remote)")
-                    )
-                    # Best-effort flush pending async ops
-                    try:
-                        asyncio.run(self.wait_for_all_async())
-                    except RuntimeError:
-                        pass
-                    # Try to stop DB thread pool quickly
-                    try:
-                        self.thread_pool.shutdown(wait=False, cancel_futures=True)
-                    except TypeError:
-                        self.thread_pool.shutdown(wait=False)
+                    self.update_status("stopped", "Job stopped (remote)")
+                    self._close_ui_reporting()
                     print("")
                     print("****************************************************")
                     print("    Stop signal received; terminating process.      ")
@@ -77,28 +57,6 @@ class UITrainer(SDTrainer):
             except Exception:
                 time.sleep(interval_sec)
 
-    def _run_async_operation(self, coro):
-        """Helper method to run an async coroutine and track the task."""
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            # No event loop exists, create a new one
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-        # Create a task and track it
-        if loop.is_running():
-            task = asyncio.run_coroutine_threadsafe(coro, loop)
-            self._async_tasks.append(asyncio.wrap_future(task))
-        else:
-            task = loop.create_task(coro)
-            self._async_tasks.append(task)
-            loop.run_until_complete(task)
-
-    async def _execute_db_operation(self, operation_func):
-        """Execute a database operation in a separate thread to avoid blocking."""
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(self.thread_pool, operation_func)
 
     def should_stop(self):
         return self.ui_job_store.should_stop()
@@ -108,69 +66,22 @@ class UITrainer(SDTrainer):
 
     def maybe_stop(self):
         if self.should_stop():
-            self._run_async_operation(
-                self._update_status("stopped", "Job stopped"))
+            self.update_status("stopped", "Job stopped")
             self.is_stopping = True
             raise JobStopRequested("Job stopped")
         if self.should_return_to_queue():
-            self._run_async_operation(
-                self._update_status("queued", "Job queued"))
+            self.update_status("queued", "Job queued")
             self.is_stopping = True
             raise JobStopRequested("Job returning to queue", return_to_queue=True)
 
-    async def _update_key(self, key, value):
-        if not self.accelerator.is_main_process:
-            return
-
-        def _do_update():
-            self.ui_job_store.update_key(key, value)
-
-        await self._execute_db_operation(_do_update)
-
-    def update_step(self):
-        """Non-blocking update of the step count."""
-        if self.accelerator.is_main_process:
-            self._run_async_operation(self._update_key("step", self.step_num))
-
-    def update_db_key(self, key, value):
-        """Non-blocking update a key in the database."""
-        if self.accelerator.is_main_process:
-            self._run_async_operation(self._update_key(key, value))
-
-    async def _update_status(self, status: AITK_Status, info: Optional[str] = None):
-        if not self.accelerator.is_main_process:
-            return
-
-        def _do_update():
-            self.ui_job_store.update_status(status, info)
-
-        await self._execute_db_operation(_do_update)
-
-    def update_status(self, status: AITK_Status, info: Optional[str] = None):
-        """Non-blocking update of status."""
-        if self.accelerator.is_main_process:
-            self._run_async_operation(self._update_status(status, info))
-
-    async def wait_for_all_async(self):
-        """Wait for all tracked async operations to complete."""
-        if not self._async_tasks:
-            return
-
-        try:
-            await asyncio.gather(*self._async_tasks)
-        except Exception as e:
-            pass
-        finally:
-            # Clear the task list after completion
-            self._async_tasks.clear()
 
     def on_error(self, e: Exception):
         super(UITrainer, self).on_error(e)
+        self.update_db_key("step", self.last_save_step)
         if self.accelerator.is_main_process and not self.is_stopping:
             self.update_status("error", str(e))
-        self.update_db_key("step", self.last_save_step)
-        asyncio.run(self.wait_for_all_async())
-        self.thread_pool.shutdown(wait=True)
+        self.flush_ui_reporting()
+        self._close_ui_reporting()
         self.ui_job_store.close()
 
     def handle_timing_print_hook(self, timing_dict):
@@ -190,8 +101,8 @@ class UITrainer(SDTrainer):
         super(UITrainer, self).done_hook()
         self.update_status("completed", "Training completed")
         # Wait for all async operations to finish before shutting down
-        asyncio.run(self.wait_for_all_async())
-        self.thread_pool.shutdown(wait=True)
+        self.flush_ui_reporting()
+        self._close_ui_reporting()
         self.ui_job_store.close()
 
     def end_step_hook(self):
@@ -242,5 +153,7 @@ class UITrainer(SDTrainer):
         self.maybe_stop()
         self.update_status("running", "Saving model")
         super().save(step)
+        self.update_db_key("step", self.last_save_step)
+        self.flush_ui_reporting()
         self.maybe_stop()
         self.update_status("running", "Training")

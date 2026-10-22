@@ -51,17 +51,27 @@ test('delete selected and all local samples with confirmation and associated fil
     await writeFile(path.join(folder, name), png);
     await writeFile(path.join(folder, name.replace('.png', '.txt')), 'fixture caption');
     await writeFile(path.join(folder, '.thumbs', `${name}.png`), png);
+    await writeFile(path.join(folder, name + '.metadata.json'), JSON.stringify({ version: 1,
+      prompt: 'historical prompt independent of the current job', negative_prompt: '', seed: 97,
+      width: 640, height: 512, guidance_scale: 4, guidance_rescale: 0, sample_steps: 20, network_multiplier: 1,
+      num_frames: 1, fps: 15, step: 10, prompt_index: names.indexOf(name), sampler: 'flowmatch', iteration_id: 'fixture-iteration' }));
   }
   await writeFile(path.join(trainingRoot, job.storageKey, 'keep.safetensors'), 'checkpoint fixture');
   await page.goto(`/jobs/${job.id}`);
   await page.getByRole('button', { name: 'Samples', exact: true }).click();
   const toolbar = page.getByRole('toolbar', { name: 'Sample actions' });
   await expect(toolbar.getByRole('status')).toHaveText('3 samples');
+  await page.getByAltText('Sample Image', { exact: true }).first().click();
+  await expect(page.getByText('Generation settings recorded at save', { exact: true })).toBeVisible();
+  await expect(page.getByText('historical prompt independent of the current job', { exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByText('Generation settings recorded at save', { exact: true })).toBeHidden();
   await toolbar.getByRole('button', { name: 'Select samples', exact: true }).click();
   await expect(toolbar.getByRole('button', { name: 'Delete selected', exact: true })).toBeDisabled();
   await toolbar.getByRole('button', { name: 'Select all', exact: true }).click();
   await expect(toolbar.getByRole('status')).toHaveText('3 of 3 selected');
   await toolbar.getByRole('button', { name: 'Clear selection', exact: true }).click();
+  await expect(page.getByRole('checkbox', { name: 'Select sample 1', exact: true })).not.toBeChecked();
   await page.getByRole('checkbox', { name: 'Select sample 1', exact: true }).check();
   await page.getByRole('checkbox', { name: 'Select sample 3', exact: true }).check();
   await expect(toolbar.getByRole('status')).toHaveText('2 of 3 selected');
@@ -73,7 +83,7 @@ test('delete selected and all local samples with confirmation and associated fil
   await selectedDialog.getByRole('button', { name: 'Delete selected', exact: true }).click();
   await expect(selectedDialog).toBeHidden();
   await expect(toolbar.getByRole('status')).toHaveText('1 sample');
-  expect((await readdir(folder)).sort()).toEqual(['.thumbs', names[1], names[1].replace('.png', '.txt')].sort());
+  expect((await readdir(folder)).sort()).toEqual(['.thumbs', names[1], names[1].replace('.png', '.txt'), names[1] + '.metadata.json'].sort());
   expect(await readdir(path.join(folder, '.thumbs'))).toEqual([`${names[1]}.png`]);
   await toolbar.getByRole('button', { name: 'Delete all', exact: true }).click();
   const allDialog = page.getByRole('dialog', { name: 'Delete All Samples', exact: true });
@@ -103,7 +113,7 @@ test('remote sample references use the mirror job and failed deletions remain se
   let remaining = [...names];
   let fail = true;
   const deleted: string[] = [];
-  await page.route(`**/api/jobs/${job.id}/samples`, route => route.fulfill({
+  await page.route(`**/api/jobs/${job.id}/samples?metadata=1`, route => route.fulfill({
     json: { samples: remaining.map(name => `remote://${job.id}/img/${encodeURIComponent(`/api/jobs/remote-job/samples/${name}`)}/${name}`) },
   }));
   await page.route('**/api/remote-assets?*', route => route.fulfill({ status: 404 }));

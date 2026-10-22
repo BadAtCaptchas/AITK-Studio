@@ -72,7 +72,8 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python -m pip install psutil pyyaml
-      - run: python -m unittest tests.test_cli_batch tests.test_attempt_process tests.test_model_registry tests.test_config_contract tests.test_runtime_profiles testing.test_cuda_compat
+      - run: python scripts/run_python_tests.py --check
+      - run: python scripts/run_python_tests.py --group lightweight
       - run: python -m compileall -q run.py toolkit extensions extensions_built_in scripts tests testing
 
   python-runtime:
@@ -84,7 +85,8 @@ jobs:
       HF_HUB_OFFLINE: '1'
       TRANSFORMERS_OFFLINE: '1'
       NO_ALBUMENTATIONS_UPDATE: '1'
-      CUDA_VISIBLE_DEVICES: ''
+      CUDA_VISIBLE_DEVICES: '-1'
+      PYTORCH_NVML_BASED_CUDA_CHECK: '0'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -98,30 +100,38 @@ jobs:
       - run: .venv/bin/python -c "import torch; assert torch.version.cuda == '13.0', torch.version.cuda"
       - run: .venv/bin/python -c "import run, toolkit.job, toolkit.attempt_process, extensions_built_in.diffusion_models"
       - run: .venv/bin/python scripts/check_model_imports.py
-      - name: FLUX.3 and MOSS CPU regressions
-        # Tiny model forward/backward and checkpoint tests; no weights or GPU required.
-        env:
-          CUDA_VISIBLE_DEVICES: ''
-        run: .venv/bin/python -m unittest -v tests.test_flux3_moss tests.test_moss_text_batching
-      - run: .venv/bin/python -m unittest tests.test_dataset_caption_loading
-      # Keep these groups in separate processes: framework stubs and Astroid
-      # inference caches must not leak into unrelated runtime suites.
-      - name: Training configuration and phases
-        run: .venv/bin/python -m unittest -v tests.test_kromoss_examples tests.test_training_config_controls testing.test_training_phases
-      - name: Kromoss runtime and distillation
-        run: .venv/bin/python -m unittest -v tests.test_kromoss tests.test_kromoss_distillation
-      - name: Adapter and optimizer checkpoint round trips
-        run: .venv/bin/python -m unittest -v testing.test_adapter_checkpoint_roundtrip testing.test_optimizer_checkpoint testing.test_inference_adapter_parity
-      - name: Dataset cache and training lifecycle
-        run: .venv/bin/python -m unittest -v testing.test_dataset_cache_identity testing.test_ema_scheduler_lifecycle testing.test_shared_training_batch_math testing.test_sd_trainer_functional_paths
-      - name: Pylint native inference and quantization regressions
-        run: .venv/bin/python -m unittest -v tests.test_pylint_regressions
+      # Each suite runs in a fresh process: framework stubs and Astroid caches
+      # cannot leak into unrelated tests. CPU-only; no pretrained downloads.
+      - name: Runtime and checkpoint safety regressions
+        run: .venv/bin/python scripts/run_python_tests.py --group runtime --group windows-runtime
+      - name: Python correctness lint
+        run: .venv/bin/python scripts/lint.py --errors-only
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: runtime-resolution
           path: runtime-resolution.json
           if-no-files-found: ignore
+
+  python-windows-runtime:
+    name: Windows checkpoint publication and file locks
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      PIP_NO_CACHE_DIR: '1'
+      HF_HUB_OFFLINE: '1'
+      TRANSFORMERS_OFFLINE: '1'
+      NO_ALBUMENTATIONS_UPDATE: '1'
+      CUDA_VISIBLE_DEVICES: '-1'
+      PYTORCH_NVML_BASED_CUDA_CHECK: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m venv .venv
+      - run: .venv/Scripts/python.exe scripts/install_runtime.py
+      - run: .venv/Scripts/python.exe scripts/run_python_tests.py --group windows-runtime
 
   mongodb:
     # MongoDB 8.0 refuses Linux 6.19+ (SERVER-121912). The 22.04 image

@@ -140,6 +140,20 @@ function findingIds(result) {
   return new Set(result.findings.map(finding => finding.id));
 }
 
+test('preflight uses dataset browser formats and treats encrypted and remote contents as unchecked', () => {
+  const dataset = makeDataset({ 'one.webm': 'video', 'one.txt': 'caption', 'two.m4a': 'audio', 'two.txt': 'caption', 'three.aac': 'audio', 'three.txt': 'caption' });
+  try {
+    assert.equal(analyzeTrainingAdvisor(baseConfig(dataset)).datasetStats.mediaFiles, 3);
+    fs.writeFileSync(path.join(dataset, '.aitk_encrypted_dataset.json'), '{}');
+    const locked = analyzeTrainingAdvisor(baseConfig(dataset));
+    assert.equal(locked.datasetStats.uncheckedDatasets, 1);
+    assert.equal(findingIds(locked).has('dataset.0.empty'), false);
+    const remote = analyzeTrainingAdvisor(baseConfig('aitk-dataset://remote/worker/data'));
+    assert.equal(remote.datasetStats.uncheckedDatasets, 1);
+    assert.equal(findingIds(remote).has('dataset.0.inaccessible'), false);
+  } finally { fs.rmSync(dataset, { recursive: true, force: true }); }
+});
+
 test('preflight reports text encoder training with cached embeddings', () => {
   const dataset = makeDataset({
     'one.jpg': 'image',

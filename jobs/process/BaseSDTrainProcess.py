@@ -9,6 +9,7 @@ from collections import OrderedDict
 import os
 import re
 import traceback
+import uuid
 from typing import Union, List, Optional
 
 import numpy as np
@@ -39,6 +40,11 @@ from toolkit.checkpoint_cleanup import (
     remove_old_save,
     save_checkpoint_names,
 )
+from toolkit.checkpoint_transaction import (
+    GENERATIONS, InvalidCheckpointError, begin_checkpoint, commit_checkpoint,
+    committed_generations, generation_for_path, publish_exports, prune_generations,
+    validate_legacy_checkpoint, is_managed_export,
+)
 from toolkit.clip_vision_adapter import ClipVisionAdapter
 from toolkit.custom_adapter import CustomAdapter
 from toolkit.data_loader import get_dataloader_from_datasets, trigger_dataloader_setup_epoch
@@ -58,7 +64,6 @@ from toolkit.optimizer import get_optimizer
 from toolkit.optimizer_checkpoint import (
     OptimizerCheckpointValidationError,
     atomic_save_optimizer_checkpoint,
-    invalidate_optimizer_checkpoint,
     load_optimizer_checkpoint_for_resume,
 )
 from toolkit.paths import CONFIG_ROOT
@@ -86,6 +91,10 @@ from toolkit.config_modules import SaveConfig, LoggingConfig, SampleConfig, Netw
     DecoratorConfig, WatermarkConfig, apply_orbit4_low_vram_training_defaults
 from toolkit.logging_aitk import create_logger
 from toolkit.training_phases import TrainingPhaseManager
+from toolkit.training_resume import (
+    ResumableDataIterator, capture_training_resume, loader_resume_reason,
+    preserve_rng, restore_training_resume, training_signature,
+)
 from diffusers import FluxTransformer2DModel
 from toolkit.accelerator import get_accelerator, unwrap_model
 from toolkit.print import print_acc
@@ -480,6 +489,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 setattr(obj, attr, value)
 
     @record_cuda_phase("sampling")
+    @preserve_rng
     def sample(self, step=None, is_first=False):
         if not self.accelerator.is_main_process:
             return
@@ -488,6 +498,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
         gen_img_config_list = []
 
         sample_config = self.first_sample_config if is_first else self.sample_config
+        sample_iteration_id = uuid.uuid4().hex
         start_seed = sample_config.seed
         current_seed = start_seed
 
@@ -538,6 +549,10 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 current_seed = sample_item.seed
 
             gen_img_config_list.append(GenerateImageConfig(
+                sample_step=step,
+                sample_prompt_index=i,
+                sample_sampler=sample_config.sampler,
+                sample_iteration_id=sample_iteration_id,
                 prompt=prompt,  # it will autoparse the prompt
                 width=sample_item.width,
                 height=sample_item.height,
@@ -636,6 +651,9 @@ class BaseSDTrainProcess(BaseTrainProcess):
         })
         if hasattr(self, 'phase_manager'):
             info.update(self.phase_manager.training_info(self.step_num))
+        resume = getattr(self, '_checkpoint_resume_summary', None)
+        if resume is not None:
+            info['resume'] = resume
         return info
 
     def checkpoint_names(self, name=None):
@@ -770,11 +788,95 @@ class BaseSDTrainProcess(BaseTrainProcess):
             seen.add(id(batch))
             batch.cleanup()
 
+    def _training_iterator(self, loader, key, state=None):
+        if loader is None:
+            self._training_data_iterators[key] = None
+            return None
+        reason = loader_resume_reason(loader)
+        if reason:
+            self._resume_approximate_reasons.append(reason)
+            self._training_data_iterators[key] = None
+            return iter(loader)
+        iterator = ResumableDataIterator(loader, state)
+        self._training_data_iterators[key] = iterator
+        return iterator
+
+    def _restore_training_iterators(self, loader, regularization_loader):
+        self._training_data_iterators = {}
+        self._resume_approximate_reasons = []
+        pending = getattr(self, '_pending_training_resume_state', None)
+        reason = None
+        if isinstance(pending, dict) and pending.get('mode') == 'exact':
+            if getattr(self.train_config, 'start_step', None) is not None:
+                reason = 'Explicit start_step overrides saved training continuation'
+            elif pending.get('signature') != training_signature(self):
+                reason = 'Training configuration changed since the checkpoint'
+            elif any(loader_resume_reason(value) for value in (loader, regularization_loader)):
+                reason = 'Current data-loader mode does not support exact continuation'
+            if reason:
+                pending = None
+        else:
+            reasons = pending.get('reasons', []) if isinstance(pending, dict) else []
+            reason = '; '.join(reasons) or 'Legacy checkpoint has no RNG/data-order/accumulation snapshot'
+            pending = None
+        states = pending.get('loaders', {}) if pending is not None else {}
+        try:
+            iterator = self._training_iterator(loader, 'train', states.get('train'))
+            reg_iterator = self._training_iterator(regularization_loader, 'regularization', states.get('regularization'))
+        except ValueError as error:
+            if pending is None:
+                raise
+            reason = str(error)
+            pending = None
+            iterator = self._training_iterator(loader, 'train')
+            reg_iterator = self._training_iterator(regularization_loader, 'regularization')
+        if pending is not None:
+            restore_training_resume(self, pending)
+            print_acc(f"Restored RNG, data order and accumulated gradients; continuing at step {self.step_num}")
+        elif getattr(self, '_resume_checkpoint_path', None):
+            print_acc(f"Approximate training resume: {reason}")
+        self._pending_training_resume_state = None
+        return iterator, reg_iterator
+
     @record_cuda_phase("saving")
     def save(self, step=None):
+        """Commit the complete model/state set before updating visible progress."""
         if not self.accelerator.is_main_process:
             return
+        original_root = self.save_root
+        staging = begin_checkpoint(original_root)
+        previous_multiplier = self.network.multiplier if self.network is not None else None
+        try:
+            self.save_root = staging
+            primary = self._write_checkpoint_files(step)
+            generation = commit_checkpoint(staging, primary, self.step_num)
+        finally:
+            self.save_root = original_root
+            if self.network is not None:
+                self.network.multiplier = previous_multiplier
+            if self.ema is not None:
+                self.ema.train()
+            if os.path.isdir(staging):
+                # Only remove the new, contained staging directory owned by this save.
+                expected_parent = os.path.realpath(os.path.join(original_root, GENERATIONS))
+                if os.path.dirname(os.path.realpath(staging)) == expected_parent:
+                    shutil.rmtree(staging, ignore_errors=True)
+
+        self.last_save_step = self.step_num
+        publish_exports(generation, original_root, print_acc)
+        print_acc(f"Committed checkpoint at step {generation.step}: {generation.primary}")
+        self.clean_up_saves()
+        prune_generations(original_root, getattr(self.save_config, 'max_step_saves_to_keep', 4), print_acc, current_generation=generation)
+        exported_primary = os.path.join(original_root, os.path.relpath(generation.primary, generation.directory))
+        self.post_save_hook(exported_primary if os.path.exists(exported_primary) else generation.primary)
         flush()
+
+    def _write_checkpoint_files(self, step=None):
+        """Write one private generation; the caller owns commit and cleanup."""
+        flush()
+        trainer_resume_state = capture_training_resume(self) if self.optimizer is not None else None
+        self._checkpoint_resume_summary = ({key: trainer_resume_state[key] for key in ('mode', 'reasons') if key in trainer_resume_state}
+                                           if trainer_resume_state is not None else {'mode': 'approximate', 'reasons': ['No optimizer state']})
         # Portable LoKr exports can fold trainable scalars/rank scaling into
         # factors. Capture the actual optimizer parameters before EMA swapping.
         adapter_resume_state = None
@@ -791,7 +893,6 @@ class BaseSDTrainProcess(BaseTrainProcess):
 
         step_num = ''
         if step is not None:
-            self.last_save_step = step
             # zeropad 9 digits
             step_num = f"_{str(step).zfill(9)}"
 
@@ -800,6 +901,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
         file_path = os.path.join(self.save_root, filename)
 
         save_meta = copy.deepcopy(self.meta)
+        save_meta['aitk_checkpoint_generation'] = os.path.basename(self.save_root)
         # get extra meta
         if self.adapter is not None and isinstance(self.adapter, CustomAdapter):
             additional_save_meta = self.adapter.get_additional_save_metadata()
@@ -823,13 +925,13 @@ class BaseSDTrainProcess(BaseTrainProcess):
 
                 # if we are doing embedding training as well, add that
                 embedding_dict = self.embedding.state_dict() if self.embedding else None
-                self.network.save_weights(
+                exported_paths = self.network.save_weights(
                     file_path,
                     dtype=get_torch_dtype(self.save_config.dtype),
                     metadata=save_meta,
                     extra_state_dict=embedding_dict
                 )
-                primary_save_path = file_path
+                primary_save_path = exported_paths[0] if isinstance(exported_paths, (list, tuple)) and exported_paths else file_path
                 self.network.multiplier = prev_multiplier
                 # if we have an embedding as well, pair it with the network
 
@@ -895,16 +997,17 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     orig_device = self.adapter.device
                     orig_dtype = self.adapter.dtype
                     self.adapter = self.adapter.to(torch.device('cpu'), dtype=get_torch_dtype(self.save_config.dtype))
-                    self.adapter.save_pretrained(
-                        name_or_path,
-                        dtype=get_torch_dtype(self.save_config.dtype),
-                        safe_serialization=True
-                    )
-                    meta_path = os.path.join(name_or_path, 'aitk_meta.yaml')
-                    with open(meta_path, 'w') as f:
-                        yaml.dump(self.meta, f)
-                    # move it back
-                    self.adapter = self.adapter.to(orig_device, dtype=orig_dtype)
+                    try:
+                        self.adapter.save_pretrained(
+                            name_or_path,
+                            dtype=get_torch_dtype(self.save_config.dtype),
+                            safe_serialization=True
+                        )
+                        meta_path = os.path.join(name_or_path, 'aitk_meta.yaml')
+                        with open(meta_path, 'w') as f:
+                            yaml.dump(parse_metadata_from_safetensors(save_meta), f)
+                    finally:
+                        self.adapter = self.adapter.to(orig_device, dtype=orig_dtype)
                     file_path = name_or_path
                 else:
                     direct_save = False
@@ -991,7 +1094,18 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 json.dump(json_data, f, indent=4)
 
         checkpoint_save_path = primary_save_path or file_path
-        print_acc(f"Saved checkpoint to {checkpoint_save_path}")
+        if not os.path.exists(checkpoint_save_path):
+            # Multi-stage full-model exporters also produce sibling files.
+            split_paths = sorted(glob.glob(os.path.splitext(checkpoint_save_path)[0] + '_*_noise.safetensors'))
+            if not split_paths:
+                raise InvalidCheckpointError(f"Exporter did not create checkpoint: {checkpoint_save_path}")
+            checkpoint_save_path = split_paths[0]
+        model_checkpoint_paths = sorted(
+            os.path.join(root, name)
+            for root, _, names in os.walk(self.save_root)
+            for name in names
+            if name != 'optimizer.pt'
+        )
 
         # save optimizer
         if self.optimizer is not None:
@@ -1008,26 +1122,12 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     checkpoint_path=checkpoint_save_path,
                     adapter_resume_state=adapter_resume_state,
                     ema_resume_state=ema_resume_state,
+                    checkpoint_paths=model_checkpoint_paths,
+                    trainer_resume_state=trainer_resume_state,
                 )
-                print_acc(f"Saved optimizer to {optimizer_path}")
             except Exception as error:
-                # State extraction can fail before the atomic writer gets a
-                # chance to invalidate the old file. Never leave that stale
-                # optimizer beside a newly written model checkpoint.
-                try:
-                    invalidate_optimizer_checkpoint(optimizer_path)
-                except OSError as invalidation_error:
-                    print_acc(f"Could not invalidate stale optimizer state: {invalidation_error}")
-                print_acc(error)
-                print_acc("Could not save optimizer; stale optimizer state was invalidated")
-
-        self.clean_up_saves()
-        self.post_save_hook(checkpoint_save_path)
-
-        if self.ema is not None:
-            self.ema.train()
-        print_acc("")
-        flush()
+                raise RuntimeError("Checkpoint was not committed because optimizer state could not be saved") from error
+        return checkpoint_save_path
 
     # Called before the model is loaded
     def hook_before_model_load(self):
@@ -1253,60 +1353,66 @@ class BaseSDTrainProcess(BaseTrainProcess):
     def get_latest_save_path(self, name=None, post='', include_pretrained_lora=True):
         if name == None:
             name = self.job.name
-        # get latest saved step
-        latest_path = None
-        if os.path.exists(self.save_root):
-            # Define patterns for both files and directories
-            checkpoint_names = self.checkpoint_names(name)
-            patterns = [
-                pattern
-                for prefix in checkpoint_names
-                for pattern in (
-                    f"{glob.escape(prefix)}*{post}.safetensors",
-                    f"{glob.escape(prefix)}*{post}",
-                )
-            ]
-            # Search for both files and directories
-            paths = []
-            for pattern in patterns:
-                paths.extend(glob.glob(os.path.join(self.save_root, pattern)))
+        checkpoint_names = self.checkpoint_names(name)
 
-            # Filter out non-existent paths and sort by creation time
-            if paths:
-                paths = [p for p in paths if os.path.exists(p) and self.is_loadable_save_path(p)]
-                # Classify suffixes after the matched name, not words in the
-                # LoRA name or its parent folder (including names before rename).
-                matching_paths = []
-                for path in paths:
-                    basename = os.path.basename(path)
-                    prefix = max(
-                        (prefix for prefix in checkpoint_names
-                         if os.path.normcase(basename).startswith(os.path.normcase(prefix))),
-                        key=len,
-                    )
-                    suffix = basename[len(prefix):]
-                    if not any(marker in suffix for marker in ('_LoRA', '_refiner', '_t2i', '_cn')):
-                        matching_paths.append(path)
-                paths = matching_paths
+        def matches(path):
+            basename = os.path.basename(path)
+            prefixes = [prefix for prefix in checkpoint_names
+                        if os.path.normcase(basename).startswith(os.path.normcase(prefix))]
+            if not prefixes or not self.is_loadable_save_path(path):
+                return False
+            suffix = basename[len(max(prefixes, key=len)):]
+            return (not any(marker in suffix for marker in ('_LoRA', '_refiner', '_t2i', '_cn'))
+                    and (not post or os.path.splitext(basename)[0].endswith(post)))
 
-                if len(paths) > 0:
-                    latest_path = max(paths, key=os.path.getctime)
+        candidates = []
+        generations, had_committed = committed_generations(self.save_root, print_acc, verify_hashes=False)
+        for generation in generations:
+            top_level = {os.path.join(generation.directory, os.path.relpath(path, generation.directory).split(os.sep)[0])
+                         for path in generation.model_files}
+            for path in top_level:
+                if matches(path):
+                    candidates.append((generation.step, 1, generation.created_ns, path))
+        had_invalid = had_committed and not generations
+        if os.path.isdir(self.save_root):
+            required_stages = tuple(stage for stage in ('high', 'low')
+                                    if getattr(getattr(self, 'sd', None), f'train_{stage}_noise', False))
+            for entry in os.scandir(self.save_root):
+                if not matches(entry.path):
+                    continue
+                try:
+                    if had_committed and is_managed_export(entry.path):
+                        continue
+                    checkpoint_step = validate_legacy_checkpoint(entry.path, required_stages)
+                    candidates.append((checkpoint_step, 0, entry.stat().st_mtime_ns, entry.path))
+                except (InvalidCheckpointError, OSError) as error:
+                    had_invalid = True
+                    print_acc(f"Skipping invalid checkpoint {entry.path}: {error}")
+        for _, managed, _, candidate in sorted(candidates, reverse=True):
+            try:
+                if managed:
+                    # Hash only the newest candidate first, rather than streaming
+                    # every retained full model before any training can resume.
+                    generation_for_path(candidate)
+                return candidate
+            except InvalidCheckpointError as error:
+                had_invalid = True
+                print_acc(f"Skipping invalid checkpoint {candidate}: {error}")
+        if had_invalid:
+            raise InvalidCheckpointError("No valid checkpoint remains; refusing to silently restart training from step zero")
 
-        if include_pretrained_lora and latest_path is None and self.network_config is not None and self.network_config.pretrained_lora_path is not None:
+        if include_pretrained_lora and self.network_config is not None and self.network_config.pretrained_lora_path is not None:
             # set pretrained lora path as load path if we do not have a checkpoint to resume from
             pretrained_path = self.network_config.pretrained_lora_path
             if os.path.splitext(str(pretrained_path))[1] != ".safetensors":
-                print_acc(
-                    f"Pretrained lora path from config must be a .safetensors file: {pretrained_path}"
-                )
+                raise InvalidCheckpointError(f"Pretrained lora path from config must be a .safetensors file: {pretrained_path}")
             elif os.path.exists(pretrained_path):
-                latest_path = pretrained_path
-                print_acc(f"Using pretrained lora path from config: {latest_path}")
+                validate_legacy_checkpoint(pretrained_path)
+                print_acc(f"Using pretrained lora path from config: {pretrained_path}")
+                return pretrained_path
             else:
-                # no pretrained lora found
-                print_acc(f"Pretrained lora path from config does not exist: {pretrained_path}")
-
-        return latest_path
+                raise InvalidCheckpointError(f"Pretrained lora path from config does not exist: {pretrained_path}")
+        return None
 
     def load_training_state_from_metadata(self, path):
         if path is not None and self.network_config is not None and path == self.network_config.pretrained_lora_path:
@@ -1347,6 +1453,11 @@ class BaseSDTrainProcess(BaseTrainProcess):
 
     def load_weights(self, path):
         if self.network is not None:
+            # Explicit inputs must fail before mutating adapter weights.
+            if generation_for_path(path) is None:
+                required_stages = tuple(stage for stage in ('high', 'low')
+                                        if getattr(getattr(self, 'sd', None), f'train_{stage}_noise', False))
+                validate_legacy_checkpoint(path, required_stages)
             extra_weights = self.network.load_weights(path)
             self.load_training_state_from_metadata(path)
             return extra_weights
@@ -2134,6 +2245,12 @@ class BaseSDTrainProcess(BaseTrainProcess):
     def load_optimizer_state(self):
         optimizer_state_filename = 'optimizer.pt'
         optimizer_state_file_path = os.path.join(self.save_root, optimizer_state_filename)
+        generation = generation_for_path(self._resume_checkpoint_path) if self._resume_checkpoint_path else None
+        if generation is not None:
+            optimizer_state_file_path = generation.optimizer
+            if optimizer_state_file_path is None:
+                print_acc("Checkpoint has no optimizer state; resume starts with a fresh optimizer")
+                return
         if not os.path.exists(optimizer_state_file_path):
             return
 
@@ -2157,11 +2274,13 @@ class BaseSDTrainProcess(BaseTrainProcess):
             else:
                 try:
                     print_acc(f"Loading optimizer state from {optimizer_state_file_path}")
-                    optimizer_state_dict, adapter_resume_state, ema_resume_state = load_optimizer_checkpoint_for_resume(
+                    optimizer_state_dict, adapter_resume_state, ema_resume_state, trainer_resume_state = load_optimizer_checkpoint_for_resume(
                         optimizer_state_file_path,
                         expected_step=self._resume_checkpoint_step,
                         checkpoint_path=self._resume_checkpoint_path,
                         include_ema_state=True,
+                        checkpoint_paths=generation.model_files if generation is not None else None,
+                        include_trainer_state=True,
                     )
                     self._validate_ema_resume_state(ema_resume_state)
                     if self.network is not None:
@@ -2171,6 +2290,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                             "Optimizer checkpoint requires an adapter network"
                         )
                     self.optimizer.load_state_dict(optimizer_state_dict)
+                    self._pending_training_resume_state = trainer_resume_state
                     if ema_resume_state is not None:
                         with torch.no_grad():
                             for parameter, saved in zip(self._ema_parameters(), ema_resume_state['parameters']):
@@ -2179,9 +2299,13 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     del optimizer_state_dict, adapter_resume_state
                     flush()
                 except OptimizerCheckpointValidationError as error:
+                    if generation is not None:
+                        raise InvalidCheckpointError(f"Committed optimizer state is incompatible: {error}") from error
                     print_acc(f"Skipping incompatible optimizer state from {optimizer_state_file_path}")
                     print_acc(error)
                 except Exception as error:
+                    if generation is not None:
+                        raise InvalidCheckpointError(f"Committed optimizer state could not be restored: {error}") from error
                     print_acc(f"Failed to load optimizer state from {optimizer_state_file_path}")
                     print_acc(error)
 
@@ -3230,17 +3354,13 @@ class BaseSDTrainProcess(BaseTrainProcess):
 
         if self.data_loader is not None:
             dataloader = self.data_loader
-            dataloader_iterator = iter(dataloader)
         else:
             dataloader = None
-            dataloader_iterator = None
 
         if self.data_loader_reg is not None:
             dataloader_reg = self.data_loader_reg
-            dataloader_iterator_reg = iter(dataloader_reg)
         else:
             dataloader_reg = None
-            dataloader_iterator_reg = None
 
         # zero any gradients
         self.optimizer.zero_grad()
@@ -3248,6 +3368,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
 
         initial_scheduler_step = self.phase_manager.get_phase_local_step(self.step_num) if self.phase_manager.enabled else self.step_num
         self.lr_scheduler.step(initial_scheduler_step)
+        dataloader_iterator, dataloader_iterator_reg = self._restore_training_iterators(dataloader, dataloader_reg)
+        self._in_training_step = False
 
         self.sd.set_device_state(self.train_device_state_preset)
         flush()
@@ -3312,8 +3434,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         except StopIteration:
                             with self.timer('reset_batch:reg'):
                                 # hit the end of an epoch, reset
-                                dataloader_iterator_reg = iter(dataloader_reg)
                                 trigger_dataloader_setup_epoch(dataloader_reg)
+                                dataloader_iterator_reg = self._training_iterator(dataloader_reg, 'regularization')
 
                             with self.timer('get_batch:reg'):
                                 batch = next(dataloader_iterator_reg)
@@ -3325,8 +3447,8 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         except StopIteration:
                             with self.timer('reset_batch'):
                                 # hit the end of an epoch, reset
-                                dataloader_iterator = iter(dataloader)
                                 trigger_dataloader_setup_epoch(dataloader)
+                                dataloader_iterator = self._training_iterator(dataloader, 'train')
                                 self.epoch_num += 1
                                 if self.train_config.gradient_accumulation_steps == -1:
                                     # if we are accumulating for an entire epoch, trigger a step
@@ -3366,6 +3488,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
             self.additional_logs = OrderedDict()
             boundary_index_before_attempt = self.current_boundary_index
             boundary_steps_before_attempt = self.steps_this_boundary
+            self._in_training_step = True
             try:
                 with self.accelerator.accumulate(self.modules_being_trained):
                     loss_dict = self.hook_train_loop(batch_list)
@@ -3609,6 +3732,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
 
                 # update various steps
                 self.step_num = step + 1
+                self._in_training_step = False
                 self.grad_accumulation_step += 1
                 should_stop_training = False
                 if not did_oom and loss_dict is not None and not self.is_grad_accumulation_step:

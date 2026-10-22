@@ -1,4 +1,5 @@
 'use client';
+import QueueSyncStatus from './QueueSyncStatus';
 import { ACTIVE_JOB_STATUSES } from '@/utils/jobStatus';
 import { useEffect, useMemo, useState } from 'react';
 import type { DragEvent, ReactNode } from 'react';
@@ -760,7 +761,7 @@ export default function QueueWorkbench({ filterText, emptyAction, focusGpuIDs }:
     view: activeTab,
     reloadInterval: 5000,
   });
-  const { queues, status: queueStatus, refreshQueues } = useQueueList(5000);
+  const { queues, status: queueStatus, freshness: queueFreshness, refreshQueues } = useQueueList(5000);
   const { gpuList, isGPUInfoLoaded } = useGPUInfo();
   const { workers, status: workerStatus } = useWorkers();
   const [sort, setSort] = useState<SortKey>('newest');
@@ -1178,6 +1179,7 @@ export default function QueueWorkbench({ filterText, emptyAction, focusGpuIDs }:
           Load more jobs
         </button>
       )}
+      <QueueSyncStatus freshness={queueFreshness} workers={workers} />
       {freshness && (freshness.failed > 0 || now - Date.parse(freshness.updatedAt) > 30000) && (
         <p role="status" className="text-sm text-amber-300">
           Job synchronization is delayed. Last checked {new Date(freshness.updatedAt).toLocaleTimeString()}.

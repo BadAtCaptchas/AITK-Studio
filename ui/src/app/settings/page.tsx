@@ -10,6 +10,7 @@ import useRemoteOllamaWorkers from '@/hooks/useRemoteOllamaWorkers';
 import { TopBar, MainContent } from '@/components/layout';
 import { apiClient } from '@/utils/api';
 import type { ComfyInstallProgress, RemoteOllamaWorker, WorkerNode } from '@/types';
+import { workerHealthLabel } from '@/utils/workerHealth';
 import { ComfyInstallProgressBand } from '@/components/ComfyInstallProgress';
 import {
   AlertTriangle,
@@ -1037,7 +1038,7 @@ export default function Settings() {
                               <div className="truncate text-sm font-medium text-gray-100">{worker.name}</div>
                               <div className="truncate text-xs text-gray-500">{worker.base_url}</div>
                               <div className="mt-1 text-xs text-gray-400">
-                                {worker.last_status}
+                                {workerHealthLabel(worker.last_status)}
                                 {worker.last_error ? `: ${worker.last_error}` : ''}
                               </div>
                               {worker.offline_bypass_enabled && (

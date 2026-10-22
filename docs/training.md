@@ -23,11 +23,11 @@ Use the [example configurations](../config/examples) as starting points. This gu
 
 For Ideogram 4 starting points, use `config/examples/train_lora_ideogram4_48gb.yaml` for NF4 LoRA, `config/examples/train_lora_ideogram4_fp8_48gb.yaml` for FP8 LoRA, `config/examples/train_lora_ideogram4_nvfp4_48gb.yaml` for Comfy NVFP4 LoRA, or `config/examples/train_full_fine_tune_ideogram4.yaml` for full conditional-transformer fine-tuning. For Comfy NVFP4 Ideogram 4 LoRA, an H200 GPU is suggested; keep the example's `train.batch_size: 1` so the job fits in memory. Ideogram 4 dataset captions work as natural text or JSON objects serialized as text files; JSON is recommended for best prompt fidelity, and training does not call Ideogram magic-prompt, moderation, or any other hosted API.
 
-When training starts, AITK Studio creates the configured training folder and writes checkpoints and samples there. You can stop training with `Ctrl+C`; when you resume, it picks up from the latest checkpoint.
+When training starts, AITK Studio creates the configured training folder and writes checkpoints and samples there. You can stop training with `Ctrl+C`; resume selects the latest valid checkpoint by training step. New saves publish the complete model and optimizer set together, so interrupting a save leaves the previous committed checkpoint available.
 
 Latent cache identities include `standardize_images`. Caches created before this field was tracked rebuild once, because their pixel transform cannot be identified reliably. Existing cache files are retained. Reference-conditioned text caches also track ordinary reference image contents, so replacing a reference at the same path triggers re-encoding.
 
-IMPORTANT: If you press `Ctrl+C` while a checkpoint is saving, it will likely corrupt that checkpoint. Wait until saving finishes before stopping the run.
+See [checkpoint recovery and resume](checkpoint-recovery.md) for corrupt-checkpoint fallback, supported exact continuation, approximate resume modes, retention and backup requirements. Preserve the hidden `.aitk-checkpoints` directory when backing up a run for continued training.
 
 ## Batch loading threads
 
@@ -120,7 +120,7 @@ At each phase boundary the trainer saves by default, rebuilds the optimizer and 
 
 The UI loss graph shows phase boundary markers when phase metrics are present. Training always has a finite step count. Older configs that enable `auto_train`/`auto_learn` or contain phase `auto_advance` settings must remove those settings and provide explicit positive phase steps before they can run.
 
-When EMA is enabled, exported checkpoints contain the averaged weights. Keep the matching `optimizer.pt` to resume from the live training weights, optimizer moments, and EMA history. Resuming with EMA disabled still restores the live weights and optimizer moments from that file.
+When EMA is enabled, exported checkpoints contain the averaged weights. Keep the complete checkpoint generation, or the matching `optimizer.pt` for legacy saves, to resume from the live training weights, optimizer moments, and EMA history. Resuming with EMA disabled still restores the live weights and optimizer moments from that state.
 
 ## Layer Targeting
 

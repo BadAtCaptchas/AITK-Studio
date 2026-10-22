@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import test from 'node:test';
+import { createHash } from 'node:crypto';
 
 import {
   uploadBundleToWorker,
@@ -26,6 +27,57 @@ function makeWorker() {
     updated_at: new Date(),
   };
 }
+
+test('interrupted uploads verify acknowledged chunks and send only missing chunks', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aitk-resume-upload-'));
+  const zipPath = path.join(root, 'dataset.zip');
+  const bytes = Buffer.alloc(600 * 1024, 42);
+  fs.writeFileSync(zipPath, bytes);
+  const originalFetch = globalThis.fetch, originalChunkMB = process.env.AITK_REMOTE_UPLOAD_CHUNK_MB;
+  const requests = [], progress = [];
+  let mismatched = false;
+  globalThis.fetch = async (url, init = {}) => {
+    const parsed = new URL(url), mode = parsed.searchParams.get('aitk_upload');
+    if (mode === 'status') return Response.json({ uploadID: 'resume-upload', state: 'receiving', chunksTotal: 3,
+      expectedBytes: bytes.length, receivedBytes: 256 * 1024, chunks: { 0: { bytes: 256 * 1024, sha256: mismatched ? '0'.repeat(64) : createHash('sha256').update(bytes.subarray(0, 256 * 1024)).digest('hex') } } });
+    requests.push({ mode, index: parsed.searchParams.get('chunkIndex') });
+    await readRequestBody(init.body);
+    return Response.json(mode === 'complete' ? { path: '/worker/dataset', dataset: { name: 'data', encrypted: false }, renamed: false } : { ok: true });
+  };
+  try {
+    process.env.AITK_REMOTE_UPLOAD_CHUNK_MB = '0.25';
+    await uploadDatasetArchiveToWorker(makeWorker(), zipPath, 'data', item => progress.push(item), 'resume-upload');
+    assert.deepEqual(requests.map(item => item.index), ['1', '2', null]);
+    assert.equal(progress[0].loaded, 256 * 1024);
+    assert.equal(progress.at(-1).loaded, bytes.length);
+    mismatched = true;
+    requests.length = 0;
+    await assert.rejects(uploadDatasetArchiveToWorker(makeWorker(), zipPath, 'data', undefined, 'resume-upload'), /source changed/);
+    assert.equal(requests.length, 0, 'conflicting source is rejected before writing more chunks');
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalChunkMB === undefined) delete process.env.AITK_REMOTE_UPLOAD_CHUNK_MB; else process.env.AITK_REMOTE_UPLOAD_CHUNK_MB = originalChunkMB;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('resume rejects mismatched upload identities and malformed completed results', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'aitk-upload-status-'));
+  const file = path.join(root, 'dataset.zip');
+  fs.writeFileSync(file, 'zip');
+  const originalFetch = globalThis.fetch;
+  let payload = { uploadID: 'different-upload', status: 'completed', error: null, result: { path: '/other' } };
+  let requests = 0;
+  globalThis.fetch = async (_url, init) => { assert.equal(init.method || 'GET', 'GET'); requests++; return Response.json(payload); };
+  try {
+    await assert.rejects(uploadDatasetArchiveToWorker(makeWorker(), file, 'data', undefined, 'expected-upload'), /different archive upload ID/);
+    payload = { ...payload, uploadID: 'expected-upload', result: null };
+    await assert.rejects(uploadDatasetArchiveToWorker(makeWorker(), file, 'data', undefined, 'expected-upload'), /invalid imported dataset/);
+    payload = { uploadID: 'expected-upload', status: 'importing', error: null, result: null };
+    globalThis.fetch = async () => Response.json(requests++ === 2 ? payload : { ...payload, status: 'surprise' });
+    await assert.rejects(uploadDatasetArchiveToWorker(makeWorker(), file, 'data', undefined, 'expected-upload'), /invalid archive import status/);
+  } finally { globalThis.fetch = originalFetch; fs.rmSync(root, { recursive: true, force: true }); }
+});
 
 async function readRequestBody(body) {
   if (!body) return Buffer.alloc(0);
@@ -140,7 +192,7 @@ test('job bundle upload sends gpu ids in the raw upload request', async () => {
     }
     return new Response(
       JSON.stringify({
-        job: { id: 'remote-job-1' },
+        job: { id: 'remote-job-1', name: 'Imported job', gpu_ids: '0,1' },
         warnings: [],
       }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },

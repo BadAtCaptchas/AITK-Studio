@@ -21,13 +21,30 @@ dataset-cache identity, EMA/scheduler lifecycle, training batch math and trainer
 paths. CUDA-only tests explicitly skip on this runner. The lightweight Python
 behavior matrix remains separate and compiles both `tests/` and `testing/`.
 
-Keep the runtime groups in `.github/workflows/ci.yml` in separate Python
-processes when reproducing locally. Broad discovery is unsafe: some suites
+`scripts/python_test_groups.json` assigns every `test_*.py` module to
+`lightweight`, `runtime`, `windows-runtime`, `gpu`, or documented `manual`
+coverage. CI rejects new or renamed suites without an assignment. Run
+`python scripts/run_python_tests.py --check` to check ownership and
+`python scripts/run_python_tests.py --group lightweight` (or `--group runtime`)
+to execute a group using the current project interpreter. The runner launches
+each suite in a separate process, hides GPUs for CPU groups, and enables library
+offline flags. Windows checkpoint suites run on both Linux and a Windows runtime
+job so file-lock cases execute on Windows. Python correctness lint also runs in CI.
+
+Broad discovery is unsafe: some suites
 install framework stubs in `sys.modules`, and Pylint/Astroid changes inference
 state. Install `requirements_dev.txt` and verify Pylint 4.0.5 before running
 `tests.test_pylint_regressions` in its own process, so missing development tooling
 cannot silently skip native-inference coverage. MOSS batching tests build tiny
 random Qwen3.5 encoders locally; no pretrained weights are needed.
+
+The `manual` group explicitly records legacy suites whose data/model requirements
+have not been certified for offline CI. Review the indicated module before
+running it individually; do not treat assignment as a passing test result.
+Promote a suite to an automated group after verifying its dependencies, cleanup,
+and offline behavior. `--group gpu` requires CUDA and is an explicit local opt-in
+on suitable hardware; ConvRot coverage needs its supported FP4/INT8 kernels and
+writable compiler caches. It is not part of the CPU workflow.
 
 The MongoDB job temporarily uses Ubuntu 22.04's 6.8 kernel because MongoDB 8.0
 refuses startup on the newer runner kernel ([SERVER-121912](https://jira.mongodb.org/browse/SERVER-121912)).

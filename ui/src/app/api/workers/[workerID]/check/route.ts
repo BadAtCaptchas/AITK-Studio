@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db, type WorkerNodeRecord } from '@/server/db';
 import { fetchWorkerGpu, fetchWorkerHealth, getRemoteWorker } from '@/server/remoteClient';
+import { workerHealthStatus } from '@/utils/workerHealth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -23,8 +24,8 @@ export async function POST(_request: Request, { params }: { params: Promise<{ wo
     const ollama = health.ollama as { ok?: boolean; error?: string | null; modelCount?: number } | undefined;
     const ollamaError = ollama && ollama.ok === false ? `Ollama: ${ollama.error || 'unavailable'}` : null;
     const updated = await db.workerNodes.update(workerID, {
-      last_status: health.ok ? 'online' : 'error',
-      last_error: health.ok ? ollamaError : 'Worker health check failed',
+      last_status: workerHealthStatus(health),
+      last_error: !health.ok ? 'Worker health check failed' : health.executionReady === true ? ollamaError : health.executionDetail,
       last_checked_at: new Date(),
       capabilities: JSON.stringify({
         health,

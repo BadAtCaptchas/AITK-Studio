@@ -11,6 +11,7 @@ import { synchronizeJobPage } from '../src/server/jobReadModel';
 import { discoverRemoteJobs } from '../src/server/remoteClient';
 import { withProcessLease, LeaseBusyError } from '../src/server/processLease';
 import { processOperations } from '../src/server/operationWorker';
+import { syncWorkerQueues } from '../src/server/queueSync';
 
 const SHUTDOWN_TIMEOUT_MS = 10000;
 
@@ -32,8 +33,9 @@ class CronWorker {
       this.run();
       this.startBackground('remote-caption', syncRemoteCaptionResults, 5000);
       this.startBackground('dataset-watchers', runDatasetWatchersIfDue, 5000);
-      this.startBackground('operations', processOperations, 1000);
+      this.startBackground('operations', () => processOperations(() => !this.is_stopping), 1000);
       this.startBackground('job-sync', synchronizeJobPage, 5000);
+      this.startBackground('queue-sync', syncWorkerQueues, 5000);
       this.startBackground('auth-retention', cleanupAuthRecords, 60000);
       this.startBackground('remote-discovery', () => discoverRemoteJobs(), 15000);
     }, this.interval);

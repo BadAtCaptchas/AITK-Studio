@@ -5,6 +5,7 @@ import { DATASET_TEXT_CAPTION_EXTENSIONS, deleteCaptionSidecars } from './captio
 import { findEncryptedDatasetRoot } from './encryptedDatasets';
 import { deleteLayeredImageForPath } from './layeredImages';
 import { deleteSampleLayers } from './sampleLayers';
+import { deleteSampleMetadata } from './sampleMetadata';
 import { isLayeredImageAssetPath } from '../domain/layeredImages';
 
 export type ImageDeleteItemResult = {
@@ -105,7 +106,7 @@ export async function deletePlainImagePaths(
         continue;
       }
       const deletedGroup = await deleteLayeredImageForPath(item.normalized, datasetsRoot);
-      if (!deletedGroup) { await deleteSampleLayers(item.normalized); await fsp.unlink(item.normalized); }
+      if (!deletedGroup) { await deleteSampleLayers(item.normalized); await deleteSampleMetadata(item.normalized); await fsp.unlink(item.normalized); }
       const extension = path.extname(item.normalized).toLowerCase();
       if (!DATASET_TEXT_CAPTION_EXTENSIONS.includes(extension)) {
         deleteCaptionSidecars(item.normalized);

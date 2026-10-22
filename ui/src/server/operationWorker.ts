@@ -52,7 +52,7 @@ async function cleanup(operation: Operation): Promise<void> {
   const directory = await ensureUploadDirectory(root, input.uploadID);
   await fs.rm(directory, { recursive: true, force: true });
 }
-export async function processOperations(): Promise<void> {
-  await runPendingOperations(execute, cleanup);
+export async function processOperations(shouldContinue: () => boolean = () => true): Promise<void> {
+  await runPendingOperations(execute, cleanup, shouldContinue);
   for (const kind of ['dataset-import', 'job-import'] as const) await cleanupExpiredUploads(await importRoot(kind));
 }

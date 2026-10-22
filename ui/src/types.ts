@@ -274,6 +274,7 @@ export interface AdvisorFinding {
 }
 
 export interface AdvisorDatasetStats {
+  uncheckedDatasets?: number;
   datasetCount: number;
   scannedFiles: number;
   mediaFiles: number;
@@ -287,6 +288,7 @@ export interface AdvisorDatasetStats {
 }
 
 export interface AdvisorResult {
+  target?: { workerId: string; state: 'checked' | 'unknown'; detail: string };
   summary: {
     critical: number;
     warning: number;

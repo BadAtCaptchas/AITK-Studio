@@ -16,7 +16,7 @@ Follow the shared library from datasets to training and generation. For setup, s
 
 Use **Home → Datasets → Training → Models → Generate** to prepare data, train, and review the results. Home chooses its next action from loaded run and dataset state. Caption counts describe completeness; they do not establish training quality. Dataset actions can preselect training data, and **Try this model** loads a checkpoint and its model settings in Generate. Workflow and watermark utilities are under **Tools**.
 
-Training starts with guided steps. Expand the labeled options for caching, repeats, augmentation, and specialist settings, or use the raw configuration editor. Unsaved drafts stay in the current browser tab during a dataset-preparation detour; reloading the tab discards them.
+Training starts with guided steps. Expand the labeled options for caching, repeats, augmentation, and specialist settings, or use the raw configuration editor. Unsaved drafts stay in the current browser tab during a dataset-preparation detour. When browser session storage is available, reloading offers **Restore draft** or **Discard draft**. Drafts are separate for new, edited, cloned, and migrated runs, and are cleared after saving. Credentials and unlocked dataset material are excluded; re-enter secrets after restoring.
 
 Storage uses the configured dataset, training, and model roots in **Settings → Storage**. Global remote workers remain available in **Settings → Compute**.
 
@@ -115,6 +115,8 @@ Caption jobs now include Qwen2.5-Omni and MOSS music captioners, captioner LoRA 
 ## Job notes and samples
 
 Open a job's **Notes** tab to edit its notes. In Samples, Ctrl/Cmd-click toggles selection and Shift-click selects a range; Delete or Backspace opens the deletion confirmation. Audio cards show artwork until opened, and text model samples can be read in the sample viewer.
+
+New samples include a versioned `.metadata.json` sidecar recording the generation configuration at save: prompt, resolved seed, dimensions, guidance, sampling settings, and training step/prompt identity when available. The viewer uses these recorded settings even after the job is edited, and groups samples by their original iteration when available. These are configuration values, not measurements of backend internals; model-specific prompt rewrites or forced sampling schedules may differ. Control references contribute to the prompt identity fingerprint, but their paths and historical control previews are not retained. Older samples are labeled as inferred from the current configuration. Sample ZIP downloads and job exports retain sidecars, and deleting a sample removes its sidecar.
 
 ## Job Import and Export
 

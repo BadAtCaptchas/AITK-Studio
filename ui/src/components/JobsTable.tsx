@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import QueueSyncStatus from './QueueSyncStatus';
 import Link from 'next/link';
 import { CgSpinner } from 'react-icons/cg';
 import { ArrowRight, List, Loader2, Pause, Play, RefreshCw, Search } from 'lucide-react';
@@ -202,7 +203,7 @@ export default function JobsTable({
     reloadInterval: 5000,
     job_type,
   });
-  const { queues, status: queueStatus, refreshQueues } = useQueueList(variant === 'dashboard' ? 5000 : null);
+  const { queues, status: queueStatus, freshness: queueFreshness, refreshQueues } = useQueueList(variant === 'dashboard' ? 5000 : null);
   const { gpuList, isGPUInfoLoaded } = useGPUInfo();
   const { workers, status: workerStatus, refreshWorkers } = useWorkers();
   const [filterText, setFilterText] = useState('');
@@ -405,6 +406,7 @@ export default function JobsTable({
     };
     return (
       <div className="studio-queue-content">
+        <QueueSyncStatus freshness={queueFreshness} workers={workers} />
         {groups.length !== 1 && (
           <div className="studio-section-heading">
             <h2>Training queue</h2>
@@ -499,6 +501,8 @@ export default function JobsTable({
           {tableError}
         </PageNotice>
       )}
+
+      <QueueSyncStatus freshness={queueFreshness} workers={workers} />
 
       {activeGroups.map(groupKey => {
         const group = jobsDict[groupKey];

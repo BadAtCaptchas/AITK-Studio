@@ -16,21 +16,24 @@ import { isVideo, isAudio, isText, encodeFilePathForUrl } from '@/utils/basic';
 import AudioPlayer from './AudioPlayer';
 import { getDisplayPath, getMediaUrl, getSampleLayersUrl, parseRemoteAssetRef } from '@/utils/media';
 import BoundingBoxOverlay, { parseBoundingBoxes } from './BoundingBoxOverlay';
+import { adjacentSample, sampleIdentity, type SampleMetadata } from '@/utils/sampleMetadata';
+const emptyMetadata: Record<string, SampleMetadata> = {};
 
 interface Props {
   imgPath: string | null; // current image path
   numSamples: number; // number of samples per row
   sampleImages: string[]; // all sample images
   sampleConfig: SampleConfig | null;
+  sampleMetadata?: Record<string, SampleMetadata>;
   onChange: (nextPath: string | null) => void; // parent setter
   refreshSampleImages?: () => void;
 }
 
 export default function SampleImageViewer({
   imgPath,
-  numSamples,
   sampleImages,
   sampleConfig,
+  sampleMetadata = emptyMetadata,
   onChange,
   refreshSampleImages,
 }: Props) {
@@ -42,6 +45,7 @@ export default function SampleImageViewer({
   const [layerUrls, setLayerUrls] = useScopedState<string[]>(imgPath, []);
   const [showingLayer, setShowingLayer] = useScopedState<number | null>(imgPath, null);
   const [layerError, setLayerError] = useScopedState(imgPath, '');
+  const recorded = imgPath ? sampleMetadata[imgPath] : undefined;
 
   useEffect(() => {
     const url = imgPath ? getSampleLayersUrl(imgPath) : null;
@@ -82,84 +86,18 @@ export default function SampleImageViewer({
   }, [setIsOpen]);
 
   const imgInfo = useMemo(() => {
-    // handle windows C:\\Apps\\AI-Toolkit\\AI-Toolkit\\output\\LoRA-Name\\samples\\1763563000704__000004000_0.jpg
-    const ii = { filename: '', step: 0, promptIdx: 0 };
-    if (imgPath) {
-      const displayPath = getDisplayPath(imgPath);
-      // handle windows
-      let filename: string | null = null;
-      if (displayPath.includes('\\')) {
-        const parts = displayPath.split('\\');
-        filename = parts[parts.length - 1];
-      } else {
-        filename = displayPath.split('/').pop() || null;
-      }
-      if (!filename) {
-        console.error('Filename could not be determined from imgPath:', imgPath);
-        return ii;
-      }
-      ii.filename = filename;
-      const parts = filename
-        .split('.')[0]
-        .split('_')
-        .filter(p => p !== '');
-      if (parts.length === 3) {
-        ii.step = parseInt(parts[1]);
-        ii.promptIdx = parseInt(parts[2]);
-      } else {
-        const currentIndex = sampleImages.findIndex(img => img === imgPath);
-        if (currentIndex >= 0) {
-          ii.step = Math.floor(currentIndex / Math.max(numSamples, 1));
-          ii.promptIdx = currentIndex % Math.max(numSamples, 1);
-        } else {
-          console.error('Unexpected filename format for sample image:', filename);
-        }
-      }
-    }
-    return ii;
-  }, [imgPath, numSamples, sampleImages]);
-
-  const setImageAtIndex = useCallback(
-    (idx: number) => {
-      if (idx < 0 || idx >= sampleImages.length) return;
-      setShowingControlIdx(null);
-      onChange(sampleImages[idx]);
-    },
-    [sampleImages, numSamples, onChange],
-  );
-
-  const currentIndex = useMemo(() => {
-    if (!imgPath) return -1;
-    return sampleImages.findIndex(img => img === imgPath);
-  }, [imgPath, sampleImages]);
-
-  const handleArrowUp = useCallback(() => {
-    if (currentIndex === -1) return;
-    setImageAtIndex(currentIndex - numSamples);
-  }, [numSamples, currentIndex, setImageAtIndex]);
-
-  const handleArrowDown = useCallback(() => {
-    if (currentIndex === -1) return;
-    setImageAtIndex(currentIndex + numSamples);
-  }, [numSamples, currentIndex, setImageAtIndex]);
-
-  const handleArrowLeft = useCallback(() => {
-    if (currentIndex === -1) return;
-    if (imgInfo.promptIdx === 0) return;
-    const minIdx = currentIndex - imgInfo.promptIdx;
-    const nextIdx = currentIndex - 1;
-    if (nextIdx < minIdx) return;
-    setImageAtIndex(nextIdx);
-  }, [sampleImages, currentIndex, imgInfo.promptIdx, setImageAtIndex]);
-
-  const handleArrowRight = useCallback(() => {
-    if (currentIndex === -1) return;
-    const stepMinIdx = currentIndex - imgInfo.promptIdx;
-    const maxIdx = stepMinIdx + numSamples - 1;
-    const nextIdx = currentIndex + 1;
-    if (nextIdx > maxIdx) return;
-    setImageAtIndex(nextIdx);
-  }, [sampleImages, currentIndex, imgInfo.promptIdx, setImageAtIndex]);
+    const identity = sampleIdentity(imgPath || '', recorded);
+    return { filename: identity.filename, step: identity.step, promptIdx: identity.promptIndex };
+  }, [imgPath, recorded]);
+  const navigateSample = useCallback((direction: 'up' | 'down' | 'left' | 'right') => {
+    if (!imgPath) return;
+    const next = adjacentSample(sampleImages, sampleMetadata, imgPath, direction);
+    if (next) { setShowingControlIdx(null); onChange(next); }
+  }, [imgPath, sampleImages, sampleMetadata, onChange]);
+  const handleArrowUp = useCallback(() => navigateSample('up'), [navigateSample]);
+  const handleArrowDown = useCallback(() => navigateSample('down'), [navigateSample]);
+  const handleArrowLeft = useCallback(() => navigateSample('left'), [navigateSample]);
+  const handleArrowRight = useCallback(() => navigateSample('right'), [navigateSample]);
 
   const canDeleteSample = useMemo(() => Boolean(imgPath), [imgPath]);
 
@@ -187,11 +125,15 @@ export default function SampleImageViewer({
   }, [imgPath, canDeleteSample, onChange, refreshSampleImages]);
 
   const sampleItem = useMemo<SampleItem | null>(() => {
+    if (recorded) return { prompt: recorded.prompt, seed: recorded.seed, width: recorded.width, height: recorded.height,
+      neg: recorded.negative_prompt, guidance_scale: recorded.guidance_scale, sample_steps: recorded.sample_steps,
+      network_multiplier: recorded.network_multiplier };
     if (!sampleConfig) return null;
+    if (imgInfo.promptIdx === null) return null;
     if (imgInfo.promptIdx < 0) return null;
     if (imgInfo.promptIdx >= sampleConfig.samples.length) return null;
     return sampleConfig.samples[imgInfo.promptIdx];
-  }, [sampleConfig, imgInfo.promptIdx]);
+  }, [sampleConfig, imgInfo.promptIdx, recorded]);
 
   const controlImages = useMemo<string[]>(() => {
     if (!imgPath) return [];
@@ -221,7 +163,7 @@ export default function SampleImageViewer({
   const seed = useMemo(() => {
     if (!sampleItem) return '?';
     if (sampleItem.seed !== undefined) return sampleItem.seed;
-    if (sampleConfig?.walk_seed) {
+    if (sampleConfig?.walk_seed && imgInfo.promptIdx !== null) {
       return sampleConfig.seed + imgInfo.promptIdx;
     }
     return sampleConfig?.seed ?? '?';
@@ -460,14 +402,19 @@ export default function SampleImageViewer({
 
               <div className="text-xs">
                 <div>
-                  <span className="text-gray-400">Step:</span> {imgInfo.step.toLocaleString()}
+                  <span className="text-gray-400">Step:</span> {imgInfo.step?.toLocaleString() ?? 'Unknown'}
                 </div>
                 <div>
-                  <span className="text-gray-400">Sample #:</span> {imgInfo.promptIdx + 1}
+                  <span className="text-gray-400">Sample #:</span> {imgInfo.promptIdx === null ? 'Unknown' : imgInfo.promptIdx + 1}
                 </div>
                 <div>
                   <span className="text-gray-400">Seed:</span> {seed}
                 </div>
+                <div className={recorded ? 'text-emerald-300' : 'text-amber-300'}>
+                  {recorded ? 'Generation settings recorded at save' : 'Inferred from current config; original settings unavailable'}
+                </div>
+                {recorded && <div className="text-gray-400">Model-specific overrides may differ.</div>}
+                {recorded && <div className="text-gray-400">{recorded.width} × {recorded.height} · {recorded.sample_steps} steps · CFG {recorded.guidance_scale}{recorded.sampler ? ` · ${recorded.sampler}` : ''}</div>}
               </div>
             </div>
             <div className="absolute top-2 right-2 z-20 flex items-center gap-2">

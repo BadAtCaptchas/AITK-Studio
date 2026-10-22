@@ -7,6 +7,8 @@ import stat
 import tempfile
 from types import SimpleNamespace
 import unittest
+import torch
+from safetensors.torch import save_file
 from unittest import mock
 
 from toolkit import checkpoint_cleanup
@@ -45,7 +47,10 @@ class CheckpointCleanupTest(unittest.TestCase):
 
     def checkpoint(self, step, prefix="My LoRA", extension=".safetensors"):
         path = self.root / f"{prefix}_{step:09d}{extension}"
-        path.write_bytes(b"checkpoint deletion fixture")
+        if extension == '.safetensors':
+            save_file({'weight': torch.ones(1)}, str(path), metadata={'training_info': json.dumps({'step': step})})
+        else:
+            path.write_bytes(b"checkpoint deletion fixture")
         return path
 
     def cleanup_with_order(self, process, paths):
@@ -149,10 +154,11 @@ class CheckpointCleanupTest(unittest.TestCase):
         old = self.checkpoint(250, "job-test-id")
         new = self.root / "My LoRA_000001250.safetensors"
         process.ema = mock.Mock()
+        process.get_ema_resume_state = mock.Mock(return_value=None)
         process.is_fine_tuning = False
         process.train_config = SimpleNamespace(merge_network_on_save=False)
         process.network = mock.Mock(multiplier=1.0)
-        process.network.save_weights.side_effect = lambda path, **kwargs: Path(path).write_bytes(b"new save")
+        process.network.save_weights.side_effect = lambda path, **kwargs: save_file({'weight': torch.ones(1)}, str(path), metadata=kwargs['metadata'])
         process.named_lora = False
         process.embedding = process.decorator = process.adapter = process.snr_gos = process.optimizer = None
         process.meta = {}

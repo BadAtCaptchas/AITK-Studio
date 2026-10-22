@@ -160,6 +160,7 @@ export async function enqueueOperation(input: OperationInput, key: string = rand
 export async function runPendingOperations(
   execute: (operation: Operation) => Promise<unknown>,
   cleanup?: (operation: Operation) => Promise<void>,
+  shouldContinue: () => boolean = () => true,
 ): Promise<void> {
   // Repair acceptance interrupted between linking the resource and writing the pending index.
   const repair = await db.runtime.get('operation-repair-cursor');
@@ -187,69 +188,103 @@ export async function runPendingOperations(
     pendingCursor?.version ?? null,
     pending.length === 32 ? pending.at(-1)!.key : '',
   );
-  await Promise.all(
-    [0, 1].map(async slot => {
-      for (const row of pending.filter((_row, index) => index % 2 === slot)) {
-        if (typeof row.value !== 'string') continue;
-        const operation = await getOperation(row.value);
-        if (!operation) {
-          await db.runtime.delete(row.key, row.version);
-          continue;
-        }
-        if (terminal.has(operation.state)) {
-          await cleanup?.(operation);
-          await db.runtime.delete(row.key, row.version);
-          continue;
-        }
-        if (operation.state === 'needs-keys' && !operation.cancelRequested) {
-          await db.runtime.delete(row.key, row.version);
-          continue;
-        }
-        if (operation.nextAttemptAt > Date.now() && !operation.cancelRequested) continue;
-        try {
-          await withProcessLease(`operation:${operation.id}`, async lease => {
-            const current = await getOperation(operation.id);
-            if (!current || terminal.has(current.state)) return;
-            if (current.cancelRequested) {
-              await updateOperation(current.id, {
-                state: 'canceled',
-                error: 'Canceled before the next operation phase',
-              });
-              return;
-            }
-            await updateOperation(current.id, { state: 'running', attempts: current.attempts + 1, error: null });
-            try {
-              const result = await execute(current);
-              await lease.assertOwned();
-              await updateOperation(current.id, { state: 'completed', phase: 'confirmed', result, error: null });
-            } catch (error) {
-              const message = error instanceof Error ? error.message : 'Operation failed';
-              const needsKeys = isRecord(error) && error.code === 'OPERATION_KEYS_REQUIRED';
-              const canceled = isRecord(error) && error.code === 'OPERATION_CANCELED';
-              const state = canceled
-                ? 'canceled'
-                : needsKeys
-                  ? 'needs-keys'
-                  : current.attempts < 4
-                    ? 'retrying'
-                    : 'failed';
-              await updateOperation(current.id, {
-                state,
-                error: needsKeys ? 'Unlock the datasets again to continue this operation.' : message,
-                nextAttemptAt: Date.now() + Math.min(60_000, 1000 * 2 ** current.attempts),
-              });
-            }
+  const visited = new Set<string>();
+  const running = new Set<Promise<void>>();
+  const activeKeys = new Set<string>();
+  const runOne = async (row: (typeof pending)[number]) => {
+    if (typeof row.value !== 'string') return;
+    const operation = await getOperation(row.value);
+    if (!operation) {
+      await db.runtime.delete(row.key, row.version);
+      return;
+    }
+    if (terminal.has(operation.state)) {
+      await cleanup?.(operation);
+      await db.runtime.delete(row.key, row.version);
+      return;
+    }
+    if (operation.state === 'needs-keys' && !operation.cancelRequested) {
+      await db.runtime.delete(row.key, row.version);
+      return;
+    }
+    if (operation.nextAttemptAt > Date.now() && !operation.cancelRequested) return;
+    try {
+      await withProcessLease(`operation:${operation.id}`, async lease => {
+        const current = await getOperation(operation.id);
+        if (!current || terminal.has(current.state)) return;
+        if (current.cancelRequested) {
+          await updateOperation(current.id, {
+            state: 'canceled',
+            error: 'Canceled before the next operation phase',
           });
-        } catch (error) {
-          if (!isRecord(error) || error.status !== 409)
-            console.error(
-              `Operation ${operation.id} ownership check failed`,
-              error instanceof Error ? error.message : 'unknown error',
-            );
+          return;
         }
-      }
-    }),
-  );
+        await updateOperation(current.id, { state: 'running', attempts: current.attempts + 1, error: null });
+        try {
+          const result = await execute(current);
+          await lease.assertOwned();
+          await updateOperation(current.id, { state: 'completed', phase: 'confirmed', result, error: null });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Operation failed';
+          const needsKeys = isRecord(error) && error.code === 'OPERATION_KEYS_REQUIRED';
+          const canceled = isRecord(error) && error.code === 'OPERATION_CANCELED';
+          const state = canceled
+            ? 'canceled'
+            : needsKeys
+              ? 'needs-keys'
+              : current.attempts < 4
+                ? 'retrying'
+                : 'failed';
+          await updateOperation(current.id, {
+            state,
+            error: needsKeys ? 'Unlock the datasets again to continue this operation.' : message,
+            nextAttemptAt: Date.now() + Math.min(60_000, 1000 * 2 ** current.attempts),
+          });
+        }
+      });
+    } catch (error) {
+      if (!isRecord(error) || error.status !== 409)
+        console.error(
+          `Operation ${operation.id} ownership check failed`,
+          error instanceof Error ? error.message : 'unknown error',
+        );
+    }
+  };
+  // Refill a shared pool as slots free up. A large import cannot strand the work
+  // assigned to its old lane, and new requests are admitted while it is running.
+  let afterPending = pending.at(-1)?.key || '';
+  let wrapped = false;
+  let nextSweep = Date.now() + 1000;
+  while (pending.length || running.size) {
+    if (!shouldContinue()) pending.length = 0;
+    if (Date.now() >= nextSweep) {
+      visited.clear();
+      nextSweep = Date.now() + 1000;
+    }
+    while (running.size < 2 && pending.length) {
+      const row = pending.shift()!;
+      if (visited.has(row.key) || activeKeys.has(row.key)) continue;
+      visited.add(row.key);
+      activeKeys.add(row.key);
+      const work = runOne(row).catch(error => {
+        console.error('Operation processing failed', error instanceof Error ? error.message : 'Unknown error');
+      }).finally(() => { running.delete(work); activeKeys.delete(row.key); });
+      running.add(work);
+    }
+    if (running.size < 2 && shouldContinue()) {
+      const rows = await db.runtime.list('operation-pending:', 32, afterPending);
+      afterPending = rows.length === 32 ? rows.at(-1)!.key : '';
+      pending.push(...rows.filter(row => !visited.has(row.key) && !activeKeys.has(row.key)));
+      if (pending.length) continue;
+      if (!afterPending && !wrapped) { wrapped = true; continue; }
+      if (afterPending) continue;
+    }
+    if (!running.size) break;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([...running, new Promise<void>(resolve => { timer = setTimeout(resolve, Math.max(1, nextSweep - Date.now())); })]);
+    if (timer) clearTimeout(timer);
+    wrapped = false;
+  }
 }
 
 export async function checkpointOperation(

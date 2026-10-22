@@ -12,7 +12,8 @@ interface SampleImageCardProps {
   onDelete?: () => void;
   onClick?: (e: React.MouseEvent<HTMLDivElement>) => void;
   selected?: boolean;
-  onSelect?: () => void;
+  selectionChecked?: boolean;
+  onSelect?: (checked: boolean) => void;
   selectionLabel?: string;
   /** pass your scroll container element (e.g. containerRef.current) */
   observerRoot?: Element | null;
@@ -29,6 +30,7 @@ const SampleImageCard: React.FC<SampleImageCardProps> = ({
   className = '',
   onClick = () => {},
   selected = false,
+  selectionChecked = false,
   onSelect,
   selectionLabel = 'Select sample',
   observerRoot = null,
@@ -206,8 +208,8 @@ const SampleImageCard: React.FC<SampleImageCardProps> = ({
             <input
               type="checkbox"
               aria-label={selectionLabel}
-              checked={selected}
-              onChange={onSelect}
+              checked={selectionChecked}
+              onChange={event => onSelect(event.currentTarget.checked)}
               className="h-5 w-5 cursor-pointer accent-blue-500"
             />
           </label>

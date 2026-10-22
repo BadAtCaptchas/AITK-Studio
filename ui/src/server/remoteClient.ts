@@ -3,7 +3,7 @@ import { ownResponseBody, readBoundedResponseText } from './responseBody';
 import path from 'path';
 import fs from 'fs/promises';
 import { createReadStream, existsSync } from 'fs';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { Readable } from 'stream';
 import { db, type WorkerNodeRecord } from './db';
 import {
@@ -24,6 +24,8 @@ import {
   resolveConfigPath,
 } from './trainingJobTransfer';
 import type { Job, Queue, GPUApiResponse, CpuInfo } from '../types';
+import { isRecord } from './commandInput';
+import { parseWorkerHealth } from '../utils/workerHealth';
 
 const REMOTE_BACKGROUND_POLL_TIMEOUT_MS = 5_000;
 const REMOTE_BACKGROUND_COOLDOWN_MS = 30_000;
@@ -736,15 +738,11 @@ function remoteArchiveUploadChunkBytes() {
   return DEFAULT_REMOTE_ARCHIVE_UPLOAD_CHUNK_BYTES;
 }
 
-function isRemoteArchiveImportStatus<T>(value: unknown): value is RemoteArchiveImportStatus<T> {
+function isRemoteArchiveImportStatus(value: unknown): value is RemoteArchiveImportStatus<unknown> {
   return (
-    !!value &&
-    typeof value === 'object' &&
-    'uploadID' in value &&
-    'status' in value &&
-    ((value as { status?: unknown }).status === 'importing' ||
-      (value as { status?: unknown }).status === 'completed' ||
-      (value as { status?: unknown }).status === 'failed')
+    isRecord(value) && typeof value.uploadID === 'string' &&
+    'result' in value && (value.error === null || typeof value.error === 'string') &&
+    (value.status === 'importing' || value.status === 'completed' || value.status === 'failed')
   );
 }
 
@@ -752,7 +750,7 @@ function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function waitForRemoteArchiveImport<T>(worker: WorkerNodeRecord, routePath: string, uploadID: string) {
+async function waitForRemoteArchiveImport<T>(worker: WorkerNodeRecord, routePath: string, uploadID: string, parseResult: (value: unknown) => T) {
   let firstPoll = true;
   const deadline = Date.now() + 60 * 60 * 1000;
   while (true) {
@@ -762,18 +760,19 @@ async function waitForRemoteArchiveImport<T>(worker: WorkerNodeRecord, routePath
     } else {
       await sleep(1000);
     }
-    const status = await remoteJson<RemoteArchiveImportStatus<T>>(
+    const status: unknown = await remoteJson(
       worker,
       appendQueryParams(routePath, {
         aitk_upload: 'status',
         uploadID,
       }),
     );
+    if (!isRemoteArchiveImportStatus(status) || status.uploadID !== uploadID) throw new Error('Worker returned an invalid archive import status');
     if (status.status === 'completed') {
       if (status.result == null) {
         throw new Error('Remote archive import completed without a result.');
       }
-      return status.result;
+      return parseResult(status.result);
     }
     if (status.status === 'failed') {
       throw new Error(status.error || 'Remote archive import failed.');
@@ -790,6 +789,7 @@ async function remoteZipFileJson<T>(
     onProgress?: (progress: FileUploadProgress) => void;
     backgroundComplete?: boolean;
     uploadID?: string;
+    parseResult: (value: unknown) => T;
   },
 ) {
   const fileStat = await fs.stat(options.filePath);
@@ -803,21 +803,49 @@ async function remoteZipFileJson<T>(
   };
 
   const uploadID = options.uploadID || randomUUID();
+  let manifest: Record<string, unknown> | null = null;
   if (options.uploadID) {
     try {
       const prior: unknown = await remoteJson(worker, appendQueryParams(routePath, { aitk_upload: 'status', uploadID }));
-      if (isRemoteArchiveImportStatus<T>(prior)) {
-        if (prior.status === 'completed' && prior.result !== null) return prior.result;
+      if (isRemoteArchiveImportStatus(prior)) {
+        if (prior.uploadID !== uploadID) throw new Error('Worker returned a different archive upload ID');
+        if (prior.status === 'completed') return options.parseResult(prior.result);
         if (prior.status === 'failed') throw new Error(prior.error || 'Remote import failed');
-        return waitForRemoteArchiveImport<T>(worker, routePath, uploadID);
+        return waitForRemoteArchiveImport(worker, routePath, uploadID, options.parseResult);
       }
+      if (!isRecord(prior) || prior.uploadID !== uploadID || prior.state !== 'receiving' || !isRecord(prior.chunks))
+        throw new Error('Worker returned an invalid or frozen upload manifest');
+      manifest = prior;
     } catch (error) { if (!(error instanceof RemoteClientError && error.status === 404)) throw error; }
   }
   const chunkBytes = remoteArchiveUploadChunkBytes();
   const chunksTotal = Math.max(1, Math.ceil(fileStat.size / chunkBytes));
+  const verifiedChunks = new Set<number>();
+  if (manifest) {
+    if ((manifest.chunksTotal !== undefined && manifest.chunksTotal !== chunksTotal) ||
+        (manifest.expectedBytes !== undefined && manifest.expectedBytes !== null && manifest.expectedBytes !== fileStat.size))
+      throw new Error('Upload source or chunk size changed; start a new upload');
+    const chunks = isRecord(manifest.chunks) ? manifest.chunks : {};
+    for (const [index, chunk] of Object.entries(chunks)) {
+      const chunkIndex = Number(index);
+      const start = chunkIndex * chunkBytes;
+      const end = Math.min(fileStat.size, start + chunkBytes) - 1;
+      const expectedBytes = Math.max(0, end - start + 1);
+      if (!/^(0|[1-9][0-9]*)$/.test(index) || !Number.isSafeInteger(chunkIndex) || chunkIndex >= chunksTotal ||
+          !isRecord(chunk) || chunk.bytes !== expectedBytes || typeof chunk.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(chunk.sha256))
+        throw new Error('Worker returned an invalid upload chunk');
+      const hash = createHash('sha256');
+      if (expectedBytes) for await (const bytes of createReadStream(options.filePath, { start, end })) hash.update(bytes);
+      if (hash.digest('hex') !== chunk.sha256) throw new Error('Upload source changed; an acknowledged chunk no longer matches');
+      verifiedChunks.add(chunkIndex);
+      uploadedFileBytes += expectedBytes;
+    }
+    if (manifest.receivedBytes !== uploadedFileBytes) throw new Error('Worker returned invalid upload byte accounting');
+  }
   reportProgress();
 
   for (let chunkIndex = 0; chunkIndex < chunksTotal; chunkIndex += 1) {
+    if (verifiedChunks.has(chunkIndex)) continue;
     const start = chunkIndex * chunkBytes;
     const end = Math.min(fileStat.size, start + chunkBytes) - 1;
     const chunkSize = Math.max(0, end - start + 1);
@@ -852,6 +880,9 @@ async function remoteZipFileJson<T>(
     reportProgress();
   }
 
+  const finalStat = await fs.stat(options.filePath);
+  if (finalStat.size !== fileStat.size || finalStat.mtimeMs !== fileStat.mtimeMs)
+    throw new Error('Upload source changed during transfer; start a new upload');
   const completeResult = await remoteJson<T | RemoteArchiveImportStatus<T>>(
     worker,
     appendQueryParams(routePath, {
@@ -869,20 +900,21 @@ async function remoteZipFileJson<T>(
     },
   );
 
-  if (isRemoteArchiveImportStatus<T>(completeResult)) {
+  if (isRemoteArchiveImportStatus(completeResult)) {
+    if (completeResult.uploadID !== uploadID) throw new Error('Worker returned a different archive upload ID');
     if (completeResult.status === 'completed') {
       if (completeResult.result == null) {
         throw new Error('Remote archive import completed without a result.');
       }
-      return completeResult.result;
+      return options.parseResult(completeResult.result);
     }
     if (completeResult.status === 'failed') {
       throw new Error(completeResult.error || 'Remote archive import failed.');
     }
-    return waitForRemoteArchiveImport<T>(worker, routePath, uploadID);
+    return waitForRemoteArchiveImport(worker, routePath, uploadID, options.parseResult);
   }
 
-  return completeResult as T;
+  return options.parseResult(completeResult);
 }
 
 export async function uploadBundleToWorker(
@@ -892,7 +924,7 @@ export async function uploadBundleToWorker(
   onProgress?: (progress: FileUploadProgress) => void,
   uploadID?: string,
 ) {
-  return remoteZipFileJson<{ job: Job; warnings: string[] }>(
+  return remoteZipFileJson(
     worker,
     appendQueryParams('/api/jobs/import', {
       gpu_ids: gpuIds,
@@ -902,18 +934,19 @@ export async function uploadBundleToWorker(
       fileName: path.basename(zipPath),
       onProgress,
       uploadID,
+      parseResult(value) {
+        if (!isRecord(value) || !isRecord(value.job) || typeof value.job.id !== 'string' || !value.job.id ||
+            typeof value.job.name !== 'string' || typeof value.job.gpu_ids !== 'string' ||
+            !Array.isArray(value.warnings) || value.warnings.some(warning => typeof warning !== 'string'))
+          throw new Error('Worker returned an invalid imported job');
+        return { job: { id: value.job.id, name: value.job.name, gpu_ids: value.job.gpu_ids }, warnings: value.warnings.filter((warning): warning is string => typeof warning === 'string') };
+      },
     },
   );
 }
 
 export async function fetchWorkerHealth(worker: WorkerNodeRecord) {
-  return remoteJson<{
-    ok: boolean;
-    app: string;
-    cloudflared: unknown;
-    ollama?: unknown;
-    timestamp: string;
-  }>(worker, '/api/remote/health', { timeoutMs: REMOTE_BACKGROUND_POLL_TIMEOUT_MS });
+  return parseWorkerHealth(await remoteJson(worker, '/api/remote/health', { timeoutMs: REMOTE_BACKGROUND_POLL_TIMEOUT_MS }));
 }
 
 export async function uploadDatasetArchiveToWorker(
@@ -923,16 +956,19 @@ export async function uploadDatasetArchiveToWorker(
   onProgress?: (progress: FileUploadProgress) => void,
   uploadID?: string,
 ) {
-  return remoteZipFileJson<{
-    dataset: { name: string; encrypted: boolean; path?: string };
-    path: string;
-    renamed: boolean;
-  }>(worker, appendQueryParam('/api/datasets/import-archive', 'preferredName', preferredName), {
+  return remoteZipFileJson(worker, appendQueryParam('/api/datasets/import-archive', 'preferredName', preferredName), {
     filePath: zipPath,
     fileName: path.basename(zipPath),
     onProgress,
     backgroundComplete: true,
     uploadID,
+    parseResult(value) {
+      if (!isRecord(value) || !isRecord(value.dataset) || typeof value.dataset.name !== 'string' || !value.dataset.name ||
+          typeof value.dataset.encrypted !== 'boolean' || typeof value.path !== 'string' || !value.path || typeof value.renamed !== 'boolean' ||
+          (value.dataset.path !== undefined && typeof value.dataset.path !== 'string'))
+        throw new Error('Worker returned an invalid imported dataset');
+      return { dataset: { name: value.dataset.name, encrypted: value.dataset.encrypted, ...(typeof value.dataset.path === 'string' ? { path: value.dataset.path } : {}) }, path: value.path, renamed: value.renamed };
+    },
   });
 }
 
@@ -945,5 +981,19 @@ export async function fetchWorkerCpu(worker: WorkerNodeRecord) {
 }
 
 export async function fetchWorkerQueues(worker: WorkerNodeRecord) {
-  return remoteJson<{ queues: Queue[] }>(worker, '/api/queue', { timeoutMs: REMOTE_BACKGROUND_POLL_TIMEOUT_MS });
+  const result: unknown = await remoteJson(worker, '/api/queue?local_only=1', { timeoutMs: REMOTE_BACKGROUND_POLL_TIMEOUT_MS });
+  if (!isRecord(result) || !Array.isArray(result.queues)) throw new Error('Worker returned invalid queues');
+  const queues: Array<Pick<Queue, 'gpu_ids' | 'is_running'>> = [];
+  const devices = new Set<string>();
+  for (const queue of result.queues) {
+    if (!isRecord(queue) || typeof queue.gpu_ids !== 'string' || typeof queue.is_running !== 'boolean' ||
+        (queue.worker_id != null && typeof queue.worker_id !== 'string'))
+      throw new Error('Worker returned an invalid queue');
+    // Older workers ignore local_only and include their own remote mirrors.
+    if (queue.worker_id != null && queue.worker_id !== 'local') continue;
+    if (devices.has(queue.gpu_ids)) throw new Error('Worker returned duplicate local queues');
+    devices.add(queue.gpu_ids);
+    queues.push({ gpu_ids: queue.gpu_ids, is_running: queue.is_running });
+  }
+  return { queues };
 }

@@ -119,6 +119,7 @@ type Props = {
   focusTarget?: (TrainingFieldTarget & { nonce: number }) | null;
   onRevealFinding?: (message: ValidationMessage) => void;
   workerLabel?: string;
+  workerId?: string;
   computeControls?: ReactNode;
   trainerLabel?: string;
   onOpenAdvanced?: () => void;
@@ -156,6 +157,7 @@ const guidedStepItems = [
   { id: 'job-review', title: 'Review', detail: 'Review settings before starting.' },
 ];
 export default function SimpleJob({
+  workerId = 'local',
   legacyView = false,
   jobConfig,
   setJobConfig,
@@ -2520,7 +2522,7 @@ export default function SimpleJob({
             </button>
             {(legacyView || activeStepId === 'job-review') && (
               <div className="operator-panel mt-5 p-5">
-                <TrainingAdvisorPanel jobConfig={jobConfig} gpuIDs={gpuIDs} variant="rail" />
+                <TrainingAdvisorPanel jobConfig={jobConfig} gpuIDs={gpuIDs} workerId={workerId} variant="rail" />
               </div>
             )}
           </aside>

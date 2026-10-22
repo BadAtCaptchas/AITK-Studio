@@ -811,14 +811,15 @@ class ToolkitNetworkMixin:
         
         if self.base_model_ref is not None and hasattr(self.base_model_ref(), 'save_lora'):
             # call the base model save lora method
-            self.base_model_ref().save_lora(save_dict, file, metadata)
-            return
+            paths = self.base_model_ref().save_lora(save_dict, file, metadata)
+            return paths if paths is not None else [file]
         
         if os.path.splitext(file)[1] == ".safetensors":
-            from safetensors.torch import save_file
-            save_file(save_dict, file, metadata)
+            from toolkit.checkpoint_transaction import atomic_save_safetensors
+            atomic_save_safetensors(save_dict, file, metadata)
         else:
             torch.save(save_dict, file)
+        return [file]
 
     def load_weights(self: Network, file, force_weight_mapping=False):
         # allows us to save and load to and from ldm weights

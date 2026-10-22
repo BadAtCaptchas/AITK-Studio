@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { analyzeTrainingAdvisor } from '@/server/trainingAdvisor';
-import type { JobConfig } from '@/types';
+import { isAdvisorJobConfig, runTrainingPreflight } from '@/server/trainingPreflight';
+import { commandError, isRecord, readJsonCommand } from '@/server/commandInput';
 import { isRequestAuthenticated } from '@/utils/authSession';
 
 export const runtime = 'nodejs';
@@ -15,47 +15,33 @@ async function ensureApiAccess(request: NextRequest): Promise<NextResponse | nul
   return null;
 }
 
-function isSafeJobConfig(jobConfig: unknown): jobConfig is JobConfig {
-  if (!jobConfig || typeof jobConfig !== 'object') return false;
-  const config = (jobConfig as Record<string, unknown>).config;
-  if (!config || typeof config !== 'object') return false;
-  const processList = (config as Record<string, unknown>).process;
-  return Array.isArray(processList) && processList.length > 0;
-}
-
-async function readJsonBody(request: NextRequest) {
-  const rawBody = await request.text();
-  if (!rawBody.trim()) return null;
-  return JSON.parse(rawBody);
-}
-
 export async function POST(request: NextRequest) {
   const accessResponse = await ensureApiAccess(request);
   if (accessResponse) return accessResponse;
 
-  let body: any;
+  let body: unknown;
   try {
-    body = await readJsonBody(request);
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    body = await readJsonCommand(request);
+  } catch (error) {
+    const invalid = commandError(error);
+    return NextResponse.json({ error: invalid?.error || 'Invalid JSON body' }, { status: invalid?.status || 400 });
   }
 
-  if (!body) {
+  if (!isRecord(body)) {
     return NextResponse.json({ error: 'Missing request body' }, { status: 400 });
   }
 
   try {
     const jobConfig = body.job_config ?? body.jobConfig;
-    if (!isSafeJobConfig(jobConfig)) {
+    if (!isAdvisorJobConfig(jobConfig)) {
       return NextResponse.json({ error: 'Invalid job config' }, { status: 400 });
     }
 
-    return NextResponse.json(
-      analyzeTrainingAdvisor(jobConfig, {
-        gpuIds: body.gpu_ids ?? body.gpuIds ?? null,
-        scanDatasets: true,
-      }),
-    );
+    const gpuIds = body.gpu_ids ?? body.gpuIds ?? null;
+    const workerId = body.worker_id ?? 'local';
+    if ((gpuIds !== null && typeof gpuIds !== 'string') || typeof workerId !== 'string' || !workerId || workerId.length > 180)
+      return NextResponse.json({ error: 'Invalid worker or GPU assignment' }, { status: 400 });
+    return NextResponse.json(await runTrainingPreflight(jobConfig, gpuIds, workerId));
   } catch (error) {
     console.error('Error running training advisor preflight:', error);
     return NextResponse.json({ error: 'Failed to run training advisor' }, { status: 500 });

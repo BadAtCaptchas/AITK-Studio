@@ -114,23 +114,24 @@ export async function enqueueOperation(input: OperationInput, key: string = rand
     input.kind === 'remote-start' ? `job:${input.jobID}` : input.kind === 'dataset-decrypt'
       ? `dataset-decrypt:${input.root}:${input.sourceName}` : `${input.kind}:${input.root}:${input.uploadID}`;
   return withProcessLease(`operation-resource:${resource}`, async () => {
+    const id = operationID(input.kind, key);
+    const prior = await getOperation(id);
+    if (prior) {
+      if (prior.resource !== resource || JSON.stringify(prior.input) !== JSON.stringify(input))
+        throw Object.assign(new Error('Idempotency key was already used with different input'), { status: 409 });
+      if (terminal.has(prior.state)) return prior;
+    }
     const existing = await activeOperationForResource(resource);
     if (existing) {
+      if (prior && prior.id !== existing.id)
+        throw Object.assign(new Error('Another operation already owns this resource'), { status: 409 });
       if (JSON.stringify(existing.input) !== JSON.stringify(input))
         throw Object.assign(new Error('An operation with different input already owns this resource'), { status: 409 });
       await db.runtime.compareAndSwap(`operation-pending:${existing.id}`, null, existing.id);
       return existing;
     }
-    const id = operationID(input.kind, key);
-    const prior = await getOperation(id);
-    if (prior) {
-      if (JSON.stringify(prior.input) !== JSON.stringify(input))
-        throw new Error('Idempotency key was already used with different input');
-      if (!terminal.has(prior.state)) await db.runtime.compareAndSwap(`operation-pending:${prior.id}`, null, prior.id);
-      return prior;
-    }
     const now = new Date().toISOString();
-    const operation: Operation = {
+    const operation: Operation = prior ?? {
       version: 1,
       id,
       input,
@@ -147,7 +148,10 @@ export async function enqueueOperation(input: OperationInput, key: string = rand
       result: null,
       error: null,
     };
-    await db.runtime.compareAndSwap(`operation:${id}`, null, operation);
+    // A different resource has a different lease but can use the same command
+    // key. Never link this resource to a record whose creation we did not win.
+    if (!prior && !(await db.runtime.compareAndSwap(`operation:${id}`, null, operation)))
+      throw Object.assign(new Error('Idempotency key was claimed concurrently. Retry the original request.'), { status: 409 });
     const owner = await db.runtime.get(`operation-resource:${resource}`);
     if (!(await db.runtime.compareAndSwap(`operation-resource:${resource}`, owner?.version ?? null, id)))
       throw new Error('Operation resource changed');

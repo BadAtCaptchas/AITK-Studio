@@ -37,3 +37,12 @@ test('malformed and non-training source responses never become an editable defau
     assert.throws(() => parseTrainingSource(invalid, 'edit'), /source/i);
   }
 });
+
+test('malformed legacy prompt arrays are rejected before migration can produce unsafe sample values', () => {
+  for (const prompts of [[42], [{ text: 'not a prompt string' }], 'not an array']) {
+    const config = trainingFixture();
+    delete config.config.process[0].sample.samples;
+    config.config.process[0].sample.prompts = prompts;
+    assert.throws(() => parseTrainingSource(source(config), 'edit'), /invalid training configuration/i);
+  }
+});

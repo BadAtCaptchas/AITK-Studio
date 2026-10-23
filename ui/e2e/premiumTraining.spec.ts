@@ -71,6 +71,99 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByRole('combobox', { name: 'Compute', exact: true })).toBeVisible();
 });
 
+for (const extension of ['json', 'jsonc']) {
+  test(`${extension} imports preserve URLs and literal comment text`, async ({ page }) => {
+    const config = structuredClone(defaultJobConfig);
+    config.config.name = `import_${extension}_fixture`;
+    config.config.process[0].sample.samples = [{ prompt: 'a sign saying /* KEEP THIS */ and \\"quoted\\"' }];
+    if (extension === 'json') config.config.process[0].model.name_or_path = 'https://models.invalid/base-model';
+    const text = `${extension === 'jsonc' ? '// configuration comment\n/* block comment */\n' : ''}${JSON.stringify(config, null, 2)}`;
+    await page.locator('input[type="file"][accept=".yaml,.yml,.json,.jsonc"]').setInputFiles({
+      name: `fixture.${extension}`, mimeType: 'application/json', buffer: Buffer.from(text),
+    });
+    await expect(page.getByLabel('Training name', { exact: true })).toHaveValue(config.config.name);
+    await page.getByRole('tab', { name: 'Config', exact: true }).click();
+    await expect(page.locator('[data-config-editor] textarea.inputarea')).toBeVisible();
+    const imported = YAML.parse((await editorSnapshot(page)).text ?? '') as JobConfig;
+    expect(imported.config.process[0].model.name_or_path).toEqual(config.config.process[0].model.name_or_path);
+    expect(imported.config.process[0].sample.samples).toEqual(config.config.process[0].sample.samples);
+  });
+}
+
+test('correcting a Config-only structure restores the Form editor', async ({ page }) => {
+  await page.getByRole('tab', { name: 'Config', exact: true }).click();
+  await expect(page.locator('[data-config-editor] textarea.inputarea')).toBeVisible();
+  const original = (await editorSnapshot(page)).text ?? '';
+  const config = YAML.parse(original) as JobConfig;
+  Reflect.deleteProperty(config.config.process[0].train, 'optimizer_params');
+  await pasteEditorText(page, YAML.stringify(config));
+  await page.getByRole('tab', { name: 'Form', exact: true }).click();
+  await expect(page.getByText('This configuration requires the Config editor.', { exact: false })).toBeVisible();
+  await page.getByRole('button', { name: 'Open Config', exact: true }).click();
+  await pasteEditorText(page, original);
+  await page.getByRole('tab', { name: 'Form', exact: true }).click();
+  await expect(page.getByLabel('Training name', { exact: true })).toBeEnabled();
+  await expect(page.getByLabel('Weight decay', { exact: true })).toBeVisible();
+});
+
+for (const mode of ['Config', 'import']) {
+test(`explicit Orbit configuration settings survive applying a complete ${mode} document`, async ({ page }) => {
+  await page.getByRole('tab', { name: 'Config', exact: true }).click();
+  await expect(page.locator('[data-config-editor] textarea.inputarea')).toBeVisible();
+  const config = YAML.parse((await editorSnapshot(page)).text ?? '') as JobConfig;
+  const process = config.config.process[0];
+  process.model.arch = 'flux2';
+  process.model.name_or_path = 'black-forest-labs/FLUX.2-dev';
+  process.model.low_vram = true;
+  process.model.quantize = true;
+  process.model.qtype = 'orbit4';
+  process.train.batch_size = 3;
+  process.train.optimizer = 'adamw';
+  process.train.cache_text_embeddings = false;
+  process.train.unload_text_encoder = false;
+  const rawText = YAML.stringify(config);
+  if (mode === 'Config') await pasteEditorText(page, rawText);
+  else await page.locator('input[type="file"][accept=".yaml,.yml,.json,.jsonc"]').setInputFiles({
+    name: 'orbit.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(config)),
+  });
+  await page.getByRole('tab', { name: 'Form', exact: true }).click();
+  await expect(page.getByLabel('Batch size', { exact: true })).toHaveValue('3');
+  await page.getByRole('tab', { name: 'Config', exact: true }).click();
+  // Config retains the user's exact document, including omitted additive
+  // defaults. Verify the transformed configuration at its actual save boundary.
+  if (mode === 'Config') expect((await editorSnapshot(page)).text).toEqual(rawText);
+  await expect(page.getByRole('button', { name: 'Create Job', exact: true })).toBeEnabled();
+  await page.route('**/api/jobs', async route => {
+    if (route.request().method() !== 'POST') return route.continue();
+    return route.fulfill({ status: 503, json: { error: 'Fixture Orbit save unavailable' } });
+  });
+  const posted = page.waitForRequest(request => request.url().endsWith('/api/jobs') && request.method() === 'POST');
+  await page.getByRole('button', { name: 'Create Job', exact: true }).click();
+  const payload = (await posted).postDataJSON() as { job_config: JobConfig };
+  const applied = payload.job_config.config.process[0];
+  expect(applied.train.batch_size).toBe(3);
+  expect(applied.train.optimizer).toBe('adamw');
+  expect(applied.train.cache_text_embeddings).toBe(false);
+  expect(applied.train.unload_text_encoder).toBe(false);
+  expect(applied.model.layer_offloading).toBe(true);
+  expect(applied.model.layer_offloading_transformer_percent).toBe(0.7);
+  expect(applied.model.layer_offloading_text_encoder_percent).toBe(0.5);
+  await expect(page.getByRole('alert').filter({ hasText: 'Fixture Orbit save unavailable' })).toBeVisible();
+});
+}
+
+test('cyclic YAML imports report an error and preserve the current editable draft', async ({ page }) => {
+  await page.getByLabel('Training name', { exact: true }).fill('retained_after_bad_import');
+  const config = structuredClone(defaultJobConfig);
+  const text = `${YAML.stringify(config)}\nextra: &recursive\n  nested: *recursive\n`;
+  await page.locator('input[type="file"][accept=".yaml,.yml,.json,.jsonc"]').setInputFiles({
+    name: 'recursive.yaml', mimeType: 'text/yaml', buffer: Buffer.from(text),
+  });
+  await expect(page.getByText('Configuration cannot be serialized. Remove circular references or excessively nested values.', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Training name', { exact: true })).toHaveValue('retained_after_bad_import');
+  await expect(page.getByRole('button', { name: 'Create Job', exact: true })).toBeEnabled();
+});
+
 test('query-only training navigation renews the dirty guard while retaining the draft', async ({ page }) => {
   await page.goto('/jobs/new?dataset=portraits_v2');
   await expect(page.getByLabel('Training name', { exact: true })).toBeEnabled();
@@ -163,6 +256,9 @@ test('source jobs load before editing and a failed clone load can retry without 
 });
 
 test('valid advanced Config values survive Form edits and a pending save locks both views until failure', async ({ page }) => {
+  await page.getByRole('link', { name: 'Training', exact: true }).click();
+  await expect.poll(() => page.locator('#training-form-view').evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+  const formScroll = await page.locator('#training-form-view').evaluate(element => element.scrollTop);
   await page.getByRole('tab', { name: 'Config', exact: true }).click();
   const input = page.locator('[data-config-editor] textarea.inputarea');
   await expect(input).toBeVisible();
@@ -177,6 +273,8 @@ test('valid advanced Config values survive Form edits and a pending save locks b
   await page.keyboard.press('Control+v');
   expect((await editorSnapshot(page)).text).toEqual(YAML.stringify(config));
   await page.getByRole('tab', { name: 'Form', exact: true }).click();
+  await expect.poll(() => page.locator('#training-form-view').evaluate(element => element.scrollTop)).toBeCloseTo(formScroll, 0);
+  await expect(page).toHaveURL(/#job-training$/);
   await page.getByLabel('Training name', { exact: true }).fill('advanced_save_fixture');
   await page.getByLabel('Learning rate', { exact: true }).fill('0.00042');
   let release!: () => void;
@@ -421,4 +519,27 @@ test('invalid YAML, cursor and selection survive switching views and guarded nav
   await expect(page.locator('[data-config-editor] [role="alert"]')).toBeVisible();
   expect((await editorSnapshot(page)).text).toEqual(before.text);
   await page.screenshot({ path: '.review-build/premium-training-invalid-config.png' });
+  for (const theme of ['dark', 'light']) {
+    if (theme === 'light') {
+      await page.getByRole('button', { name: 'More tools', exact: true }).click();
+      await page.getByTitle('Switch to light mode', { exact: true }).click();
+      await page.keyboard.press('Escape');
+    }
+    const colors = await page.locator('[data-config-editor] [role="alert"]').evaluate(element => {
+      const style = getComputedStyle(element);
+      const luminance = (color: string) => {
+        const channels = (color.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number).map(value => {
+          const channel = value / 255;
+          return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+        });
+        return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+      };
+      const foreground = luminance(style.color);
+      const background = luminance(style.backgroundColor);
+      return { color: style.color, background: style.backgroundColor,
+        ratio: (Math.max(foreground, background) + 0.05) / (Math.min(foreground, background) + 0.05) };
+    });
+    await test.info().attach(`yaml-error-contrast-${theme}`, { body: JSON.stringify(colors), contentType: 'application/json' });
+    expect(colors.ratio, `YAML error contrast in ${theme} theme`).toBeGreaterThanOrEqual(4.5);
+  }
 });

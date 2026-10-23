@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from 'react';
 import { readTrainingDraft, restoreTrainingDraft, useTrainingDraft } from '@/hooks/useTrainingDraft';
 import { readStoredTrainingDraft, removeStoredTrainingDraft, type StoredTrainingDraft, type TrainingDraft } from '@/utils/trainingDraftStorage';
 import { parseTrainingSource } from '@/utils/trainingSource';
+import { parseTrainingConfigImport } from '@/utils/trainingConfigImport';
 import useHydrated from '@/hooks/useHydrated';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { defaultJobConfig, defaultDatasetConfig, migrateJobConfig } from './jobConfig';
@@ -24,7 +25,6 @@ import useSettings from '@/hooks/useSettings';
 import useGPUInfo from '@/hooks/useGPUInfo';
 import useDatasetList from '@/hooks/useDatasetList';
 import useWorkers from '@/hooks/useWorkers';
-import YAML from 'yaml';
 import path from 'path';
 import { TopBar } from '@/components/layout';
 import { Button } from '@headlessui/react';
@@ -151,6 +151,13 @@ function TrainingFormEditor({ draftKey, initialDraft }: { draftKey: string; init
   const [jobConfig, setJobConfig] = useNestedState<JobConfig>(
     restoredDraft?.config || objectCopy(migrateJobConfig(defaultJobConfig)),
   );
+  const [formRevision, setFormRevision] = useState(0);
+  const applyExternalConfig = (config: JobConfig) => {
+    setJobConfig(config);
+    // A complete imported/Config document is already configured. Reset only the
+    // Form's derived controls and error boundary; keep raw text and editor state.
+    setFormRevision(value => value + 1);
+  };
   const draft = useTrainingDraft(draftKey, {
     config: jobConfig,
     workerID,
@@ -178,12 +185,7 @@ function TrainingFormEditor({ draftKey, initialDraft }: { draftKey: string; init
       if (!mountedRef.current || savingRef.current || readConfigEditorSession(draftKey)?.valid === false) return;
       try {
         const text = reader.result as string;
-        let parsed: unknown;
-        if (file.name.endsWith('.json') || file.name.endsWith('.jsonc')) {
-          parsed = JSON.parse(text.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, ''));
-        } else {
-          parsed = YAML.parse(text);
-        }
+        const parsed = parseTrainingConfigImport(text, file.name);
         if (!isEditableTrainingConfig(parsed))
           throw new Error(
             'Config needs a training name, model, training settings, samples, and datasets with resolutions.',
@@ -201,8 +203,7 @@ function TrainingFormEditor({ draftKey, initialDraft }: { draftKey: string; init
         } catch (err) {
           console.warn('Could not set required fields on imported config:', err);
         }
-        if (!migrationId) migrateJobConfig(parsed);
-        setJobConfig(parsed);
+        applyExternalConfig(migrationId ? parsed : migrateJobConfig(parsed));
       } catch (err) {
         console.error('Failed to parse config file:', err);
         reportWorkflowError(
@@ -795,7 +796,7 @@ function TrainingFormEditor({ draftKey, initialDraft }: { draftKey: string; init
             </PageNotice>
           </div>
         )}
-        <ErrorBoundary fallback={<div className="p-6 text-sm text-amber-800 dark:text-amber-300">This configuration requires the Config editor. <button type="button" className="underline" onClick={() => setShowAdvancedView(true)}>Open Config</button></div>}>
+        <ErrorBoundary key={formRevision} fallback={<div className="p-6 text-sm text-amber-800 dark:text-amber-300">This configuration requires the Config editor. <button type="button" className="underline" onClick={() => setShowAdvancedView(true)}>Open Config</button></div>}>
           <SimpleJob jobConfig={jobConfig} setJobConfig={setJobConfig} readOnly={!rawEditorValid || editorLocked}
             handleSubmit={handleSubmit} runId={runId} datasetOptions={datasetOptions}
             validationMessages={currentFindings} focusTarget={focusTarget} onOpenConfig={() => setShowAdvancedView(true)}
@@ -810,7 +811,7 @@ function TrainingFormEditor({ draftKey, initialDraft }: { draftKey: string; init
         {migrationNotice}
         {saveError && <div role="alert" className="px-4 py-3"><PageNotice tone="danger" title="Could not save job">{saveError} <button type="button" className="underline" onClick={() => void saveJob()}>Retry</button></PageNotice></div>}
         <div className="min-h-0 flex-1">
-          <AdvancedConfigEditor config={jobConfig} setConfig={setJobConfig} transformOnParse={transformAdvancedConfig}
+          <AdvancedConfigEditor config={jobConfig} setConfig={applyExternalConfig} transformOnParse={transformAdvancedConfig}
             onValidityChange={setRawEditorValid} onDirtyChange={setRawEditorDirty} sessionKey={draftKey} active={showAdvancedView} readOnly={editorLocked} ariaLabel="Training configuration YAML" />
         </div>
       </div>

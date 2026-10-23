@@ -392,6 +392,12 @@ export function isEditableTrainingConfig(value: unknown): value is JobConfig {
     )
       return false;
     if (
+      process.sample.prompts != null &&
+      (!Array.isArray(process.sample.prompts) ||
+        !process.sample.prompts.every(prompt => typeof prompt === 'string'))
+    )
+      return false;
+    if (
       process.sample.samples != null &&
       (!Array.isArray(process.sample.samples) ||
         !process.sample.samples.every(sample => record(sample) && textFields(sample, ['prompt'])))

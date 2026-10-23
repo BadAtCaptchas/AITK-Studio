@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import RuntimeDiagnostics from '@/components/RuntimeDiagnostics';
 import useSettings, { notifySettingsChanged } from '@/hooks/useSettings';
 import useCommittedRef from '@/hooks/useCommittedRef';
+import useUnsavedChangesGuard from '@/hooks/useUnsavedChangesGuard';
 import useWorkers from '@/hooks/useWorkers';
 import useRemoteOllamaWorkers from '@/hooks/useRemoteOllamaWorkers';
 import { TopBar, MainContent } from '@/components/layout';
@@ -728,6 +729,16 @@ export default function Settings() {
   const hasHealthyOllama = Boolean(firstOllamaWorker && !firstOllamaWorker.last_error);
   const hasUnsavedSettings =
     isSettingsLoaded && savedSettingsRef.current !== null && savedSettingsRef.current !== JSON.stringify(settings);
+  useUnsavedChangesGuard({
+    dirty: hasUnsavedSettings,
+    revision: JSON.stringify(settings),
+    title: 'Leave Settings?',
+    message:
+      status === 'saving'
+        ? 'A settings save is still pending. Leaving will not cancel that request, and any newer unsaved edits will be discarded.'
+        : 'Your unsaved settings changes will be discarded.',
+    confirmText: 'Discard changes',
+  });
   const saveStatusLabel =
     status === 'saving'
       ? 'Saving'

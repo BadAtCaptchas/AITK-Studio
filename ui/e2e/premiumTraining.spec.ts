@@ -15,6 +15,16 @@ async function editorSnapshot(page: Page) {
   });
 }
 
+async function pasteEditorText(page: Page, text: string) {
+  const input = page.locator('[data-config-editor] textarea.inputarea');
+  await expect(input).toBeVisible();
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.evaluate(value => navigator.clipboard.writeText(value), text);
+  await input.focus();
+  await page.keyboard.press('Control+a');
+  await page.keyboard.press('Control+v');
+}
+
 async function expectReadableComputeValues(page: Page) {
   for (const [name, text] of [['Compute', 'Local worker'], ['Trainer', 'LoRA Trainer'], ['GPU', 'GPU #0']]) {
     await expect.poll(async () => page.getByRole('combobox', { name, exact: true }).evaluate(input => {
@@ -265,6 +275,52 @@ test('continuous sections, parameter navigation and responsive Create control', 
     await zoomContext.close();
   }
 });
+
+for (const navigationMode of ['fallback', 'native'] as const) {
+test(`${navigationMode} browser history protects and restores an unfinished Config draft`, async ({ page }) => {
+  if (navigationMode === 'fallback') {
+    await page.addInitScript(() => Object.defineProperty(window, 'navigation', { value: undefined, configurable: true }));
+  }
+  await page.goto('/jobs');
+  expect(await page.evaluate(() => typeof (window as Window & { navigation?: unknown }).navigation !== 'undefined')).toBe(navigationMode === 'native');
+  await page.getByRole('link', { name: 'New training', exact: true }).click();
+  await expect(page.getByLabel('Training name', { exact: true })).toBeEnabled();
+  await page.getByRole('link', { name: 'Training', exact: true }).click();
+  await expect(page).toHaveURL(/\/jobs\/new#job-training$/);
+  await page.getByRole('tab', { name: 'Config', exact: true }).click();
+  const input = page.locator('[data-config-editor] textarea.inputarea');
+  await expect(input).toBeVisible();
+  await input.focus();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.insertText('\n# history-memory-only-fixture\nbroken: [');
+  await expect(page.locator('[data-config-editor] [role="alert"]')).toBeVisible();
+  const rawText = (await editorSnapshot(page)).text;
+
+  // The section hash is its own history entry. Traverse past it to the queue.
+  await page.evaluate(() => window.history.go(-2));
+  await expect(page.getByText('Leave training setup?', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(page).toHaveURL(/\/jobs\/new#job-training$/);
+  await expect(page.getByRole('tab', { name: 'Config', exact: true })).toHaveAttribute('aria-selected', 'true');
+  expect((await editorSnapshot(page)).text).toEqual(rawText);
+
+  // Cancellation must not consume the queue entry or duplicate this draft's
+  // entries: repeat the same traversal, then confirm its original destination.
+  await page.evaluate(() => window.history.go(-2));
+  await expect(page.getByText('Leave training setup?', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Leave setup', exact: true }).click();
+  await expect(page).toHaveURL(/\/jobs$/);
+  await page.evaluate(() => window.history.forward());
+  await expect(page).toHaveURL(/\/jobs\/new$/);
+  await page.getByRole('tab', { name: 'Config', exact: true }).click();
+  await expect(page.locator('[data-config-editor] [role="alert"]')).toBeVisible();
+  expect((await editorSnapshot(page)).text).toEqual(rawText);
+  await page.evaluate(() => window.history.forward());
+  await expect(page).toHaveURL(/\/jobs\/new#job-training$/);
+  expect((await editorSnapshot(page)).text).toEqual(rawText);
+  expect(await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }))).not.toContain('history-memory-only-fixture');
+});
+}
 
 test('invalid YAML, cursor and selection survive switching views and guarded navigation without browser persistence', async ({ page }) => {
   await page.getByRole('tab', { name: 'Config', exact: true }).click();

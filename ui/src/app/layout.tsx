@@ -11,6 +11,7 @@ import os from 'os';
 import { CaptionDatasetModal } from '@/components/CaptionDatasetModal';
 import MergeLoRAsModal from '@/components/MergeLoRAsModal';
 import AppShell from '@/components/AppShell';
+import HistoryNavigationGuard from '@/components/HistoryNavigationGuard';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,6 +42,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body>
+        <HistoryNavigationGuard />
         <script dangerouslySetInnerHTML={{ __html: `window.server_platform = "${platform}";` }} />
         <ThemeProvider>
           <AuthWrapper authRequired={authRequired}>

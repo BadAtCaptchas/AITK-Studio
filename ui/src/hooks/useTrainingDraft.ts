@@ -3,6 +3,7 @@ import useCommittedRef from './useCommittedRef';
 import { useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { openConfirm } from '@/components/ConfirmModal';
+import { registerHistoryGuard, type HistoryTransition } from '@/components/HistoryNavigationGuard';
 import { saveStoredTrainingDraft, removeStoredTrainingDraft, type StoredTrainingDraft, type TrainingDraft } from '@/utils/trainingDraftStorage';
 export type { TrainingDraft } from '@/utils/trainingDraftStorage';
 type StoredDraft = { draft: TrainingDraft; baseline: string };
@@ -15,7 +16,7 @@ const serialize = (draft: TrainingDraft) => JSON.stringify(draft);
 type NavigateEvent = Event & {
   canIntercept: boolean;
   hashChange: boolean;
-  destination: { url: string };
+  destination: { url: string; key?: string };
   navigationType: string;
 };
 
@@ -28,7 +29,6 @@ export function useTrainingDraft(key: string, draft: TrainingDraft, hasUnsavedCo
   const allowing = useRef(false),
     confirming = useRef(false);
   const currentURL = useRef('');
-  const currentState = useRef<unknown>(null);
   useEffect(() => {
     if (allowing.current) {
       dirty.current = false;
@@ -43,7 +43,7 @@ export function useTrainingDraft(key: string, draft: TrainingDraft, hasUnsavedCo
     return () => window.clearTimeout(timer);
   }, [draft.config, draft.workerID, draft.gpuIDs, draft.migration, hasUnsavedConfigText, key, current]);
   const leaveSetup = useCallback(
-    (onLeave: () => void) => {
+    (onLeave: () => void, onCancel?: () => void) => {
       if (allowing.current || !dirty.current) {
         onLeave();
         return;
@@ -59,6 +59,7 @@ export function useTrainingDraft(key: string, draft: TrainingDraft, hasUnsavedCo
         confirmText: 'Leave setup',
         onCancel: () => {
           confirming.current = false;
+          onCancel?.();
         },
         onConfirm: () => {
           confirming.current = false;
@@ -72,7 +73,6 @@ export function useTrainingDraft(key: string, draft: TrainingDraft, hasUnsavedCo
   useEffect(() => {
     returnPath = window.location.pathname + window.location.search;
     currentURL.current = window.location.href;
-    currentState.current = window.history.state;
     const sameDocument = (destination: string) => {
       const url = new URL(destination, window.location.href),
         here = new URL(currentURL.current);
@@ -109,7 +109,7 @@ export function useTrainingDraft(key: string, draft: TrainingDraft, hasUnsavedCo
       leaveSetup(() => go(anchor.href));
     };
     // Navigation API runs before same-document history traversal, including browser Back/Forward.
-    const navigation = (window as Window & { navigation?: EventTarget }).navigation;
+    const navigation = (window as Window & { navigation?: EventTarget & { traverseTo?: (key: string) => unknown } }).navigation;
     const browserNavigate = (event: Event) => {
       const next = event as NavigateEvent;
       if (
@@ -121,18 +121,21 @@ export function useTrainingDraft(key: string, draft: TrainingDraft, hasUnsavedCo
       )
         return;
       event.preventDefault();
-      leaveSetup(() => go(next.destination.url));
+      leaveSetup(() => {
+        if (next.navigationType === 'traverse' && next.destination.key && navigation?.traverseTo)
+          navigation.traverseTo(next.destination.key);
+        else go(next.destination.url);
+      });
     };
-    const popstate = (event: PopStateEvent) => {
-      if (navigation || allowing.current || !dirty.current || sameDocument(window.location.href)) return;
-      const destination = window.location.href;
-      event.stopImmediatePropagation();
-      window.history.replaceState(currentState.current, '', currentURL.current);
-      leaveSetup(() => go(destination));
+    const popstate = ({ destination, resume, cancel }: HistoryTransition) => {
+      if (navigation || allowing.current || !dirty.current || sameDocument(destination)) return false;
+      if (confirming.current) { cancel(); return true; }
+      leaveSetup(resume, cancel);
+      return true;
     };
     document.addEventListener('click', navigate, true);
     navigation?.addEventListener('navigate', browserNavigate);
-    window.addEventListener('popstate', popstate, true);
+    const unregisterHistoryGuard = registerHistoryGuard(popstate);
     window.addEventListener('beforeunload', beforeUnload);
     return () => {
       if (dirty.current) {
@@ -141,7 +144,7 @@ export function useTrainingDraft(key: string, draft: TrainingDraft, hasUnsavedCo
       }
       document.removeEventListener('click', navigate, true);
       navigation?.removeEventListener('navigate', browserNavigate);
-      window.removeEventListener('popstate', popstate, true);
+      unregisterHistoryGuard();
       window.removeEventListener('beforeunload', beforeUnload);
     };
   }, [key, router, leaveSetup]);

@@ -1,13 +1,23 @@
 'use client';
 import useScopedState from '@/hooks/useScopedState';
+import useUnsavedChangesGuard from '@/hooks/useUnsavedChangesGuard';
 import { useEffect, useState } from 'react';
 import type { Job } from '@/types';
 import { apiClient } from '@/utils/api';
 
 export default function JobNotes({ job }: { job: Job }) {
   const [notes, setNotes] = useScopedState(job.id, '');
+  const [savedNotes, setSavedNotes] = useScopedState(job.id, '');
   const [loaded, setLoaded] = useScopedState(job.id, false);
   const [status, setStatus] = useState('Loading…');
+  useUnsavedChangesGuard({
+    dirty: loaded && notes !== savedNotes,
+    revision: notes,
+    title: 'Leave notes?',
+    message: status === 'Saving…'
+      ? 'Your notes are still saving. Leaving will not cancel the save already requested.'
+      : 'Your unsaved notes will be discarded if you leave this job.',
+  });
   useEffect(() => {
     const controller = new AbortController();
     void apiClient
@@ -16,6 +26,7 @@ export default function JobNotes({ job }: { job: Job }) {
         if (typeof data.notes !== 'string') throw new Error('Invalid notes response');
         if (!controller.signal.aborted) {
           setNotes(data.notes);
+          setSavedNotes(data.notes);
           setLoaded(true);
           setStatus('');
         }
@@ -24,7 +35,7 @@ export default function JobNotes({ job }: { job: Job }) {
         if (!controller.signal.aborted) setStatus('Could not load notes.');
       });
     return () => controller.abort();
-  }, [job.id, setNotes, setLoaded]);
+  }, [job.id, setNotes, setSavedNotes, setLoaded]);
   return (
     <div className="space-y-3 p-5">
       <label htmlFor="job-notes" className="block font-semibold">
@@ -36,7 +47,7 @@ export default function JobNotes({ job }: { job: Job }) {
         value={notes}
         onChange={e => {
           setNotes(e.target.value);
-          setStatus('Unsaved');
+          setStatus(e.target.value === savedNotes ? '' : 'Unsaved');
         }}
         className="w-full min-h-[50vh] rounded border border-gray-700 bg-gray-950 p-4 font-mono text-sm"
       />
@@ -48,6 +59,7 @@ export default function JobNotes({ job }: { job: Job }) {
             setStatus('Saving…');
             try {
               await apiClient.post(`/api/jobs/${job.id}/notes`, { notes });
+              setSavedNotes(notes);
               setStatus('Saved');
             } catch {
               setStatus('Could not save notes.');

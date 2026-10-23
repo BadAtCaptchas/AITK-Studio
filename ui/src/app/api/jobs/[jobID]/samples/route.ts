@@ -6,7 +6,8 @@ import {
   isLocalWorker,
   isRemoteJobMissingError,
   markRemoteJobMissing,
-  remoteJson,
+  remotePollingJson,
+  RemotePollUnavailableError,
 } from '@/server/remoteClient';
 import { makeRemoteAssetRef } from '@/server/remoteAssets';
 import { listJobSampleUrls, listJobSampleMetadata } from '@/server/jobSamples';
@@ -28,9 +29,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ jobI
     }
     try {
       const worker = await getRemoteWorker(job.worker_id);
-      const data = await remoteJson<unknown>(
+      const data = await remotePollingJson(
         worker,
         `/api/jobs/${encodeURIComponent(job.remote_job_id)}/samples${includeMetadata ? '?metadata=1' : ''}`,
+        'samples',
+        { signal: request.signal },
       );
       if (!data || typeof data !== 'object' || !('samples' in data) || !Array.isArray(data.samples) ||
           !data.samples.every((sample: unknown): sample is string => typeof sample === 'string')) throw new Error('Invalid remote samples');
@@ -40,11 +43,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ jobI
       return NextResponse.json({ samples,
         metadata: Object.fromEntries(Object.entries(metadata).map(([sample, value]) => [makeRemoteAssetRef(job.id, 'img', sample), value])) });
     } catch (error) {
+      if (request.signal.aborted) return new Response(null, { status: 499 });
       if (isRemoteJobMissingError(error)) {
         await markRemoteJobMissing(job);
         return NextResponse.json({ samples: [] });
       }
-      console.error('Error reading remote samples:', error);
+      if (!(error instanceof RemotePollUnavailableError)) {
+        console.error('Error reading remote samples:', error instanceof Error ? error.message : 'Unknown error');
+      }
       return NextResponse.json({ error: 'Error reading remote samples' }, { status: 502 });
     }
   }

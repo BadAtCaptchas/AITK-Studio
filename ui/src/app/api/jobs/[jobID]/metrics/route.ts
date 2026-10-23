@@ -8,7 +8,8 @@ import {
   isLocalWorker,
   isRemoteJobMissingError,
   markRemoteJobMissing,
-  remoteJson,
+  remotePollingJson,
+  RemotePollUnavailableError,
 } from '@/server/remoteClient';
 
 export const runtime = 'nodejs';
@@ -54,17 +55,20 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     try {
       const worker = await getRemoteWorker(job.worker_id);
       return NextResponse.json(
-        await remoteJson<unknown>(worker, `/api/jobs/${encodeURIComponent(job.remote_job_id)}/metrics?${url.searchParams}`, {
+        await remotePollingJson(worker, `/api/jobs/${encodeURIComponent(job.remote_job_id)}/metrics?${url.searchParams}`, 'metrics', {
           maxResponseBytes: MAX_REMOTE_METRICS_BYTES,
           signal: request.signal,
         }),
       );
     } catch (error) {
+      if (request.signal.aborted) return new Response(null, { status: 499 });
       if (isRemoteJobMissingError(error)) {
         await markRemoteJobMissing(job);
         return NextResponse.json({ keys: [], keyInfo: [], series: {} });
       }
-      console.error('Error reading remote metrics:', error);
+      if (!(error instanceof RemotePollUnavailableError)) {
+        console.error('Error reading remote metrics:', error instanceof Error ? error.message : 'Unknown error');
+      }
       return NextResponse.json({ error: 'Error reading remote metrics' }, { status: 502 });
     }
   }

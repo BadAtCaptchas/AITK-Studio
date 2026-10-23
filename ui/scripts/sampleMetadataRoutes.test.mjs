@@ -32,7 +32,7 @@ test('remote sample metadata is validated and rekeyed to the controller mirror r
   const remotePaths = [];
   const { GET } = load('../src/app/api/jobs/[jobID]/samples/route.ts', {
     'next/server': { NextResponse: Response }, '@/server/db': { db: { jobs: { findById: async () => ({ id: 'mirror', worker_id: 'worker', remote_job_id: 'worker-job' }) } } },
-    '@/server/remoteClient': { isLocalWorker: () => false, getRemoteWorker: async () => ({}), remoteJson: async (_worker, remotePath) => { remotePaths.push(remotePath); return response; }, isRemoteJobMissingError: () => false },
+    '@/server/remoteClient': { isLocalWorker: () => false, getRemoteWorker: async () => ({}), remotePollingJson: async (_worker, remotePath) => { remotePaths.push(remotePath); return response; }, isRemoteJobMissingError: () => false },
     '@/server/remoteAssets': remoteAssets, '@/server/jobSamples': {}, '@/utils/sampleMetadata': sampleMetadata,
   });
   const request = (query = '?metadata=1') => GET(new Request('http://localhost/api/jobs/mirror/samples' + query), { params: Promise.resolve({ jobID: 'mirror' }) });

@@ -8,6 +8,10 @@ import ts from 'typescript';
 import {
   RemoteClientError,
   remoteJson,
+  remotePollingJson,
+  RemotePollUnavailableError,
+  getRemoteBackgroundPollEligibility,
+  noteRemoteBackgroundPollFailure,
   resetRemoteBackgroundPollingStateForTests,
   runRemoteBackgroundPoll,
   withoutRemoteRedirects,
@@ -125,7 +129,7 @@ test('remote metrics route accepts multi-series histories above the generic 8 Mi
     path,
     '@/server/db': { db: { jobs: { findById: async () => ({ worker_id: 'worker-1', remote_job_id: 'remote/job' }) } } },
     '@/server/trainingPaths': {},
-    '@/server/remoteClient': { isLocalWorker: () => false, getRemoteWorker: async () => makeWorker(), remoteJson, isRemoteJobMissingError: () => false },
+    '@/server/remoteClient': { isLocalWorker: () => false, getRemoteWorker: async () => makeWorker(), remotePollingJson, RemotePollUnavailableError, isRemoteJobMissingError: () => false },
   };
   const loadedModule = { exports: {} };
   new Function('require', 'module', 'exports', code)(name => {
@@ -263,4 +267,98 @@ test('background polling enters cooldown after a transient DNS failure', async (
   assert.equal(second.skipped, true);
   assert.match(second.reason, /cooling down/);
   assert.equal(taskCalls, 1);
+});
+
+test('worker outage logs are shared across jobs, quiet during cooldown, and reset after recovery', async t => {
+  installRemotePolicyDb();
+  const worker = makeWorker();
+  let now = 1_000_000;
+  t.mock.method(Date, 'now', () => now);
+  const warnings = t.mock.method(console, 'warn', () => {});
+  const info = t.mock.method(console, 'info', () => {});
+  const failure = status => new RemoteClientError(`Worker failed for job-${now}`, status, '<html>Cloudflare Tunnel error</html>');
+  noteRemoteBackgroundPollFailure(worker, failure(530), 'job sync one');
+  noteRemoteBackgroundPollFailure(worker, failure(502), 'queue sync');
+  for (let i = 0; i < 5; i++) {
+    now += 5000;
+    for (const feature of ['job sync one', 'job sync two', 'queue sync', 'job discovery']) {
+      assert.equal((await getRemoteBackgroundPollEligibility(worker, feature)).allowed, false);
+    }
+  }
+  assert.equal(warnings.mock.callCount(), 1);
+  assert.equal(info.mock.callCount(), 0);
+  now += 6000;
+  noteRemoteBackgroundPollFailure(worker, failure(530), 'samples');
+  assert.equal(warnings.mock.callCount(), 1, 'retry failures must not restart the log interval');
+  now += 300_000;
+  noteRemoteBackgroundPollFailure(worker, failure(502), 'metrics');
+  assert.equal(warnings.mock.callCount(), 2);
+  assert.match(warnings.mock.calls[1].arguments[0], /suppressed/);
+  now += 31_000;
+  assert.deepEqual(await runRemoteBackgroundPoll(worker, 'samples', async () => 'ok'), { skipped: false, value: 'ok' });
+  noteRemoteBackgroundPollFailure(worker, failure(530), 'samples');
+  assert.equal(warnings.mock.callCount(), 3, 'a new outage after recovery must be reported');
+});
+
+function loadPollingRoute(kind) {
+  const dependencies = {
+    '../../../../../utils/jobIdentity': {},
+    'next/server': { NextResponse: Response }, path,
+    '@/server/db': { db: { jobs: { findById: async () => ({ id: 'mirror', worker_id: 'worker-1', remote_job_id: 'remote-job' }) } } },
+    '@/server/trainingPaths': {}, '@/server/remoteAssets': {}, '@/server/jobSamples': {}, '@/utils/sampleMetadata': {},
+    '@/server/remoteClient': {
+      isLocalWorker: () => false, getRemoteWorker: async () => makeWorker(),
+      remotePollingJson, RemotePollUnavailableError, isRemoteJobMissingError: () => false,
+    },
+  };
+  const code = ts.transpileModule(
+    fs.readFileSync(new URL(`../src/app/api/jobs/[jobID]/${kind}/route.ts`, import.meta.url), 'utf8'),
+    { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } },
+  ).outputText;
+  const loadedModule = { exports: {} };
+  new Function('require', 'module', 'exports', code)(name => {
+    assert.ok(Object.hasOwn(dependencies, name), `Unexpected dependency ${name}`);
+    return dependencies[name];
+  }, loadedModule, loadedModule.exports);
+  return loadedModule.exports.GET;
+}
+
+test('sample and metric routes return failed polls without HTML dumps or repeated network requests', async t => {
+  installRemotePolicyDb();
+  const warnings = t.mock.method(console, 'warn', () => {});
+  const errors = t.mock.method(console, 'error', () => {});
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return new Response('<html>Cloudflare Tunnel error secret-body</html>', { status: 530 });
+  };
+  for (const kind of ['samples', 'metrics', 'samples', 'metrics']) {
+    const response = await loadPollingRoute(kind)(new Request(`http://localhost/api/jobs/mirror/${kind}`), {
+      params: Promise.resolve({ jobID: 'mirror' }),
+    });
+    assert.equal(response.status, 502, 'outages must not look like empty successful data');
+    assert.deepEqual(await response.json(), { error: `Error reading remote ${kind}` });
+  }
+  assert.equal(calls, 1);
+  assert.equal(warnings.mock.callCount(), 1);
+  assert.equal(errors.mock.callCount(), 0);
+  assert.doesNotMatch(warnings.mock.calls[0].arguments[0], /<html>|secret-body/);
+});
+
+test('polling preserves missing-job and authentication errors and does not cool down canceled requests', async t => {
+  installRemotePolicyDb();
+  const warnings = t.mock.method(console, 'warn', () => {});
+  for (const status of [404, 401]) {
+    globalThis.fetch = async () => new Response('{"error":"Job not found"}', { status });
+    await assert.rejects(remotePollingJson(makeWorker(), '/samples', 'samples'), error => error instanceof RemoteClientError && error.status === status);
+    assert.equal((await getRemoteBackgroundPollEligibility(makeWorker())).allowed, true);
+  }
+  const controller = new AbortController();
+  globalThis.fetch = async () => {
+    controller.abort();
+    throw controller.signal.reason;
+  };
+  await assert.rejects(remotePollingJson(makeWorker(), '/samples', 'samples', { signal: controller.signal }), { name: 'AbortError' });
+  assert.equal((await getRemoteBackgroundPollEligibility(makeWorker())).allowed, true);
+  assert.equal(warnings.mock.callCount(), 0);
 });

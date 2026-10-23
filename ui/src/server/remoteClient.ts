@@ -166,9 +166,9 @@ async function isWorkerAllowedInOfflineMode(worker: WorkerNodeRecord) {
   return allowedHosts.has(hostname);
 }
 
-function logRemoteBackgroundPoll(worker: WorkerNodeRecord, feature: string, message: string, level: 'info' | 'warn') {
-  const key = `${workerPollKey(worker)}:${feature}`;
-  const signature = message;
+function logRemoteBackgroundPoll(worker: WorkerNodeRecord, signature: string, message: string, level: 'info' | 'warn') {
+  // One outage affects every poll on the worker, regardless of job or endpoint.
+  const key = workerPollKey(worker);
   const now = Date.now();
   const state = remoteBackgroundPollLogState.get(key);
 
@@ -190,7 +190,7 @@ function logRemoteBackgroundPoll(worker: WorkerNodeRecord, feature: string, mess
 }
 
 function clearRemoteBackgroundPollLog(worker: WorkerNodeRecord, feature: string) {
-  const key = `${workerPollKey(worker)}:${feature}`;
+  const key = workerPollKey(worker);
   const state = remoteBackgroundPollLogState.get(key);
   if (state?.suppressedCount) {
     console.info(
@@ -257,6 +257,7 @@ export function isTransientRemoteBackgroundPollError(error: unknown) {
 
 function transientRemoteErrorReason(error: unknown) {
   if (isCloudflareTunnelUnavailable(error)) return 'Cloudflare tunnel is unavailable';
+  if (error instanceof RemoteClientError) return `HTTP ${error.status}`;
   const code = getNestedErrorCode(error);
   const message = getErrorMessage(error);
   return code ? `${code}: ${message}` : message;
@@ -272,7 +273,6 @@ export async function getRemoteBackgroundPollEligibility(
   if (cooldown && now < cooldown.until) {
     const seconds = Math.max(1, Math.ceil((cooldown.until - now) / 1000));
     const reason = `cooling down for ${seconds}s after ${cooldown.reason}`;
-    logRemoteBackgroundPoll(worker, feature, `Skipping ${feature} for worker ${worker.name}: ${reason}.`, 'info');
     return { allowed: false, reason };
   }
   if (cooldown) {
@@ -283,7 +283,7 @@ export async function getRemoteBackgroundPollEligibility(
   if (await isWorkerAllowedInOfflineMode(worker)) return { allowed: true };
 
   const reason = 'offline mode is enabled and this worker is not allowed for offline polling';
-  logRemoteBackgroundPoll(worker, feature, `Skipping ${feature} for worker ${worker.name}: ${reason}.`, 'info');
+  logRemoteBackgroundPoll(worker, 'offline', `Skipping ${feature} for worker ${worker.name}: ${reason}.`, 'info');
   return { allowed: false, reason };
 }
 
@@ -305,7 +305,7 @@ export function noteRemoteBackgroundPollFailure(
   });
   logRemoteBackgroundPoll(
     worker,
-    feature,
+    'unavailable',
     `Remote ${feature} for worker ${worker.name} failed; background polling will retry after cooldown: ${reason}.`,
     'warn',
   );
@@ -316,7 +316,9 @@ export async function runRemoteBackgroundPoll<T>(
   worker: WorkerNodeRecord,
   feature: string,
   task: () => Promise<T>,
+  signal?: AbortSignal,
 ): Promise<RemoteBackgroundPollResult<T>> {
+  signal?.throwIfAborted();
   const eligibility = await getRemoteBackgroundPollEligibility(worker, feature);
   if ('reason' in eligibility) return { skipped: true, reason: eligibility.reason };
 
@@ -325,6 +327,7 @@ export async function runRemoteBackgroundPoll<T>(
     noteRemoteBackgroundPollSuccess(worker, feature);
     return { skipped: false, value };
   } catch (error) {
+    if (signal?.aborted) throw error;
     if (noteRemoteBackgroundPollFailure(worker, error, feature)) {
       return { skipped: true, reason: transientRemoteErrorReason(error) };
     }
@@ -407,6 +410,25 @@ export async function remoteJson<T>(
   const response = await remoteRequest(worker, routePath, { timeoutMs: 30_000, ...requestInit, headers });
   const payload: unknown = JSON.parse(await readBoundedResponseText(response, maxResponseBytes));
   return payload as T;
+}
+
+export class RemotePollUnavailableError extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = 'RemotePollUnavailableError';
+  }
+}
+
+/** Read-only UI polling shares worker cooldowns without treating an outage as empty data. */
+export async function remotePollingJson(
+  worker: WorkerNodeRecord,
+  routePath: string,
+  feature: string,
+  init: Pick<RemoteRequestInit, 'signal'> & { maxResponseBytes?: number } = {},
+): Promise<unknown> {
+  const poll = await runRemoteBackgroundPoll(worker, feature, () => remoteJson<unknown>(worker, routePath, init), init.signal ?? undefined);
+  if ('reason' in poll) throw new RemotePollUnavailableError(poll.reason);
+  return poll.value;
 }
 
 export function withoutRemoteRedirects(init: RequestInit): RequestInit {

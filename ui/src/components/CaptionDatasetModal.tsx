@@ -94,6 +94,30 @@ type CaptionLaunchCheckpoint = {
   startState: 'saved' | 'uncertain' | 'started';
 };
 
+type PendingCaptionCreate = {
+  body: {
+    id: null;
+    name: string;
+    gpu_ids: string | null;
+    job_config: CaptionJobConfig;
+    job_type: 'caption';
+    job_ref: string;
+    idempotencyKey: string;
+  };
+  fingerprint: string;
+};
+
+function mayHaveCreatedJob(error: unknown): boolean {
+  if (!error || typeof error !== 'object' || !('response' in error)) return true;
+  const response = error.response;
+  if (!response || typeof response !== 'object' || !('status' in response) || typeof response.status !== 'number') return true;
+  const data = 'data' in response ? response.data : null;
+  const code = data && typeof data === 'object' && 'code' in data ? data.code : null;
+  // Conflicted receipts require review; never silently create or launch a replacement.
+  if (['CREATE_BUSY', 'CREATE_KEY_CONFLICT', 'CREATE_RESULT_CHANGED', 'CREATE_RESULT_DELETED'].includes(String(code))) return true;
+  return response.status >= 500 || [408, 425, 429].includes(response.status) || response.status < 400;
+}
+
 function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatasetModalState; onClose: () => void }) {
   const [jobConfig, setJobConfig] = useNestedState<CaptionJobConfig>(initialCaptionConfig(modalInfo));
   const [gpuIDs, setGpuIDs] = useState<string | null>(null);
@@ -108,6 +132,7 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
   const [createName] = useState(() => uuidv4());
   const preparedCopyRef = useRef<{ source: string; path: string } | null>(null);
   const [launchCheckpoint, setLaunchCheckpoint] = useState<CaptionLaunchCheckpoint | null>(null);
+  const [pendingCreate, setPendingCreate] = useState<PendingCaptionCreate | null>(null);
   const clearLaunchError = useRef<(() => void) | null>(null);
   const [allowDurableEncryptedResume, setAllowDurableEncryptedResume] = useState(false);
   const { gpuList, isGPUInfoLoaded } = useGPUInfo(null, null, 'local');
@@ -115,7 +140,7 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
   const systemPromptTouchedRef = useRef(false);
   const mountedRef = useRef(false);
   const [isSaving, setIsSaving] = useState(false);
-  const inputsLocked = isSaving || (!!launchCheckpoint && launchCheckpoint.startState !== 'saved');
+  const inputsLocked = isSaving || !!pendingCreate || (!!launchCheckpoint && launchCheckpoint.startState !== 'saved');
   const showGPUSelect = !isMac();
   const isLoadingExistingJob = sourceStatus === 'loading';
   const showLoadingOverlay = isLoadingExistingJob || isSaving;
@@ -216,8 +241,9 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
     setIsSaving(true);
     let stage: 'prepare' | 'save' | 'start' | 'queue' = 'prepare';
     let checkpoint = launchCheckpoint;
+    let creation = pendingCreate;
     try {
-      if (!checkpoint || checkpoint.startState === 'saved') {
+      if (!creation && (!checkpoint || checkpoint.startState === 'saved')) {
         const jobConfigToSave = objectCopy(jobConfig);
         const captionConfig = jobConfigToSave.config.process[0].caption;
         let jobRef = modalInfo.datasetPath;
@@ -249,29 +275,46 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
         stage = 'save';
         if (!checkpoint || checkpoint.fingerprint !== fingerprint) {
           const name = checkpoint?.name || existingJobName || createName;
-          const { data } = await apiClient.post<unknown>('/api/jobs', {
-            id: checkpoint?.id || modalInfo.jobId || null,
+          const id = checkpoint?.id || modalInfo.jobId || null;
+          const body = {
+            id,
             name,
             gpu_ids: gpuIDs,
             job_config: jobConfigToSave,
-            job_type: 'caption',
+            job_type: 'caption' as const,
             job_ref: jobRef,
-          });
-          if (!data || typeof data !== 'object' || !('id' in data) || typeof data.id !== 'string' || !data.id.trim()) {
-            throw new Error('Invalid caption job response');
-          }
-          checkpoint = {
-            id: data.id,
-            name,
-            fingerprint,
-            gpuIds: gpuIDs,
-            jobRef,
-            startKey: uuidv4(),
-            startState: 'saved',
           };
-          if (mountedRef.current) setLaunchCheckpoint(checkpoint);
+          if (!id) {
+            // Keep the exact request in this modal only until its outcome is known.
+            creation = { body: { ...body, id: null, idempotencyKey: uuidv4() }, fingerprint };
+            if (mountedRef.current) setPendingCreate(creation);
+          } else {
+            const { data } = await apiClient.post<unknown>('/api/jobs', body);
+            if (!data || typeof data !== 'object' || !('id' in data) || data.id !== id) {
+              throw new Error('Invalid caption job response');
+            }
+            checkpoint = { id, name, fingerprint, gpuIds: gpuIDs, jobRef, startKey: uuidv4(), startState: 'saved' };
+            if (mountedRef.current) setLaunchCheckpoint(checkpoint);
+          }
         }
       }
+      if (creation) {
+        stage = 'save';
+        const { data } = await apiClient.post<unknown>('/api/jobs', creation.body);
+        if (!data || typeof data !== 'object' || !('id' in data) || typeof data.id !== 'string' || !data.id.trim()) {
+          throw new Error('Invalid caption job response');
+        }
+        checkpoint = {
+          id: data.id, name: creation.body.name, fingerprint: creation.fingerprint,
+          gpuIds: creation.body.gpu_ids, jobRef: creation.body.job_ref, startKey: uuidv4(), startState: 'saved',
+        };
+        creation = null;
+        if (mountedRef.current) {
+          setPendingCreate(null);
+          setLaunchCheckpoint(checkpoint);
+        }
+      }
+      if (!checkpoint) throw new Error('Caption job was not saved');
       if (checkpoint.startState !== 'started') {
         stage = 'start';
         // Persist the command identity before sending: a lost response is not a rejection.
@@ -292,6 +335,9 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
       if (mountedRef.current) handleClose();
     } catch (error: unknown) {
       if (!mountedRef.current) return;
+      // A later authentication/validation rejection cannot disprove an earlier save.
+      const uncertainCreate = stage === 'save' && !!creation && (!!pendingCreate || mayHaveCreatedJob(error));
+      if (stage === 'save' && creation && !uncertainCreate) setPendingCreate(null);
       const uncertainStart = stage === 'start' && (!isStartJobError(error) || error.outcome === 'unknown');
       if (stage === 'start' && checkpoint && !uncertainStart) {
         // A conclusively rejected/failed command is finished. A deliberate retry
@@ -301,7 +347,9 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
       }
       const messages = {
         prepare: 'Failed to prepare caption dataset. Please try again.',
-        save: 'Failed to save job. Please try again.',
+        save: uncertainCreate
+          ? 'Job may already have been saved. Retry to recover the saved job before editing.'
+          : 'Failed to save job. Please try again.',
         start: uncertainStart
           ? 'Captioning may already have started. Retry to confirm or complete the start before editing.'
           : 'Job saved, but captioning could not start. Retry to start the saved job.',
@@ -453,6 +501,8 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
             >
               {isSaving
                 ? 'Starting…'
+                : pendingCreate
+                  ? 'Retry job save'
                 : launchCheckpoint?.startState === 'started'
                   ? 'Retry queue start'
                   : launchCheckpoint?.startState === 'uncertain'

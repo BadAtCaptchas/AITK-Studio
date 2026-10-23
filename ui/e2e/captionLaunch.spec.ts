@@ -251,3 +251,88 @@ test('a definitively failed start operation can retry unchanged configuration as
   expect(state.saves).toHaveLength(1);
   expect(state.queueStarts).toBe(1);
 });
+
+for (const failure of ['lost', 'busy', 'invalid'] as const) {
+  test(`caption creation recovers an ${failure} acknowledgement with the same saved input`, async ({ page }) => {
+    const { state, modal, submit, job } = await launchFixture(page, true);
+    const bodies: Record<string, unknown>[] = [];
+    const createdKeys = new Set<unknown>();
+    await page.route('**/api/jobs', route => {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      bodies.push(body);
+      createdKeys.add(body.idempotencyKey);
+      if (bodies.length === 1) {
+        if (failure === 'lost') return route.abort('failed');
+        if (failure === 'busy') return route.fulfill({ status: 409, json: { code: 'CREATE_BUSY', error: 'Creation still in progress' } });
+        return route.fulfill({ json: { accepted: true } });
+      }
+      if (failure === 'lost' && bodies.length === 2) return route.fulfill({ status: 401, json: { error: 'Fixture session expired' } });
+      return route.fulfill({ json: { ...job, name: body.name } });
+    });
+    state.failStart = false;
+    await submit.click();
+    await expect(submit).toBeEnabled();
+    await expect(modal.getByRole('alert').filter({ hasText: 'Job may already have been saved' })).toBeVisible();
+    await expect(modal.getByLabel('Caption Prompt', { exact: true })).toBeDisabled();
+    expect(state.starts).toBe(0);
+    await submit.click();
+    if (failure === 'lost') {
+      await expect(submit).toBeEnabled();
+      await expect(modal.getByRole('alert').filter({ hasText: 'Fixture session expired' })).toBeVisible();
+      await expect(modal.getByLabel('Caption Prompt', { exact: true })).toBeDisabled();
+      await submit.click();
+    }
+    await expect(modal).toHaveCount(0);
+    expect(bodies).toHaveLength(failure === 'lost' ? 3 : 2);
+    expect(bodies[0].idempotencyKey).toEqual(expect.any(String));
+    expect(bodies[1]).toEqual(bodies[0]);
+    if (failure === 'lost') expect(bodies[2]).toEqual(bodies[0]);
+    expect(createdKeys.size).toBe(1);
+    expect(state.starts).toBe(1);
+    expect(state.queueStarts).toBe(1);
+  });
+}
+
+test('a rejected caption creation permits edits and uses a fresh command for the retry', async ({ page }) => {
+  const { state, modal, submit, job } = await launchFixture(page, true);
+  const bodies: Record<string, unknown>[] = [];
+  await page.route('**/api/jobs', route => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    bodies.push(body);
+    if (bodies.length === 1) return route.fulfill({ status: 400, json: { code: 'INVALID_COMMAND', error: 'Fixture input rejected' } });
+    return route.fulfill({ json: { ...job, name: body.name } });
+  });
+  state.failStart = false;
+  await submit.click();
+  await expect(submit).toBeEnabled();
+  await expect(modal.getByLabel('Caption Prompt', { exact: true })).toBeEnabled();
+  await modal.getByLabel('Caption Prompt', { exact: true }).fill('Corrected caption prompt');
+  await submit.click();
+  await expect(modal).toHaveCount(0);
+  expect(bodies).toHaveLength(2);
+  expect(bodies[0].idempotencyKey).toEqual(expect.any(String));
+  expect(bodies[1].idempotencyKey).not.toBe(bodies[0].idempotencyKey);
+  expect(bodies[1]).toMatchObject({ job_config: { config: { process: [{ caption: { caption_prompt: 'Corrected caption prompt' } }] } } });
+});
+
+test('a recovered caption job changed elsewhere is never started or replaced automatically', async ({ page }) => {
+  const { state, modal, submit } = await launchFixture(page, true);
+  const bodies: unknown[] = [];
+  await page.route('**/api/jobs', route => {
+    bodies.push(route.request().postDataJSON());
+    if (bodies.length === 1) return route.abort('failed');
+    return route.fulfill({ status: 409, json: { code: 'CREATE_RESULT_CHANGED', error: 'The saved job changed after this creation command. Review it before starting.' } });
+  });
+  await submit.click();
+  await expect(submit).toBeEnabled();
+  await submit.click();
+  await expect(submit).toBeEnabled();
+  await expect(modal.getByRole('alert').filter({ hasText: 'Review it before starting' })).toBeVisible();
+  await expect(modal.getByLabel('Caption Prompt', { exact: true })).toBeDisabled();
+  await submit.click();
+  await expect.poll(() => bodies.length).toBe(3);
+  expect(bodies[1]).toEqual(bodies[0]);
+  expect(bodies[2]).toEqual(bodies[0]);
+  expect(state.starts).toBe(0);
+  expect(state.queueStarts).toBe(0);
+});

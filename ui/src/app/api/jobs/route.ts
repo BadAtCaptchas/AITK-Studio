@@ -12,6 +12,7 @@ import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClien
 import { listJobsForJobsApi } from '@/server/jobsApiList';
 import { rewriteSameWorkerRemoteDatasetRefsForWorker } from '@/server/remoteDatasetPaths';
 import { prepareLocalJobConfig, prepareRemoteJobConfigEdit } from '@/server/trainingPaths';
+import { createJobWithReceipt } from '@/server/jobCreateCommand';
 
 import type { Job } from '@/types';
 import { isRequestAuthenticated } from '@/utils/authSession';
@@ -143,6 +144,14 @@ async function postCommand(request: Request) {
   try {
     const body = await readJsonCommand(request);
     const { id, name, job_config } = body;
+    let createKey: string | undefined;
+    if (body.idempotencyKey !== undefined) {
+      if (typeof body.idempotencyKey !== 'string' || !/^[a-zA-Z0-9_-]{8,128}$/.test(body.idempotencyKey)) {
+        throw new CommandInputError('Invalid idempotencyKey');
+      }
+      if (id !== undefined && id !== null) throw new CommandInputError('Creation idempotencyKey cannot be combined with a job id');
+      createKey = body.idempotencyKey;
+    }
     let resolvedJobConfig = isRecord(job_config) ? { ...job_config, capability_version: job_config.capability_version ?? 1 } : job_config;
     const worker_id = normalizeWorkerId(body.worker_id);
 
@@ -270,22 +279,15 @@ async function postCommand(request: Request) {
         throw error;
       }
     } else {
-      // find the highest queue position and add 1000
-      const newQueuePosition = (await db.jobs.maxQueuePosition()) + 1000;
-      const duplicateJob = await db.jobs.findByName(name);
-      if (duplicateJob) {
-        return NextResponse.json({ error: duplicateJobNameError() }, { status: 409 });
-      }
-
-      // Create new training
-      if (isLocalWorker(worker_id)) resolvedJobConfig = await prepareLocalJobConfig(resolvedJobConfig);
-      const training = await db.jobs.create({
-        name,
-        worker_id,
-        gpu_ids,
-        job_config: JSON.stringify(resolvedJobConfig),
-        queue_position: newQueuePosition,
-        ...extra,
+      const training = await createJobWithReceipt(createKey, {
+        name, worker_id, gpu_ids, job_config: resolvedJobConfig,
+        job_type: extra.job_type ?? 'train', job_ref: extra.job_ref ?? null,
+      }, async () => {
+        const duplicateJob = await db.jobs.findByName(name);
+        if (duplicateJob) throw new CommandInputError(duplicateJobNameError(), 409, 'JOB_NAME_CONFLICT');
+        const newQueuePosition = (await db.jobs.maxQueuePosition()) + 1000;
+        const config = isLocalWorker(worker_id) ? await prepareLocalJobConfig(resolvedJobConfig) : resolvedJobConfig;
+        return { name, worker_id, gpu_ids, job_config: JSON.stringify(config), queue_position: newQueuePosition, ...extra };
       });
       return NextResponse.json(training);
     }

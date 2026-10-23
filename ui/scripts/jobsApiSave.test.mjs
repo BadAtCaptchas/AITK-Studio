@@ -77,6 +77,12 @@ function fixture(existing = null) {
       },
     },
     '@/server/jobAttempts': { claimJobMaintenance: async job => ({ ...job, status: 'editing' }) },
+    '@/server/jobCreateCommand': { createJobWithReceipt: async (key, _input, prepare) => {
+      assert.equal(key, undefined);
+      const job = { ...await prepare(), id: 'new-job' };
+      created.push(job);
+      return job;
+    } },
     '@/server/remoteClient': {
       isLocalWorker: id => !id || id === 'local',
       getRemoteWorker: async () => worker,

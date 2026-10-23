@@ -31,7 +31,8 @@ export default function useJobsList({
   const [statusCounts, setStatusCounts] = useScopedState<Record<string, number> | null>(scope, null);
   const [freshness, setFreshness] = useScopedState<Page['freshness']>(scope, null);
   const activeScope = useCommittedRef(scope);
-  const pages = useRef<Array<Page & { cursor: string | null }>>([]);
+  const pages = useRef<Array<Page & { cursor: string | null; readVersion: number }>>([]);
+  const readVersion = useRef(0);
   const pollPage = useRef(0);
   const inflight = useRef<AbortController | null>(null);
   const refreshJobs = useCallback(
@@ -63,13 +64,22 @@ export default function useJobsList({
         if (!Array.isArray(data.jobs) || (data.nextCursor !== null && typeof data.nextCursor !== 'string'))
           throw new Error('Invalid job page');
         if (controller.signal.aborted || activeScope.current !== scope) return;
-        pages.current[index] = { ...data, cursor };
+        pages.current[index] = { ...data, cursor, readVersion: ++readVersion.current };
         if (!data.nextCursor) pages.current = pages.current.slice(0, index + 1);
         else if (pages.current[index + 1]) pages.current[index + 1].cursor = data.nextCursor;
         pollPage.current = index + 1;
         setFreshness(data.freshness);
         setStatusCounts(data.statusCounts ?? null);
-        setJobs([...new Map(pages.current.flatMap(page => page.jobs).map(job => [job.id, job])).values()]);
+        // Rows can cross a page boundary while loaded pages refresh independently.
+        // Keep the newest received row, rather than letting a later cached page overwrite it.
+        const newest = new Map<string, { job: Job; readVersion: number }>();
+        for (const page of pages.current) {
+          for (const job of page.jobs) {
+            if ((newest.get(job.id)?.readVersion ?? -1) < page.readVersion)
+              newest.set(job.id, { job, readVersion: page.readVersion });
+          }
+        }
+        setJobs([...newest.values()].map(item => item.job));
         setNextCursor(pages.current.at(-1)?.nextCursor ?? null);
         setStatus('success');
       } catch {
@@ -95,6 +105,7 @@ export default function useJobsList({
   );
   useEffect(() => {
     pages.current = [];
+    readVersion.current = 0;
     pollPage.current = 0;
     return () => {
       inflight.current?.abort();

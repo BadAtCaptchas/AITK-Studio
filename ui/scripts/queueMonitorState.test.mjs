@@ -135,3 +135,20 @@ test('a restarted metric stream drops old points/cursors and ignores old attempt
     { step: 0, value: 0.25 },
   ]);
 });
+
+test('refreshing a page keeps its new job data ahead of duplicate rows from older cached pages', async t => {
+  const f = fixture(t, 'useJobsList');
+  const page = (jobs, nextCursor) => ({ data: { jobs, nextCursor, statusCounts: { queued: 2 } } });
+  const olderJob = { id: 'moving', step: 10, status: 'queued', updated_at: '2026-10-23T10:00:00Z' };
+  const newerJob = { ...olderJob, step: 50, status: 'running', updated_at: '2026-10-23T10:01:00Z' };
+  const first = f.render({ view: 'all' }).refreshJobs();
+  f.requests[0].resolve(page([{ id: 'removed', step: 0 }], 'next'));
+  await first;
+  const more = f.render({ view: 'all' }).loadMore();
+  f.requests[1].resolve(page([olderJob], null));
+  await more;
+  const refresh = f.render({ view: 'all' }).refreshJobs();
+  f.requests[2].resolve(page([newerJob], 'next'));
+  await refresh;
+  assert.equal(f.render({ view: 'all' }).jobs.find(job => job.id === 'moving').step, 50);
+});

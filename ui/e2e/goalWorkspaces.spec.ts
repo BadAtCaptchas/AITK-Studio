@@ -1,7 +1,13 @@
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
+const origin = 'http://127.0.0.1:15875';
+const image = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZtsAAAAASUVORK5CYII=',
+  'base64',
+);
 let cookies: Awaited<ReturnType<BrowserContext['cookies']>> = [];
 const errors = new WeakMap<Page, string[]>();
 
@@ -148,4 +154,109 @@ test('late LoRA upload keeps a newer Base model choice', async ({ page }) => {
   await page.waitForTimeout(100);
   await expect(page.getByRole('button', { name: 'Base model', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByLabel('Base Model', { exact: true })).toHaveValue('fixture/newer-model-choice');
+});
+
+async function twoImageDataset(page: Page) {
+  const dataset = `goal-workspace-${randomUUID().slice(0, 8)}`;
+  const uploadGroup = randomUUID();
+  for (const [name, data] of [
+    ['a.png', image],
+    ['a.txt', Buffer.from('First caption')],
+    ['b.png', image],
+    ['b.txt', Buffer.from('Second caption')],
+  ] as const) {
+    const response = await page.request.post('/api/datasets/upload', {
+      headers: {
+        Origin: origin,
+        'Content-Type': 'application/octet-stream',
+        'X-AITK-Dataset-Name': encodeURIComponent(dataset),
+        'X-AITK-File-Name': name,
+        'X-AITK-Upload-Group': uploadGroup,
+      },
+      data,
+    });
+    expect(response.status()).toBe(200);
+  }
+  return dataset;
+}
+
+test('Dataset Save and Next stays on edits made while the caption save is pending', async ({ page }) => {
+  const dataset = await twoImageDataset(page);
+  await page.goto(`/datasets/${dataset}`);
+  const caption = page.getByRole('textbox', { name: 'Image caption', exact: true });
+  await expect(caption).toHaveValue('First caption');
+  let finish: (() => Promise<void>) | undefined;
+  let requests = 0;
+  await page.route('**/api/img/caption', async route => {
+    if (route.request().method() !== 'POST' || ++requests > 1) return route.continue();
+    const response = await route.fetch();
+    await new Promise<void>(resolve => {
+      finish = async () => {
+        await route.fulfill({ response });
+        resolve();
+      };
+    });
+  });
+  await caption.fill('Submitted caption');
+  const advance = page.getByRole('button', { name: 'Save & Next', exact: true });
+  await advance.click();
+  await expect.poll(() => Boolean(finish)).toBe(true);
+  await caption.fill('Newer unsaved caption');
+  const response = page.waitForResponse(
+    response => response.url().endsWith('/api/img/caption') && response.request().method() === 'POST',
+  );
+  await finish!();
+  await response;
+  await expect(advance).toBeEnabled();
+  await expect(caption).toHaveValue('Newer unsaved caption');
+  await advance.click();
+  await expect(caption).toHaveValue('Second caption');
+  await page.reload();
+  await expect(caption).toHaveValue('Newer unsaved caption');
+});
+
+test('Dataset bulk caption actions stop when the current caption cannot be saved', async ({ page }) => {
+  const dataset = await twoImageDataset(page);
+  await page.goto(`/datasets/${dataset}`);
+  const caption = page.getByRole('textbox', { name: 'Image caption', exact: true });
+  await expect(caption).toHaveValue('First caption');
+  await caption.fill('First caption with unsaved edits');
+  let bulkRequests = 0;
+  await page.route('**/api/img/caption', route =>
+    route.request().method() === 'POST'
+      ? route.fulfill({ status: 503, json: { error: 'Fixture caption save failed' } })
+      : route.continue(),
+  );
+  await page.route('**/api/datasets/caption-bulk', route => {
+    bulkRequests++;
+    return route.fulfill({ json: { found: 1, affected: 1 } });
+  });
+  page.on('dialog', dialog => dialog.accept());
+  await page.getByRole('button', { name: 'Batch actions', exact: true }).click();
+  await page.getByPlaceholder('Find caption keywords', { exact: true }).fill('First');
+  const remove = page.getByRole('button', { name: 'Remove words', exact: true });
+  await expect(remove).toBeEnabled();
+  const failedSave = page.waitForResponse(
+    response => response.url().endsWith('/api/img/caption') && response.request().method() === 'POST',
+  );
+  await remove.click();
+  expect((await failedSave).status()).toBe(503);
+  await expect(remove).toBeEnabled();
+  expect(bulkRequests).toBe(0);
+  await expect(caption).toHaveValue('First caption with unsaved edits');
+  let deletes = 0;
+  await page.route('**/api/img/delete-bulk', route => {
+    deletes++;
+    return route.fulfill({ json: { requested: 2, deleted: 0, failed: 2 } });
+  });
+  await page.getByRole('button', { name: 'Select shown', exact: true }).click();
+  const failedDeleteSave = page.waitForResponse(
+    response => response.url().endsWith('/api/img/caption') && response.request().method() === 'POST',
+  );
+  const deleteSelected = page.getByRole('button', { name: 'Delete selected', exact: true });
+  await deleteSelected.click();
+  expect((await failedDeleteSave).status()).toBe(503);
+  await expect(deleteSelected).toBeEnabled();
+  expect(deletes).toBe(0);
+  await expect(caption).toHaveValue('First caption with unsaved edits');
 });

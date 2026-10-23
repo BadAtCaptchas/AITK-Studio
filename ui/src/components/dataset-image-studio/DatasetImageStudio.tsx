@@ -1220,7 +1220,12 @@ function DatasetImageStudioContent({
       setIsSaving(true);
       try {
         await saveCaptionForItem(selectedItem, selectedKey, value);
-        return true;
+        // A successful request only covers its captured caption. Keep newer edits
+        // selected so navigation/approval cannot imply that they were saved too.
+        const currentValue = isPlainTextCaptionItem(selectedItem)
+          ? latestCaptionRef.current
+          : latestCaptionRef.current.trim();
+        return selectedKeyRef.current === selectedKey && currentValue === value;
       } catch (error) {
         console.error('Caption save failed:', error);
         alert('Failed to save caption. Please try again.');
@@ -1540,7 +1545,11 @@ function DatasetImageStudioContent({
       setIsDeletingImages(true);
       setDeleteMessage('');
       try {
-        await saveCaption();
+        if (!(await saveCaption())) {
+          const message = 'Save the current caption before deleting images.';
+          setDeleteMessage(message);
+          return { requested: uniqueItems.length, deleted: 0, failed: uniqueItems.length, message };
+        }
         const result = await onDeleteImages(uniqueItems);
         applyImageDeleteResult(result, uniqueItems);
         const message = result.message || imageDeleteResultMessage(result);
@@ -1601,7 +1610,7 @@ function DatasetImageStudioContent({
       if (request.matches.length === 0) {
         return { action: request.action, found: 0, affected: 0 };
       }
-      await saveCaption();
+      if (!(await saveCaption())) throw new Error('Save the current caption before running bulk actions.');
       const firstItem = request.matches[0]?.item;
       let result: BulkCaptionActionResult;
       if (firstItem?.kind === 'encrypted') {

@@ -360,6 +360,49 @@ test('queue commands cannot reorder an incomplete snapshot with no remaining cur
   expect(reorders).toHaveLength(0);
 });
 
+test('polling an applied order before its request resolves does not report a conflict', async ({ page }) => {
+  const { jobs } = await mockQueue(page);
+  let releaseReply: () => void = () => {};
+  const reply = new Promise<void>(resolve => {
+    releaseReply = resolve;
+  });
+  let applied = false;
+  await page.route('**/api/queue/*/reorder', async route => {
+    const body: unknown = route.request().postDataJSON();
+    if (body && typeof body === 'object' && 'job_ids' in body && Array.isArray(body.job_ids)) {
+      body.job_ids.forEach((id: unknown, index: number) => {
+        const item = jobs.find(job => job.id === id);
+        if (item) item.queue_position = (index + 1) * 1000;
+      });
+    }
+    applied = true;
+    await reply;
+    await route.fulfill({ json: { ok: true } });
+  });
+  try {
+    await page.goto('/jobs');
+    await page.getByRole('button', { name: 'Inspect material_study', exact: true }).click();
+    await page.getByRole('button', { name: 'Move up', exact: true }).click();
+    await page.getByRole('button', { name: 'Apply order', exact: true }).click();
+    await expect.poll(() => applied).toBe(true);
+    await Promise.all([
+      page.waitForResponse(response => {
+        const url = new URL(response.url());
+        return url.pathname === '/api/jobs' && !url.searchParams.has('id');
+      }),
+      page.getByRole('button', { name: 'Refresh queue', exact: true }).click(),
+    ]);
+    await expect(page.getByRole('button', { name: 'Refresh queue', exact: true }).locator('svg')).not.toHaveClass(
+      /animate-spin/,
+    );
+  } finally {
+    releaseReply();
+  }
+  await expect(page.getByRole('button', { name: 'Saving…', exact: true })).toHaveCount(0);
+  await expect(page.getByText('Queue order was not saved', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Unsaved order', { exact: true })).toHaveCount(0);
+});
+
 for (const status of ['starting', 'remote-starting']) {
   test(`monitor continues log polling while a job is ${status}`, async ({ page }) => {
     const { jobs } = await mockQueue(page);

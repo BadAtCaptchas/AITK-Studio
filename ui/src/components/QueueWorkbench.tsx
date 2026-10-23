@@ -522,6 +522,7 @@ export default function QueueWorkbench({ filterText, emptyAction, focusGpuIDs, o
   }, [filteredJobs, queues, gpuList, workers, focusGpuIDs]);
   if (
     pendingReorder &&
+    !reorderBusy &&
     !matchesQueuedLaneOrder(jobs, pendingReorder.baseJobIDs, pendingReorder.workerID, pendingReorder.gpuIDs)
   ) {
     setPendingReorder(null);

@@ -137,6 +137,15 @@ const emptyOllamaWorkerForm = {
   offline_bypass_enabled: false,
 };
 
+function savedWorkerId(value: unknown): string {
+  if (typeof value !== 'object' || value === null || !('id' in value) || typeof value.id !== 'string') {
+    throw new Error('Worker save response is missing its identity');
+  }
+  const id = value.id.trim();
+  if (!id) throw new Error('Worker save response is missing its identity');
+  return id;
+}
+
 function formatUpdaterTime(value?: string | null) {
   if (!value) return 'Not checked yet';
   const date = new Date(value);
@@ -275,6 +284,10 @@ export default function Settings() {
   const [workerStatus, setWorkerStatus] = useState<'idle' | 'saving' | 'error'>('idle');
   const [ollamaWorkerForm, setOllamaWorkerForm] = useState(emptyOllamaWorkerForm);
   const [ollamaWorkerStatus, setOllamaWorkerStatus] = useState<'idle' | 'saving' | 'error'>('idle');
+  const workerSavePending = useRef(false);
+  const workerEditorVersion = useRef(0);
+  const ollamaWorkerSavePending = useRef(false);
+  const ollamaWorkerEditorVersion = useRef(0);
   const [cloudflared, setCloudflared] = useState<CloudflaredStatus | null>(null);
   const [cloudflaredAction, setCloudflaredAction] = useState<'idle' | 'starting' | 'downloading' | 'error'>('idle');
   const [cloudflaredActionError, setCloudflaredActionError] = useState('');
@@ -604,19 +617,46 @@ export default function Settings() {
 
   const saveWorker = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (workerSavePending.current) return;
+    workerSavePending.current = true;
+    const submitted = workerForm;
+    const editorVersion = workerEditorVersion.current;
     setWorkerStatus('saving');
     try {
-      await apiClient.post('/api/workers', workerForm);
-      setWorkerForm(emptyWorkerForm);
+      const response = await apiClient.post<unknown>('/api/workers', submitted);
+      const id = savedWorkerId(response.data);
+      if (!settingsMounted.current) return;
+      setWorkerForm(current => {
+        if (workerEditorVersion.current !== editorVersion) return current;
+        if (current === submitted) return emptyWorkerForm;
+        // A new worker already exists after this response; subsequent edits must update it.
+        return { ...current, id };
+      });
       refreshWorkers();
       setWorkerStatus('idle');
-    } catch (error) {
-      console.error('Error saving worker:', error);
-      setWorkerStatus('error');
+    } catch {
+      // Request errors can contain the submitted token; keep feedback free of request details.
+      if (settingsMounted.current) {
+        const isCurrentEditor = workerEditorVersion.current === editorVersion;
+        setWorkerStatus(isCurrentEditor ? 'error' : 'idle');
+        if (!isCurrentEditor) {
+          reportWorkflowError('The previous worker could not be saved. Your current draft is unchanged.');
+        }
+      }
+    } finally {
+      workerSavePending.current = false;
     }
   };
 
+  const cancelWorkerEdit = () => {
+    workerEditorVersion.current += 1;
+    setWorkerForm(emptyWorkerForm);
+    if (!workerSavePending.current) setWorkerStatus('idle');
+  };
+
   const editWorker = (worker: WorkerNode) => {
+    workerEditorVersion.current += 1;
+    if (!workerSavePending.current) setWorkerStatus('idle');
     setWorkerForm({
       id: worker.id,
       name: worker.name,
@@ -694,19 +734,46 @@ export default function Settings() {
 
   const saveOllamaWorker = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (ollamaWorkerSavePending.current) return;
+    ollamaWorkerSavePending.current = true;
+    const submitted = ollamaWorkerForm;
+    const editorVersion = ollamaWorkerEditorVersion.current;
     setOllamaWorkerStatus('saving');
     try {
-      await apiClient.post('/api/ollama-workers', ollamaWorkerForm);
-      setOllamaWorkerForm(emptyOllamaWorkerForm);
+      const response = await apiClient.post<unknown>('/api/ollama-workers', submitted);
+      const id = savedWorkerId(response.data);
+      if (!settingsMounted.current) return;
+      setOllamaWorkerForm(current => {
+        if (ollamaWorkerEditorVersion.current !== editorVersion) return current;
+        if (current === submitted) return emptyOllamaWorkerForm;
+        return { ...current, id };
+      });
       refreshOllamaWorkers();
       setOllamaWorkerStatus('idle');
-    } catch (error) {
-      console.error('Error saving Remote Ollama worker:', error);
-      setOllamaWorkerStatus('error');
+    } catch {
+      if (settingsMounted.current) {
+        const isCurrentEditor = ollamaWorkerEditorVersion.current === editorVersion;
+        setOllamaWorkerStatus(isCurrentEditor ? 'error' : 'idle');
+        if (!isCurrentEditor) {
+          reportWorkflowError(
+            'The previous Remote Ollama endpoint could not be saved. Your current draft is unchanged.',
+          );
+        }
+      }
+    } finally {
+      ollamaWorkerSavePending.current = false;
     }
   };
 
+  const cancelOllamaWorkerEdit = () => {
+    ollamaWorkerEditorVersion.current += 1;
+    setOllamaWorkerForm(emptyOllamaWorkerForm);
+    if (!ollamaWorkerSavePending.current) setOllamaWorkerStatus('idle');
+  };
+
   const editOllamaWorker = (worker: RemoteOllamaWorker) => {
+    ollamaWorkerEditorVersion.current += 1;
+    if (!ollamaWorkerSavePending.current) setOllamaWorkerStatus('idle');
     setOllamaWorkerForm({
       id: worker.id,
       name: worker.name,
@@ -1065,7 +1132,7 @@ export default function Settings() {
                       {workerForm.id && (
                         <button
                           type="button"
-                          onClick={() => setWorkerForm(emptyWorkerForm)}
+                          onClick={cancelWorkerEdit}
                           className="h-9 border border-gray-800 px-3 text-sm text-gray-300 hover:bg-gray-900"
                         >
                           Cancel
@@ -1479,7 +1546,7 @@ export default function Settings() {
                             {ollamaWorkerForm.id && (
                               <button
                                 type="button"
-                                onClick={() => setOllamaWorkerForm(emptyOllamaWorkerForm)}
+                                onClick={cancelOllamaWorkerEdit}
                                 className="h-9 border border-gray-800 px-3 text-sm text-gray-300"
                               >
                                 Cancel

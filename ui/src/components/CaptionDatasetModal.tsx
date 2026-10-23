@@ -18,7 +18,7 @@ import AdvancedConfigEditor from '@/components/AdvancedConfigEditor';
 import { SelectInput } from '@/components/formInputs';
 import { Loader2 } from 'lucide-react';
 import { defaultIdeogramJsonCaptionPrompt } from '@/helpers/captionOptions';
-import { parseCaptionJobSource } from '@/utils/captionJobSource';
+import { parseCaptionJobConfig, parseCaptionJobSource } from '@/utils/captionJobSource';
 export interface CaptionDatasetModalState {
   datasetPath: string;
   jobId?: string | null;
@@ -93,6 +93,8 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
   );
   const [sourceAttempt, setSourceAttempt] = useState(0);
   const [activeTab, setActiveTab] = useState<'simple' | 'advanced'>('simple');
+  const [hasOpenedConfig, setHasOpenedConfig] = useState(false);
+  const [isConfigValid, setIsConfigValid] = useState(true);
   const [allowDurableEncryptedResume, setAllowDurableEncryptedResume] = useState(false);
   const { gpuList, isGPUInfoLoaded } = useGPUInfo(null, null, 'local');
   const isSavingRef = useRef(false);
@@ -182,7 +184,7 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
     onClose();
   };
   const saveJob = async () => {
-    if (isSavingRef.current || sourceStatus !== 'ready') return;
+    if (isSavingRef.current || sourceStatus !== 'ready' || !isConfigValid) return;
     if (!modalInfo?.datasetPath) {
       reportWorkflowError('Dataset path is missing. Please try again.');
       return;
@@ -296,7 +298,14 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
           <button type="button" className={tabButtonClass('simple')} onClick={() => setActiveTab('simple')}>
             Simple
           </button>
-          <button type="button" className={tabButtonClass('advanced')} onClick={() => setActiveTab('advanced')}>
+          <button
+            type="button"
+            className={tabButtonClass('advanced')}
+            onClick={() => {
+              setHasOpenedConfig(true);
+              setActiveTab('advanced');
+            }}
+          >
             Advanced
           </button>
           <div className="flex-1" />
@@ -316,26 +325,45 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
             saveJob();
           }}
         >
-          {sourceStatus === 'ready' &&
-            (activeTab === 'simple' ? (
-              <CaptionSimpleJob
-                jobConfig={jobConfig}
-                setJobConfig={setJobConfig}
-                datasetPath={modalInfo?.datasetPath || ''}
-                encryptedDatasetKeyB64={modalInfo?.encryptedDatasetKeyB64}
-                gpuIDs={gpuIDs}
-                setGpuIDs={setGpuIDs}
-                gpuList={gpuList}
-                showGPUSelect={showGPUSelect}
-                onSystemPromptChange={() => {
-                  systemPromptTouchedRef.current = true;
-                }}
-              />
-            ) : (
-              <div className="h-[60vh] mt-2">
-                <AdvancedConfigEditor config={jobConfig} setConfig={setJobConfig} />
-              </div>
-            ))}
+          {sourceStatus === 'ready' && (
+            <>
+              {activeTab === 'simple' &&
+                (isConfigValid ? (
+                  <CaptionSimpleJob
+                    jobConfig={jobConfig}
+                    setJobConfig={setJobConfig}
+                    datasetPath={modalInfo?.datasetPath || ''}
+                    encryptedDatasetKeyB64={modalInfo?.encryptedDatasetKeyB64}
+                    gpuIDs={gpuIDs}
+                    setGpuIDs={setGpuIDs}
+                    gpuList={gpuList}
+                    showGPUSelect={showGPUSelect}
+                    onSystemPromptChange={() => {
+                      systemPromptTouchedRef.current = true;
+                    }}
+                  />
+                ) : (
+                  <div role="alert" className="rounded border border-rose-700 p-3 text-sm">
+                    <p>Fix the configuration in Advanced before editing this form or saving. Your text is retained.</p>
+                    <button type="button" className="operator-button mt-2" onClick={() => setActiveTab('advanced')}>
+                      Return to Advanced
+                    </button>
+                  </div>
+                ))}
+              {hasOpenedConfig && (
+                <div className={activeTab === 'advanced' ? 'h-[60vh] mt-2' : 'hidden'}>
+                  <AdvancedConfigEditor
+                    config={jobConfig}
+                    setConfig={setJobConfig}
+                    transformOnParse={parseCaptionJobConfig}
+                    onValidityChange={setIsConfigValid}
+                    active={activeTab === 'advanced'}
+                    readOnly={isSaving}
+                  />
+                </div>
+              )}
+            </>
+          )}
 
           <div className="mt-6 flex justify-end space-x-3">
             {modalInfo?.encryptedDatasetKeyB64 && (
@@ -357,7 +385,11 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
             <button type="button" className="operator-button" onClick={handleClose}>
               Cancel
             </button>
-            <button type="submit" disabled={isSaving || sourceStatus !== 'ready'} className="operator-button-primary">
+            <button
+              type="submit"
+              disabled={isSaving || sourceStatus !== 'ready' || !isConfigValid}
+              className="operator-button-primary"
+            >
               {isSaving ? 'Starting…' : 'Save & start captioning'}
             </button>
           </div>

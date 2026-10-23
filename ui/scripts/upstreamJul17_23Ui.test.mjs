@@ -260,7 +260,7 @@ test('polling hooks guard request identity and clear data when their request sco
   assert.doesNotMatch(job, /projectID|project_id/);
   assert.match(files, /activeJobIDRef\.current !== requestJobID/);
   assert.match(files, /useScopedState<FileObject\[\]>\(jobID, \[\]\)/);
-  assert.match(samples, /activeJobIDRef\.current !== requestJobID/);
+  assert.match(samples, /activeScopeRef\.current !== currentRequestScope/);
   assert.match(samples, /useScopedState<string\[\]>\(jobID, \[\]\)/);
   assert.match(jobs, /activeScope\.current !== scope/);
   assert.match(jobs, /useScopedState<Job\[\]>\(scope, \[\]\)/);

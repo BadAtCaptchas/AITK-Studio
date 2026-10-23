@@ -2,7 +2,7 @@
 import useCommittedRef from './useCommittedRef';
 import useScopedState from './useScopedState';
 
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { apiClient } from '@/utils/api';
 import usePollLoop from './usePollLoop';
 import { parseSampleMetadataMap, type SampleMetadata } from '@/utils/sampleMetadata';
@@ -10,19 +10,27 @@ import { parseSampleMetadataMap, type SampleMetadata } from '@/utils/sampleMetad
 export default function useSampleImages(jobID: string, reloadInterval: null | number = null, includeMetadata = false) {
   const [sampleImages, setSampleImages] = useScopedState<string[]>(jobID, []);
   const [sampleMetadata, setSampleMetadata] = useScopedState<Record<string, SampleMetadata>>(jobID, {});
-  const activeJobIDRef = useCommittedRef(jobID);
+  const requestScope = JSON.stringify([jobID, includeMetadata]);
+  const activeScopeRef = useCommittedRef(requestScope);
+  const requestGeneration = useRef(0);
   const [status, setStatus] = useScopedState<'idle' | 'loading' | 'success' | 'error'>(jobID, 'idle');
 
   const refreshSampleImages = useCallback(
     (signal?: AbortSignal) => {
-      const requestJobID = jobID;
-      if (activeJobIDRef.current !== requestJobID) return;
+      const currentRequestScope = requestScope;
+      if (signal?.aborted || activeScopeRef.current !== currentRequestScope) return;
+      const generation = ++requestGeneration.current;
       setStatus('loading');
       return apiClient
         .get<unknown>(`/api/jobs/${encodeURIComponent(jobID)}/samples${includeMetadata ? '?metadata=1' : ''}`, { signal })
         .then(res => res.data)
         .then(data => {
-          if (signal?.aborted || activeJobIDRef.current !== requestJobID) return;
+          if (
+            signal?.aborted ||
+            activeScopeRef.current !== currentRequestScope ||
+            generation !== requestGeneration.current
+          )
+            return;
           if (
             !data ||
             typeof data !== 'object' ||
@@ -36,13 +44,24 @@ export default function useSampleImages(jobID: string, reloadInterval: null | nu
           setStatus('success');
         })
         .catch(error => {
-          if (signal?.aborted || activeJobIDRef.current !== requestJobID) return;
+          if (
+            signal?.aborted ||
+            activeScopeRef.current !== currentRequestScope ||
+            generation !== requestGeneration.current
+          )
+            return;
           console.error('Error fetching samples:', error);
           setStatus('error');
         });
     },
-    [jobID, includeMetadata, setStatus, setSampleImages, setSampleMetadata],
+    [jobID, includeMetadata, requestScope, setStatus, setSampleImages, setSampleMetadata],
   );
+
+  useEffect(() => {
+    return () => {
+      requestGeneration.current += 1;
+    };
+  }, [requestScope]);
 
   usePollLoop(signal => refreshSampleImages(signal), reloadInterval, [jobID, includeMetadata]);
 

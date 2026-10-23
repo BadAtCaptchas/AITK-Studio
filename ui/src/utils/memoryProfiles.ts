@@ -69,7 +69,9 @@ const LARGE_TEXT_ENCODER_ARCHES = new Set([
 ]);
 
 export function normalizeMemoryProfileArch(archName?: string | null) {
-  return String(archName || '').split(':')[0];
+  const arch = String(archName || '').split(':')[0];
+  // ModelConfig resolves Flex.1 through the Flux runtime before applying memory defaults.
+  return arch === 'flex1' ? 'flux' : arch;
 }
 
 export function supportsBlockLayerOffloading(archName?: string | null) {

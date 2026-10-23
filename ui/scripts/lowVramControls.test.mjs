@@ -34,9 +34,9 @@ for (const [from, destination] of [
   });
 }
 
-test('Low VRAM capability correction does not broaden Flex.2 or change offloading controls', () => {
+test('Low VRAM capabilities retain supported offloading and exclude Flex.2', () => {
   assert.equal(modelArchs.find(model => model.name === 'flex2').additionalSections.includes('model.low_vram'), false);
-  for (const [name, expected] of [['flux', true], ['flex1', false], ['flux_kontext', true], ['flex2', false]]) {
+  for (const [name, expected] of [['flux', true], ['flex1', true], ['flux_kontext', true], ['flex2', false]]) {
     assert.equal(modelArchs.find(model => model.name === name).additionalSections.includes('model.layer_offloading'), expected);
   }
 });

@@ -565,7 +565,8 @@
       "group": "image",
       "isVideoModel": false,
       "additionalSections": [
-        "model.low_vram"
+        "model.low_vram",
+        "model.layer_offloading"
       ],
       "disableSections": [
         "network.conv"
@@ -599,7 +600,7 @@
         "multipleAfterFirst": 1
       },
       "offloading": {
-        "layers": false
+        "layers": true
       }
     },
     {

@@ -152,12 +152,16 @@ test(`explicit Orbit configuration settings survive applying a complete ${mode} 
 });
 }
 
-test('Flux.1 exposes offloading controls and preserves their explicit values through Config and save', async ({ page }) => {
+for (const [arch, label, modelPath] of [
+  ['flux', 'Flux.1', 'black-forest-labs/FLUX.1-dev'],
+  ['flex1', 'Flex.1', 'ostris/Flex.1-alpha'],
+]) {
+test(`${label} exposes offloading controls and preserves their explicit values through Config and save`, async ({ page }) => {
   await page.getByRole('tab', { name: 'Config', exact: true }).click();
   await expect(page.locator('[data-config-editor] textarea.inputarea')).toBeVisible();
   const config = YAML.parse((await editorSnapshot(page)).text ?? '') as JobConfig;
   Object.assign(config.config.process[0].model, {
-    arch: 'flux', name_or_path: 'black-forest-labs/FLUX.1-dev',
+    arch, name_or_path: modelPath,
     layer_offloading: true, layer_offloading_backend: 'block',
     layer_offloading_transformer_percent: 0.64, layer_offloading_text_encoder_percent: 0.42,
   });
@@ -182,6 +186,7 @@ test('Flux.1 exposes offloading controls and preserves their explicit values thr
   await page.getByRole('option', { name: 'Legacy', exact: true }).click();
   await page.getByRole('tab', { name: 'Config', exact: true }).click();
   const changed = (YAML.parse((await editorSnapshot(page)).text ?? '') as JobConfig).config.process[0].model;
+  expect(changed.arch).toBe(arch);
   expect(changed.layer_offloading).toBe(true);
   expect(changed.layer_offloading_backend).toBe('legacy');
   expect(changed.layer_offloading_transformer_percent).toBeCloseTo(0.65);
@@ -195,6 +200,42 @@ test('Flux.1 exposes offloading controls and preserves their explicit values thr
   const payload = (await posted).postDataJSON() as { job_config: JobConfig };
   expect(payload.job_config.config.process[0].model).toEqual(changed);
   await expect(page.getByRole('alert').filter({ hasText: 'Fixture offload save unavailable' })).toBeVisible();
+});
+}
+
+test('Flex.1 Orbit Config uses the runtime memory profile without replacing explicit training values', async ({ page }) => {
+  await page.getByRole('tab', { name: 'Config', exact: true }).click();
+  await expect(page.locator('[data-config-editor] textarea.inputarea')).toBeVisible();
+  const config = YAML.parse((await editorSnapshot(page)).text ?? '') as JobConfig;
+  const process = config.config.process[0];
+  Object.assign(process.model, {
+    arch: 'flex1', name_or_path: 'ostris/Flex.1-alpha', low_vram: true, quantize: true, qtype: 'orbit4',
+  });
+  delete process.model.layer_offloading;
+  delete process.model.layer_offloading_backend;
+  delete process.model.layer_offloading_transformer_percent;
+  delete process.model.layer_offloading_text_encoder_percent;
+  process.train.batch_size = 3;
+  process.train.optimizer = 'adamw';
+  await pasteEditorText(page, YAML.stringify(config));
+  await page.getByRole('tab', { name: 'Form', exact: true }).click();
+  await expect(page.getByRole('switch', { name: 'Layer Offloading', exact: true })).toBeChecked();
+  await expect(page.getByRole('slider', { name: 'Transformer Offload %', exact: true })).toHaveAttribute('aria-valuenow', '70');
+  await expect(page.getByRole('slider', { name: 'Text Encoder Offload %', exact: true })).toHaveAttribute('aria-valuenow', '50');
+  await expect(page.getByRole('button', { name: 'Create Job', exact: true })).toBeEnabled();
+  await page.route('**/api/jobs', route => route.request().method() === 'POST'
+    ? route.fulfill({ status: 503, json: { error: 'Fixture Flex save unavailable' } })
+    : route.continue());
+  const posted = page.waitForRequest(request => request.url().endsWith('/api/jobs') && request.method() === 'POST');
+  await page.getByRole('button', { name: 'Create Job', exact: true }).click();
+  const saved = ((await posted).postDataJSON() as { job_config: JobConfig }).job_config.config.process[0];
+  expect(saved.model).toMatchObject({
+    arch: 'flex1', layer_offloading: true, layer_offloading_backend: 'block',
+    layer_offloading_transformer_percent: 0.7, layer_offloading_text_encoder_percent: 0.5,
+  });
+  expect(saved.train.batch_size).toBe(3);
+  expect(saved.train.optimizer).toBe('adamw');
+  await expect(page.getByRole('alert').filter({ hasText: 'Fixture Flex save unavailable' })).toBeVisible();
 });
 
 for (const [from, destination, label] of [

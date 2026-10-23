@@ -3,7 +3,7 @@ import { modelArchs, type ModelArch } from './modelOptions';
 import capabilities from './modelCapabilities.json';
 import { configContractErrors } from './configContract';
 import { isEditableTrainingConfig, type ValidationMessage } from '../utils/trainingValidation';
-import { getLayerOffloadingMemoryProfile } from '../utils/memoryProfiles';
+import { getLayerOffloadingMemoryProfile, normalizeMemoryProfileArch } from '../utils/memoryProfiles';
 import { expectedFluxGuidanceBypass } from '../utils/fluxGuidancePolicy';
 
 export type MigrationChange = { path: string; reason: string; before: string; after: string };
@@ -279,11 +279,18 @@ export function migrateTrainingModel(source: unknown, targetArch: string, target
         nextModel[key] = selectedDefault(`model.${key}`) ?? 'qfloat8';
     }
     if (!to.additionalSections?.includes('model.low_vram')) nextModel.low_vram = false;
-    if (to.additionalSections?.includes('model.layer_offloading') && oldModel.layer_offloading) {
+    const sharesFluxRuntime =
+      normalizeMemoryProfileArch(from.name) === 'flux' && normalizeMemoryProfileArch(to.name) === 'flux';
+    if (
+      to.additionalSections?.includes('model.layer_offloading') &&
+      (oldModel.layer_offloading || (sharesFluxRuntime && oldModel.layer_offloading === false))
+    ) {
       const profile = getLayerOffloadingMemoryProfile(to.name);
+      const backend = oldModel.layer_offloading_backend;
       Object.assign(nextModel, {
-        layer_offloading: true,
-        layer_offloading_backend: profile.backend,
+        layer_offloading: oldModel.layer_offloading,
+        layer_offloading_backend:
+          sharesFluxRuntime && (backend === 'block' || backend === 'legacy') ? backend : profile.backend,
         layer_offloading_transformer_percent:
           oldModel.layer_offloading_transformer_percent ?? profile.transformerPercent,
         layer_offloading_text_encoder_percent:

@@ -320,8 +320,8 @@ export default function JobActionBar({
     try {
       const progress = await cancelTrainingJobExport(job.id, exportID);
       updateExportStatus(exportStatus?.mode || (progress.includeDatasets ? 'datasets' : 'state'), progress);
-    } catch (error) {
-      console.error('Error canceling export:', error);
+    } catch {
+      console.error('Error canceling export:');
       reportWorkflowError('Failed to cancel export. Please try again.');
     } finally {
       cancelExportInFlight.current = false;
@@ -356,8 +356,8 @@ export default function JobActionBar({
       if (progress.warnings?.length) {
         reportWorkflowError(`Export completed with warnings:\n\n${progress.warnings.join('\n')}`);
       }
-    } catch (error) {
-      console.error('Error exporting job:', error);
+    } catch {
+      console.error('Error exporting job:');
       reportWorkflowError('Failed to export job. Please try again.');
       setExportStatus({ mode: exportMode, phase: 'failed', progress: null });
       clearExportStatusSoon();
@@ -396,7 +396,7 @@ export default function JobActionBar({
       onRefresh?.();
       clearModelDownloadStatusSoon();
     } catch (error) {
-      console.error('Error downloading referenced models:', error);
+      console.error('Error downloading referenced models:');
       setModelDownloadStatus({
         phase: 'failed',
         handledCount: 0,
@@ -467,7 +467,7 @@ export default function JobActionBar({
       await saveJobNow(job.id);
       onRefresh?.();
     } catch (error) {
-      console.error('Error requesting checkpoint save:', error);
+      console.error('Error requesting checkpoint save:');
       reportWorkflowError(getApiErrorMessage(error, 'Failed to request a checkpoint save.'));
     }
   };
@@ -476,7 +476,7 @@ export default function JobActionBar({
       await sampleJobNow(job.id);
       onRefresh?.();
     } catch (error) {
-      console.error('Error requesting sample:', error);
+      console.error('Error requesting sample:');
       reportWorkflowError(getApiErrorMessage(error, 'Failed to request a sample.'));
     }
   };
@@ -505,7 +505,7 @@ export default function JobActionBar({
       await retryRemoteCaptionResult(job.id);
       onRefresh?.();
     } catch (error) {
-      console.error('Error syncing remote caption result:', error);
+      console.error('Error syncing remote caption result:');
       reportWorkflowError(getApiErrorMessage(error, 'Failed to sync remote caption result.'));
       onRefresh?.();
     } finally {
@@ -648,8 +648,8 @@ export default function JobActionBar({
                 if (job.status === 'running') {
                   try {
                     await stopJob(job.id);
-                  } catch (e) {
-                    console.error('Error stopping job before deleting:', e);
+                    } catch {
+                      console.error('Error stopping job before deleting:');
                   }
                 }
                 await deleteJob(job.id);

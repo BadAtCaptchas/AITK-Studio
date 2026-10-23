@@ -4,13 +4,12 @@ export const startQueue = (queueID: string, workerID = 'local') => {
   return new Promise<void>((resolve, reject) => {
     apiClient
       .post(`/api/queue/${queueID}/start`, undefined, { params: { worker_id: workerID } })
-      .then(res => res.data)
-      .then(data => {
-        console.log('Queue started:', data);
+      .then(() => {
+        console.log('Queue started:');
         resolve();
       })
       .catch(error => {
-        console.error('Error starting queue:', error);
+        console.error('Error starting queue:');
         reject(error);
       });
   });
@@ -19,13 +18,12 @@ export const stopQueue = (queueID: string, workerID = 'local') => {
   return new Promise<void>((resolve, reject) => {
     apiClient
       .post(`/api/queue/${queueID}/stop`, undefined, { params: { worker_id: workerID } })
-      .then(res => res.data)
-      .then(data => {
-        console.log('Queue stopped:', data);
+      .then(() => {
+        console.log('Queue stopped:');
         resolve();
       })
       .catch(error => {
-        console.error('Error stopping queue:', error);
+        console.error('Error stopping queue:');
         reject(error);
       });
   });

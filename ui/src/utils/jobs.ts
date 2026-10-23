@@ -107,7 +107,8 @@ const runStartLikeJobAction = (
         resolve();
       })
       .catch(async error => {
-        console.error(`${failureLabel}:`, error);
+        // Axios failures retain request bodies, headers and response configuration.
+        console.error(`${failureLabel}:`);
         reject(new Error(apiErrorMessage(error, failureLabel)));
       });
   });
@@ -137,13 +138,12 @@ export const stopJob = (jobID: string) => {
   return new Promise<void>((resolve, reject) => {
     apiClient
       .post(`/api/jobs/${jobID}/stop`)
-      .then(res => res.data)
-      .then(data => {
-        console.log('Job stopped:', data);
+      .then(() => {
+        console.log('Job stopped:');
         resolve();
       })
       .catch(error => {
-        console.error('Error stopping job:', error);
+        console.error('Error stopping job:');
         reject(error);
       });
   });
@@ -152,13 +152,12 @@ export const deleteJob = (jobID: string) => {
   return new Promise<void>((resolve, reject) => {
     apiClient
       .post(`/api/jobs/${jobID}/delete`)
-      .then(res => res.data)
-      .then(data => {
-        console.log('Job deleted:', data);
+      .then(() => {
+        console.log('Job deleted:');
         resolve();
       })
       .catch(error => {
-        console.error('Error deleting job:', error);
+        console.error('Error deleting job:');
         reject(error);
       });
   });
@@ -167,13 +166,12 @@ export const markJobAsStopped = (jobID: string) => {
   return new Promise<void>((resolve, reject) => {
     apiClient
       .post(`/api/jobs/${jobID}/mark_stopped`)
-      .then(res => res.data)
-      .then(data => {
-        console.log('Job marked as stopped:', data);
+      .then(() => {
+        console.log('Job marked as stopped:');
         resolve();
       })
       .catch(error => {
-        console.error('Error marking job as stopped:', error);
+        console.error('Error marking job as stopped:');
         reject(error);
       });
   });
@@ -182,13 +180,12 @@ export const saveJobNow = (jobID: string) => {
   return new Promise<void>((resolve, reject) => {
     apiClient
       .post(`/api/jobs/${jobID}/save_now`)
-      .then(res => res.data)
-      .then(data => {
-        console.log('Job set to save on next step:', data);
+      .then(() => {
+        console.log('Job set to save on next step:');
         resolve();
       })
       .catch(error => {
-        console.error('Error setting job to save on next step:', error);
+        console.error('Error setting job to save on next step:');
         reject(error);
       });
   });
@@ -293,8 +290,8 @@ export const importTrainingJob = (
   })();
 };
 export const sampleJobNow = async (jobID: string): Promise<void> => {
-  const response = await apiClient.post(`/api/jobs/${jobID}/sample_now`);
-  console.log('Job set to sample on next step:', response.data);
+  await apiClient.post(`/api/jobs/${jobID}/sample_now`);
+  console.log('Job set to sample on next step:');
 };
 export const getRemoteStartProgress = (jobID: string, startID: string) => {
   return apiClient.get(`/api/jobs/${jobID}/start-progress/${startID}`).then(res => res.data as RemoteStartProgress);

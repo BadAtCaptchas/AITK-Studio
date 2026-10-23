@@ -280,9 +280,26 @@ export default function Settings() {
   const { workers, setWorkers, refreshWorkers } = useWorkers();
   const { workers: ollamaWorkers, refreshWorkers: refreshOllamaWorkers } = useRemoteOllamaWorkers();
   const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
-  const [workerForm, setWorkerForm] = useState(emptyWorkerForm);
+  const [workerEditor, setWorkerEditor] = useState({ draft: emptyWorkerForm, baseline: emptyWorkerForm });
+  const workerForm = workerEditor.draft;
+  const setWorkerForm = (update: React.SetStateAction<typeof emptyWorkerForm>) => {
+    setWorkerEditor(current => ({
+      ...current,
+      draft: typeof update === 'function' ? update(current.draft) : update,
+    }));
+  };
   const [workerStatus, setWorkerStatus] = useState<'idle' | 'saving' | 'error'>('idle');
-  const [ollamaWorkerForm, setOllamaWorkerForm] = useState(emptyOllamaWorkerForm);
+  const [ollamaWorkerEditor, setOllamaWorkerEditor] = useState({
+    draft: emptyOllamaWorkerForm,
+    baseline: emptyOllamaWorkerForm,
+  });
+  const ollamaWorkerForm = ollamaWorkerEditor.draft;
+  const setOllamaWorkerForm = (update: React.SetStateAction<typeof emptyOllamaWorkerForm>) => {
+    setOllamaWorkerEditor(current => ({
+      ...current,
+      draft: typeof update === 'function' ? update(current.draft) : update,
+    }));
+  };
   const [ollamaWorkerStatus, setOllamaWorkerStatus] = useState<'idle' | 'saving' | 'error'>('idle');
   const workerSavePending = useRef(false);
   const workerEditorVersion = useRef(0);
@@ -626,11 +643,18 @@ export default function Settings() {
       const response = await apiClient.post<unknown>('/api/workers', submitted);
       const id = savedWorkerId(response.data);
       if (!settingsMounted.current) return;
-      setWorkerForm(current => {
+      setWorkerEditor(current => {
         if (workerEditorVersion.current !== editorVersion) return current;
-        if (current === submitted) return emptyWorkerForm;
+        if (current.draft === submitted) return { draft: emptyWorkerForm, baseline: emptyWorkerForm };
         // A new worker already exists after this response; subsequent edits must update it.
-        return { ...current, id };
+        return {
+          draft: {
+            ...current.draft,
+            id,
+            api_token: current.draft.api_token === submitted.api_token ? '' : current.draft.api_token,
+          },
+          baseline: { ...submitted, id, api_token: '' },
+        };
       });
       refreshWorkers();
       setWorkerStatus('idle');
@@ -650,21 +674,22 @@ export default function Settings() {
 
   const cancelWorkerEdit = () => {
     workerEditorVersion.current += 1;
-    setWorkerForm(emptyWorkerForm);
+    setWorkerEditor({ draft: emptyWorkerForm, baseline: emptyWorkerForm });
     if (!workerSavePending.current) setWorkerStatus('idle');
   };
 
   const editWorker = (worker: WorkerNode) => {
     workerEditorVersion.current += 1;
     if (!workerSavePending.current) setWorkerStatus('idle');
-    setWorkerForm({
+    const draft = {
       id: worker.id,
       name: worker.name,
       base_url: worker.base_url,
       api_token: '',
       enabled: worker.enabled,
       offline_bypass_enabled: worker.offline_bypass_enabled,
-    });
+    };
+    setWorkerEditor({ draft, baseline: draft });
   };
 
   const checkWorker = async (workerID: string) => {
@@ -743,10 +768,17 @@ export default function Settings() {
       const response = await apiClient.post<unknown>('/api/ollama-workers', submitted);
       const id = savedWorkerId(response.data);
       if (!settingsMounted.current) return;
-      setOllamaWorkerForm(current => {
+      setOllamaWorkerEditor(current => {
         if (ollamaWorkerEditorVersion.current !== editorVersion) return current;
-        if (current === submitted) return emptyOllamaWorkerForm;
-        return { ...current, id };
+        if (current.draft === submitted) return { draft: emptyOllamaWorkerForm, baseline: emptyOllamaWorkerForm };
+        return {
+          draft: {
+            ...current.draft,
+            id,
+            auth_token: current.draft.auth_token === submitted.auth_token ? '' : current.draft.auth_token,
+          },
+          baseline: { ...submitted, id, auth_token: '' },
+        };
       });
       refreshOllamaWorkers();
       setOllamaWorkerStatus('idle');
@@ -767,21 +799,22 @@ export default function Settings() {
 
   const cancelOllamaWorkerEdit = () => {
     ollamaWorkerEditorVersion.current += 1;
-    setOllamaWorkerForm(emptyOllamaWorkerForm);
+    setOllamaWorkerEditor({ draft: emptyOllamaWorkerForm, baseline: emptyOllamaWorkerForm });
     if (!ollamaWorkerSavePending.current) setOllamaWorkerStatus('idle');
   };
 
   const editOllamaWorker = (worker: RemoteOllamaWorker) => {
     ollamaWorkerEditorVersion.current += 1;
     if (!ollamaWorkerSavePending.current) setOllamaWorkerStatus('idle');
-    setOllamaWorkerForm({
+    const draft = {
       id: worker.id,
       name: worker.name,
       base_url: worker.base_url,
       auth_token: '',
       enabled: worker.enabled,
       offline_bypass_enabled: worker.offline_bypass_enabled,
-    });
+    };
+    setOllamaWorkerEditor({ draft, baseline: draft });
   };
 
   const checkOllamaWorker = async (workerID: string) => {
@@ -818,14 +851,17 @@ export default function Settings() {
   const hasHealthyOllama = Boolean(firstOllamaWorker && !firstOllamaWorker.last_error);
   const hasUnsavedSettings =
     isSettingsLoaded && savedSettingsRef.current !== null && savedSettingsRef.current !== JSON.stringify(settings);
+  const hasUnsavedWorker = JSON.stringify(workerForm) !== JSON.stringify(workerEditor.baseline);
+  const hasUnsavedOllamaWorker = JSON.stringify(ollamaWorkerForm) !== JSON.stringify(ollamaWorkerEditor.baseline);
+  const hasPendingWorkerSave = workerStatus === 'saving' || ollamaWorkerStatus === 'saving';
   useUnsavedChangesGuard({
-    dirty: hasUnsavedSettings,
-    revision: JSON.stringify(settings),
+    dirty: hasUnsavedSettings || hasUnsavedWorker || hasUnsavedOllamaWorker || hasPendingWorkerSave,
+    revision: JSON.stringify({ settings, workerForm, ollamaWorkerForm, hasPendingWorkerSave }),
     title: 'Leave Settings?',
     message:
-      status === 'saving'
-        ? 'A settings save is still pending. Leaving will not cancel that request, and any newer unsaved edits will be discarded.'
-        : 'Your unsaved settings changes will be discarded.',
+      status === 'saving' || hasPendingWorkerSave
+        ? 'A save is still pending. Leaving will not cancel that request, and any newer unsaved edits will be discarded.'
+        : 'Your unsaved settings or worker changes will be discarded.',
     confirmText: 'Discard changes',
   });
   const saveStatusLabel =

@@ -53,6 +53,62 @@ for (const kind of [
     error: 'Failed to save Remote Ollama endpoint.',
   },
 ] as const) {
+  for (const historyMode of kind.label === 'training worker' ? ['native', 'fallback'] : ['native']) {
+    test(`unsaved ${kind.label} draft is protected through links and ${historyMode} Back`, async ({ page }) => {
+      if (historyMode === 'fallback') {
+        await page.addInitScript(() =>
+          Object.defineProperty(window, 'navigation', { value: undefined, configurable: true }),
+        );
+      }
+      await page.goto('/models');
+      await page.getByRole('link', { name: 'Settings', exact: true }).click();
+      await expect(page.getByLabel('Training folder', { exact: true })).toBeEnabled();
+      const section = page
+        .getByRole('navigation', { name: 'Settings sections' })
+        .getByRole('button', { name: kind.section, exact: true });
+      await section.click();
+      const name = page.getByPlaceholder(kind.namePlaceholder, { exact: true });
+      const url = page.getByPlaceholder(kind.urlPlaceholder, { exact: true });
+      const token = page.getByPlaceholder(kind.newTokenPlaceholder, { exact: true });
+      await name.fill('Unsaved navigation fixture');
+      await url.fill('https://navigation-fixture.invalid');
+      await token.fill('fixture-token-navigation');
+      expect(await page.evaluate(() => !window.dispatchEvent(new Event('beforeunload', { cancelable: true })))).toBe(
+        true,
+      );
+      const models = page
+        .getByRole('navigation', { name: 'Main navigation' })
+        .getByRole('link', { name: 'Models', exact: true });
+      await models.click();
+      const leave = page.getByRole('dialog', { name: 'Leave Settings?', exact: true });
+      await expect(leave.getByRole('heading', { name: 'Leave Settings?', exact: true })).toBeVisible();
+      await leave.getByRole('button', { name: 'Cancel', exact: true }).click();
+      await expect(page).toHaveURL(/\/settings$/);
+      await expect(name).toHaveValue('Unsaved navigation fixture');
+      await page.evaluate(() => window.history.back());
+      await expect(leave.getByRole('heading', { name: 'Leave Settings?', exact: true })).toBeVisible();
+      await leave.getByRole('button', { name: 'Cancel', exact: true }).click();
+      await expect(page).toHaveURL(/\/settings$/);
+      await expect(token).toHaveValue('fixture-token-navigation');
+      await page
+        .getByRole('navigation', { name: 'Settings sections' })
+        .getByRole('button', { name: 'Appearance', exact: true })
+        .click();
+      await expect(leave).toHaveCount(0);
+      await section.click();
+      await expect(name).toHaveValue('Unsaved navigation fixture');
+      await name.clear();
+      await url.clear();
+      await token.clear();
+      expect(await page.evaluate(() => !window.dispatchEvent(new Event('beforeunload', { cancelable: true })))).toBe(
+        false,
+      );
+      await models.click();
+      await expect(page).toHaveURL(/\/models$/);
+      expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain('fixture-token-navigation');
+    });
+  }
+
   test(`delayed ${kind.label} save preserves newer local name, URL and token edits`, async ({ page }) => {
     const worker = {
       id: 'fixture-worker',
@@ -106,6 +162,13 @@ for (const kind of [
     await token.fill('fixture-token-submitted');
     await page.getByRole('button', { name: kind.submit, exact: true }).click();
     await expect.poll(() => Boolean(finish)).toBe(true);
+    const models = page
+      .getByRole('navigation', { name: 'Main navigation' })
+      .getByRole('link', { name: 'Models', exact: true });
+    const leave = page.getByRole('dialog', { name: 'Leave Settings?', exact: true });
+    await models.click();
+    await expect(leave.getByText(/Leaving will not cancel that request/)).toBeVisible();
+    await leave.getByRole('button', { name: 'Cancel', exact: true }).click();
     await name.fill('Newer unsaved fixture name');
     await url.fill('https://newer-fixture.invalid');
     await token.fill('fixture-token-newer');
@@ -118,6 +181,9 @@ for (const kind of [
     await expect(name).toHaveValue('Newer unsaved fixture name');
     await expect(url).toHaveValue('https://newer-fixture.invalid');
     await expect(token).toHaveValue('fixture-token-newer');
+    await models.click();
+    await expect(leave.getByRole('heading', { name: 'Leave Settings?', exact: true })).toBeVisible();
+    await leave.getByRole('button', { name: 'Cancel', exact: true }).click();
     expect(submissions[0]).toMatchObject({
       id: worker.id,
       name: 'First submitted fixture name',
@@ -133,6 +199,89 @@ for (const kind of [
       [kind.tokenField]: 'fixture-token-newer',
     });
     expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain('fixture-token');
+    await models.click();
+    await expect(page).toHaveURL(/\/models$/);
+  });
+
+  test(`${kind.label} clean baseline survives failed saves and keeps main Settings edits independent`, async ({
+    page,
+  }) => {
+    const worker = {
+      id: 'fixture-baseline-worker',
+      name: 'Baseline fixture',
+      base_url: 'https://baseline-fixture.invalid',
+      enabled: false,
+      offline_bypass_enabled: false,
+      last_status: 'unknown',
+      last_error: null,
+      last_checked_at: null,
+      capabilities: '{}',
+      gpus: '[]',
+      models: '[]',
+      model_count: 0,
+      created_at: '2026-10-23T00:00:00Z',
+      updated_at: '2026-10-23T00:00:00Z',
+    };
+    let saves = 0;
+    await page.route(`**${kind.endpoint}`, async route => {
+      if (route.request().method() !== 'POST') return route.fulfill({ json: { workers: [worker] } });
+      saves += 1;
+      return saves === 1
+        ? route.fulfill({ status: 503, json: { error: 'Fixture save unavailable' } })
+        : route.fulfill({ json: worker });
+    });
+    const models = page
+      .getByRole('navigation', { name: 'Main navigation' })
+      .getByRole('link', { name: 'Models', exact: true });
+    const name = page.getByPlaceholder(kind.namePlaceholder, { exact: true });
+    const token = page.getByPlaceholder(kind.tokenPlaceholder, { exact: true });
+    const leave = page.getByRole('dialog', { name: 'Leave Settings?', exact: true });
+    const edit = async () => {
+      await page.getByRole('link', { name: 'Settings', exact: true }).click();
+      await expect(page.getByLabel('Training folder', { exact: true })).toBeEnabled();
+      await page
+        .getByRole('navigation', { name: 'Settings sections' })
+        .getByRole('button', { name: kind.section, exact: true })
+        .click();
+      await page
+        .getByText(worker.name, { exact: true })
+        .locator('..')
+        .locator('..')
+        .getByRole('button', { name: 'Edit', exact: true })
+        .click();
+      await expect(name).toHaveValue(worker.name);
+    };
+    await page.goto('/models');
+    await edit();
+    // Merely opening an existing worker is not an unsaved change.
+    await models.click();
+    await expect(page).toHaveURL(/\/models$/);
+    await edit();
+    await name.fill('Failed baseline fixture');
+    await token.fill('fixture-token-failed-baseline');
+    await page.getByRole('button', { name: kind.submit, exact: true }).click();
+    await expect(page.getByText(kind.error, { exact: true })).toBeVisible();
+    await models.click();
+    await expect(leave.getByRole('heading', { name: 'Leave Settings?', exact: true })).toBeVisible();
+    await leave.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await name.fill(worker.name);
+    await token.clear();
+    await models.click();
+    await expect(page).toHaveURL(/\/models$/);
+    await edit();
+    const folder = page.getByLabel('Training folder', { exact: true });
+    const initialFolder = await folder.inputValue();
+    await folder.fill(`${initialFolder}-unsaved-worker-fixture`);
+    await name.fill('Successfully saved fixture');
+    await page.getByRole('button', { name: kind.submit, exact: true }).click();
+    await expect(name).toHaveValue('');
+    await models.click();
+    await expect(leave.getByRole('heading', { name: 'Leave Settings?', exact: true })).toBeVisible();
+    await leave.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(folder).toHaveValue(`${initialFolder}-unsaved-worker-fixture`);
+    await folder.fill(initialFolder);
+    await models.click();
+    await expect(page).toHaveURL(/\/models$/);
   });
 
   test(`new ${kind.label} retains its saved identity and prevents duplicate pending submissions`, async ({ page }) => {
@@ -177,6 +326,14 @@ for (const kind of [
     await expect(page.getByPlaceholder(kind.tokenPlaceholder, { exact: true })).toHaveValue(
       'fixture-token-created-newer',
     );
+    // The clean baseline is now the created worker, not the original empty form.
+    await name.fill('Submitted new fixture');
+    await page.getByPlaceholder(kind.tokenPlaceholder, { exact: true }).clear();
+    expect(await page.evaluate(() => !window.dispatchEvent(new Event('beforeunload', { cancelable: true })))).toBe(
+      false,
+    );
+    await name.fill('Newer created fixture');
+    await page.getByPlaceholder(kind.tokenPlaceholder, { exact: true }).fill('fixture-token-created-newer');
     await page.getByRole('button', { name: kind.submit, exact: true }).click();
     await expect(name).toHaveValue('');
     expect(submissions).toHaveLength(2);

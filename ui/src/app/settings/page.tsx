@@ -461,7 +461,11 @@ export default function Settings() {
     refreshCloudflared();
     refreshComfyInstall();
     if (typeof window !== 'undefined') {
-      setCloudflaredAutoDownload(window.localStorage.getItem(CLOUDFLARED_AUTO_DOWNLOAD_KEY) !== 'false');
+      try {
+        setCloudflaredAutoDownload(window.localStorage.getItem(CLOUDFLARED_AUTO_DOWNLOAD_KEY) !== 'false');
+      } catch {
+        // This optional preference must not prevent loading the settings editor.
+      }
     }
   }, []);
 
@@ -489,7 +493,11 @@ export default function Settings() {
   const setAutoDownloadCloudflared = (checked: boolean) => {
     setCloudflaredAutoDownload(checked);
     if (typeof window !== 'undefined') {
-      window.localStorage.setItem(CLOUDFLARED_AUTO_DOWNLOAD_KEY, checked ? 'true' : 'false');
+      try {
+        window.localStorage.setItem(CLOUDFLARED_AUTO_DOWNLOAD_KEY, checked ? 'true' : 'false');
+      } catch {
+        // The selected value remains usable for this visit when persistence is blocked.
+      }
     }
   };
 

@@ -1,11 +1,48 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { getSampleThumbnailUrl } from '../src/utils/media';
 
+let sessionCookies: Awaited<ReturnType<BrowserContext['cookies']>> = [];
 async function login(page: Page) {
+  if (sessionCookies.length) {
+    await page.context().addCookies(sessionCookies);
+    return;
+  }
   await page.goto('/');
   await page.getByLabel('Password', { exact: true }).fill('browser-fixture-local-only');
   await page.getByRole('button', { name: 'Check Password' }).click();
   await expect(page.getByLabel('Password', { exact: true })).toHaveCount(0);
+  sessionCookies = (await page.context().cookies()).filter(cookie => cookie.name === 'aitk_session');
+}
+
+for (const storageFailure of ['write', 'read-and-write'] as const) {
+  test(`theme remains usable when browser storage blocks ${storageFailure}`, async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.route('**/api/monitor', route => route.abort());
+    await login(page);
+    await page.goto('/models');
+    await page.evaluate(failure => {
+      const originalGet = Storage.prototype.getItem;
+      const originalSet = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key, value) {
+        if (key === 'theme') throw new DOMException('Fixture storage denied', 'QuotaExceededError');
+        return originalSet.call(this, key, value);
+      };
+      if (failure === 'read-and-write') Storage.prototype.getItem = function (key) {
+        if (key === 'theme') throw new DOMException('Fixture storage denied', 'SecurityError');
+        return originalGet.call(this, key);
+      };
+    }, storageFailure);
+    await page.getByRole('button', { name: 'More tools', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Switch to light mode', exact: true }).click();
+    await expect(page.locator('html')).not.toHaveClass(/dark/);
+    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Datasets', exact: true }).click();
+    await expect(page).toHaveURL(/\/datasets$/);
+    await page.getByRole('button', { name: 'More tools', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Switch to dark mode', exact: true }).click();
+    await expect(page.locator('html')).toHaveClass(/dark/);
+    expect(errors).toEqual([]);
+  });
 }
 
 test('header utility menu exposes theme, updates and logout to keyboard users', async ({ page }) => {

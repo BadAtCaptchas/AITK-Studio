@@ -611,8 +611,12 @@ function DatasetImageStudioContent({
   }, []);
   useEffect(() => {
     if (!hasEncryptedItems || typeof window === 'undefined') return;
-    if (recaptionQueueStorageKeyValue) window.localStorage.removeItem(recaptionQueueStorageKeyValue);
-    if (recaptionStorageKey) window.localStorage.removeItem(recaptionStorageKey);
+    try {
+      if (recaptionQueueStorageKeyValue) window.localStorage.removeItem(recaptionQueueStorageKeyValue);
+      if (recaptionStorageKey) window.localStorage.removeItem(recaptionStorageKey);
+    } catch {
+      // Blocked browser storage must not block encrypted editing; no content is persisted here.
+    }
   }, [hasEncryptedItems, recaptionQueueStorageKeyValue, recaptionStorageKey]);
   if (!queueRestored && items.length > 0) {
     setQueueRestored(true);
@@ -643,17 +647,21 @@ function DatasetImageStudioContent({
     const storageKey = recaptionQueueStorageKeyValue;
     if (!canPersistRecaptionState) return;
     if (!storageKey || !queueRestored || typeof window === 'undefined') return;
-    if (!activeRecaptionEntry && recaptionQueue.length === 0) {
-      window.localStorage.removeItem(storageKey);
-      return;
+    try {
+      if (!activeRecaptionEntry && recaptionQueue.length === 0) {
+        window.localStorage.removeItem(storageKey);
+        return;
+      }
+      const snapshot: PersistedRecaptionQueue = {
+        version: 2,
+        active: activeRecaptionEntry ? persistedRecaptionQueueEntry(activeRecaptionEntry, 'running') : null,
+        queue: recaptionQueue.map(entry => persistedRecaptionQueueEntry(entry, 'queued')),
+        updatedAt: new Date().toISOString(),
+      };
+      window.localStorage.setItem(storageKey, JSON.stringify(snapshot));
+    } catch {
+      // Recaption state remains in memory; caption editing/saving does not depend on storage.
     }
-    const snapshot: PersistedRecaptionQueue = {
-      version: 2,
-      active: activeRecaptionEntry ? persistedRecaptionQueueEntry(activeRecaptionEntry, 'running') : null,
-      queue: recaptionQueue.map(entry => persistedRecaptionQueueEntry(entry, 'queued')),
-      updatedAt: new Date().toISOString(),
-    };
-    window.localStorage.setItem(storageKey, JSON.stringify(snapshot));
   }, [activeRecaptionEntry, canPersistRecaptionState, queueRestored, recaptionQueue, recaptionQueueStorageKeyValue]);
   useEffect(() => {
     savedCaptionRef.current = savedCaption;

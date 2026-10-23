@@ -1,7 +1,7 @@
 'use client';
 import useScopedState from '@/hooks/useScopedState';
 import useUnsavedChangesGuard from '@/hooks/useUnsavedChangesGuard';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import type { Job } from '@/types';
 import { apiClient } from '@/utils/api';
 
@@ -9,7 +9,8 @@ export default function JobNotes({ job }: { job: Job }) {
   const [notes, setNotes] = useScopedState(job.id, '');
   const [savedNotes, setSavedNotes] = useScopedState(job.id, '');
   const [loaded, setLoaded] = useScopedState(job.id, false);
-  const [status, setStatus] = useState('Loading…');
+  const [status, setStatus] = useScopedState(job.id, 'Loading…');
+  const [loadAttempt, setLoadAttempt] = useScopedState(job.id, 0);
   useUnsavedChangesGuard({
     dirty: loaded && notes !== savedNotes,
     revision: notes,
@@ -35,7 +36,7 @@ export default function JobNotes({ job }: { job: Job }) {
         if (!controller.signal.aborted) setStatus('Could not load notes.');
       });
     return () => controller.abort();
-  }, [job.id, setNotes, setSavedNotes, setLoaded]);
+  }, [job.id, loadAttempt, setNotes, setSavedNotes, setLoaded, setStatus]);
   return (
     <div className="space-y-3 p-5">
       <label htmlFor="job-notes" className="block font-semibold">
@@ -52,6 +53,19 @@ export default function JobNotes({ job }: { job: Job }) {
         className="w-full min-h-[50vh] rounded border border-gray-700 bg-gray-950 p-4 font-mono text-sm"
       />
       <div className="flex items-center gap-4">
+        {!loaded && status === 'Could not load notes.' && (
+          <button
+            type="button"
+            className="operator-button"
+            aria-label="Retry notes load"
+            onClick={() => {
+              setStatus('Loading…');
+              setLoadAttempt(attempt => attempt + 1);
+            }}
+          >
+            Retry
+          </button>
+        )}
         <button
           className="operator-button"
           disabled={!loaded || status === 'Saving…'}

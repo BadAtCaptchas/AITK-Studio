@@ -284,6 +284,65 @@ test('monitor reports a failed refresh while retaining the last job details and 
   await expect(page.getByText('Job details could not be refreshed', { exact: true })).toHaveCount(0);
 });
 
+test('notes load can retry without leaving the retained monitor panel', async ({ page }) => {
+  await mockQueue(page);
+  let failLoad = true;
+  let savedNotes = '';
+  await page.route('**/api/jobs/portrait_flux_v3/notes', route => {
+    if (route.request().method() === 'POST') {
+      const body: unknown = route.request().postDataJSON();
+      if (body && typeof body === 'object' && 'notes' in body && typeof body.notes === 'string')
+        savedNotes = body.notes;
+      return route.fulfill({ json: { ok: true } });
+    }
+    return failLoad
+      ? route.fulfill({ status: 503, json: { error: 'Fixture notes unavailable' } })
+      : route.fulfill({ json: { notes: savedNotes } });
+  });
+  await page.goto('/jobs/portrait_flux_v3?tab=notes');
+  await expect(page.getByText('Could not load notes.', { exact: true })).toBeVisible();
+  failLoad = false;
+  await page.getByRole('button', { name: 'Retry notes load', exact: true }).click();
+  const notes = page.getByLabel('Job notes', { exact: true });
+  await expect(notes).toBeEnabled();
+  await notes.fill('Recovered note fixture');
+  await page.getByRole('button', { name: 'Save notes', exact: true }).click();
+  await expect.poll(() => savedNotes).toBe('Recovered note fixture');
+  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+  await page.getByRole('tab', { name: 'Metrics', exact: true }).click();
+  await page.getByRole('tab', { name: 'Notes', exact: true }).click();
+  await expect(notes).toHaveValue('Recovered note fixture');
+});
+
+for (const surface of ['compact inspector', 'full monitor']) {
+  test(`metrics failure stays visible with cached points in ${surface}`, async ({ page }) => {
+    await mockQueue(page);
+    if (surface === 'compact inspector') {
+      await page.goto('/jobs');
+      await page.getByRole('button', { name: 'Inspect portrait_flux_v3', exact: true }).click();
+    } else {
+      await page.goto('/jobs/portrait_flux_v3?tab=metrics');
+    }
+    const scope =
+      surface === 'compact inspector'
+        ? page.locator('#queue-job-inspector')
+        : page.getByRole('tabpanel', { name: 'Metrics', exact: true });
+    await expect(scope.locator('.uplot')).toBeVisible();
+    const pattern = '**/api/jobs/portrait_flux_v3/metrics?*';
+    await page.route(pattern, route => route.fulfill({ status: 503, json: { error: 'Fixture metrics unavailable' } }));
+    await scope.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await expect(
+      scope.getByText('Metrics could not be refreshed. Showing the last loaded data.', { exact: true }),
+    ).toBeVisible();
+    await expect(scope.locator('.uplot')).toBeVisible();
+    await page.unroute(pattern);
+    await scope.getByRole('button', { name: 'Refresh', exact: true }).click();
+    await expect(
+      scope.getByText('Metrics could not be refreshed. Showing the last loaded data.', { exact: true }),
+    ).toHaveCount(0);
+  });
+}
+
 test('queue commands cannot reorder an incomplete snapshot with no remaining cursor', async ({ page }) => {
   const { listState, reorders } = await mockQueue(page);
   listState.queuedCount = 4;

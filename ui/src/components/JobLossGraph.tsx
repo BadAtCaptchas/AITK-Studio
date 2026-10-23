@@ -1120,6 +1120,11 @@ function JobLossGraphContent({ job, compact = false }: Props) {
         </button>
       </div>
 
+      {status === 'error' && built.hasData && (
+        <p role="status" className="border-b border-gray-800 px-4 py-2 text-xs text-amber-800 dark:text-amber-300">
+          Metrics could not be refreshed. Showing the last loaded data.
+        </p>
+      )}
       <div className="monitor-body p-4 space-y-3 flex-1 min-h-0 overflow-auto">
         <div className="monitor-metrics grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
           <KpiCard

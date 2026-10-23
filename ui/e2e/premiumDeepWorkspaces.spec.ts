@@ -70,6 +70,111 @@ async function fixtureDataset(page: Page) {
   return dataset;
 }
 
+test('late Settings save cannot overwrite edits in a newly opened Settings editor', async ({ page }) => {
+  await page.goto('/settings');
+  const folder = page.getByLabel('Training folder', { exact: true });
+  await expect(folder).toBeEnabled();
+  const initial = await folder.inputValue();
+  let finish: (() => Promise<void>) | undefined;
+  await page.route('**/api/settings', async route => {
+    if (route.request().method() !== 'POST') return route.continue();
+    await new Promise<void>(resolve => {
+      finish = async () => {
+        await route.fulfill({ json: { success: true } });
+        resolve();
+      };
+    });
+  });
+  await folder.fill(`${initial}-submitted`);
+  await page.getByRole('button', { name: 'Save settings', exact: true }).click();
+  await expect.poll(() => Boolean(finish)).toBe(true);
+  await page
+    .getByRole('navigation', { name: 'Main navigation' })
+    .getByRole('link', { name: 'Models', exact: true })
+    .click();
+  await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
+  await expect(page).toHaveURL(/\/models$/);
+  await page.getByRole('link', { name: 'Settings', exact: true }).click();
+  await expect(folder).toBeEnabled();
+  const newer = `${initial}-new-editor`;
+  await folder.fill(newer);
+  const response = page.waitForResponse(
+    response => response.url().endsWith('/api/settings') && response.request().method() === 'POST',
+  );
+  await finish!();
+  await response;
+  // Give the old component's asynchronous completion time to publish its event.
+  await page.waitForTimeout(150);
+  await expect(folder).toHaveValue(newer);
+  await expect(page.getByRole('button', { name: 'Save settings', exact: true })).toBeEnabled();
+});
+
+test('late Generate job creation cannot redirect away from a later workspace', async ({ page }) => {
+  await page.goto('/generate');
+  await expect(page.getByRole('combobox', { name: 'Architecture', exact: true })).toBeEnabled();
+  await page.getByLabel('Base Model', { exact: true }).fill('fixture/base-model');
+  await page.getByLabel('Prompt text', { exact: true }).fill('First fixture prompt\nSecond fixture prompt');
+  await page.locator('summary').filter({ hasText: 'Run settings' }).click();
+  const startImmediately = page.getByRole('switch', { name: 'Start job now', exact: true });
+  await startImmediately.click();
+  await expect(startImmediately).toHaveAttribute('aria-checked', 'false');
+  let finish: (() => Promise<void>) | undefined;
+  await page.route('**/api/jobs', async route => {
+    if (route.request().method() !== 'POST') return route.continue();
+    await new Promise<void>(resolve => {
+      finish = async () => {
+        await route.fulfill({ json: { id: 'late-generation-fixture' } });
+        resolve();
+      };
+    });
+  });
+  await page.getByRole('button', { name: 'Create Job', exact: true }).click();
+  await expect.poll(() => Boolean(finish)).toBe(true);
+  await page
+    .getByRole('navigation', { name: 'Main navigation' })
+    .getByRole('link', { name: 'Models', exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/models$/);
+  const response = page.waitForResponse(
+    response => response.url().endsWith('/api/jobs') && response.request().method() === 'POST',
+  );
+  await finish!();
+  await response;
+  await page.waitForTimeout(150);
+  await expect(page).toHaveURL(/\/models$/);
+});
+
+test('late Settings service status cannot restart polling after navigation', async ({ page }) => {
+  await page.clock.install();
+  let calls = 0;
+  let finish: (() => Promise<void>) | undefined;
+  await page.route('**/api/comfy/install', async route => {
+    calls++;
+    const json = { installed: false, installing: true, root: '', logPath: '' };
+    if (calls > 1) return route.fulfill({ json });
+    await new Promise<void>(resolve => {
+      finish = async () => {
+        await route.fulfill({ json });
+        resolve();
+      };
+    });
+  });
+  await page.goto('/settings');
+  await expect.poll(() => Boolean(finish)).toBe(true);
+  await page
+    .getByRole('navigation', { name: 'Main navigation' })
+    .getByRole('link', { name: 'Models', exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/models$/);
+  const response = page.waitForResponse('**/api/comfy/install');
+  await finish!();
+  await response;
+  await page.waitForTimeout(100);
+  await page.clock.fastForward(6000);
+  await page.waitForTimeout(100);
+  expect(calls).toBe(1);
+});
+
 async function blockWorkspaceStorage(page: Page) {
   await page.addInitScript(() => {
     for (const method of ['getItem', 'setItem', 'removeItem'] as const) {

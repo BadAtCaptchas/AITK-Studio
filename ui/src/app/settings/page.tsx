@@ -291,6 +291,8 @@ export default function Settings() {
   const loadedWorkerUpdaterIds = useRef<Set<string>>(new Set());
   const savedSettingsRef = useRef<string | null>(null);
   const currentSettingsRef = useCommittedRef(settings);
+  const settingsMounted = useRef(true);
+  const saveFeedbackTimer = useRef<number | null>(null);
 
   const updateWorkerUpdaterState = (
     workerID: string,
@@ -353,6 +355,7 @@ export default function Settings() {
   };
 
   const startWorkerUpdaterPolling = (workerID: string, action: WorkerUpdaterAction, requestedAt = Date.now()) => {
+    if (!settingsMounted.current) return;
     clearWorkerUpdaterPoll(workerID);
     workerUpdaterPolls.current[workerID] = window.setInterval(async () => {
       const elapsed = Date.now() - requestedAt;
@@ -434,13 +437,14 @@ export default function Settings() {
   };
 
   const startComfyInstallPolling = () => {
-    if (comfyInstallPoll.current !== null) return;
+    if (!settingsMounted.current || comfyInstallPoll.current !== null) return;
     comfyInstallPoll.current = window.setInterval(() => {
       void refreshComfyInstall();
     }, 2000);
   };
 
   const applyComfyInstallStatus = (nextStatus: ComfyManagedInstallStatus) => {
+    if (!settingsMounted.current) return;
     setComfyInstall(nextStatus);
     if (nextStatus.installing) {
       startComfyInstallPolling();
@@ -470,7 +474,10 @@ export default function Settings() {
   }, []);
 
   useEffect(() => {
+    settingsMounted.current = true;
     return () => {
+      settingsMounted.current = false;
+      if (saveFeedbackTimer.current !== null) window.clearTimeout(saveFeedbackTimer.current);
       Object.values(workerUpdaterPolls.current).forEach(interval => window.clearInterval(interval));
       workerUpdaterPolls.current = {};
       stopComfyInstallPolling();
@@ -545,11 +552,14 @@ export default function Settings() {
   const saveSettings = async () => {
     if (!isSettingsLoaded || status === 'saving' || !hasUnsavedSettings) return;
     const submittedSettings = settings;
+    if (saveFeedbackTimer.current !== null) window.clearTimeout(saveFeedbackTimer.current);
     setStatus('saving');
 
     apiClient
       .post('/api/settings', submittedSettings)
       .then(() => {
+        // A previous editor must not publish its response into a newly opened draft.
+        if (!settingsMounted.current) return;
         const sanitizedSettings = {
           ...submittedSettings,
           HF_TOKEN: '',
@@ -575,9 +585,13 @@ export default function Settings() {
         notifySettingsChanged(sanitizedSettings);
         setSettings(nextDraft);
         setStatus('success');
-        setTimeout(() => setStatus(current => (current === 'success' ? 'idle' : current)), 2000);
+        saveFeedbackTimer.current = window.setTimeout(() => {
+          saveFeedbackTimer.current = null;
+          setStatus(current => (current === 'success' ? 'idle' : current));
+        }, 2000);
       })
       .catch(() => {
+        if (!settingsMounted.current) return;
         // Axios errors can include the submitted configuration, including newly entered tokens.
         setStatus('error');
       });

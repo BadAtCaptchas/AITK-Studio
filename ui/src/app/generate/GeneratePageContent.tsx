@@ -292,6 +292,7 @@ export function GeneratePageContent() {
   const loraFileInputRef = useRef<HTMLInputElement | null>(null);
   const inlineAbortControllerRef = useRef<AbortController | null>(null);
   const statusResetTimeoutRef = useRef<number | null>(null);
+  const generationMounted = useRef(true);
   const { settings, isSettingsLoaded } = useSettings();
   const { gpuData, gpuList, isGPUInfoLoaded } = useGPUInfo();
   const [gpuIDs, setGpuIDs] = useState<string | null>(null);
@@ -362,7 +363,9 @@ export function GeneratePageContent() {
     void loadLoras();
   }, [loadLoras]);
   useEffect(() => {
+    generationMounted.current = true;
     return () => {
+      generationMounted.current = false;
       inlineAbortControllerRef.current?.abort();
       inlineAbortControllerRef.current = null;
       if (statusResetTimeoutRef.current !== null) {
@@ -415,6 +418,7 @@ export function GeneratePageContent() {
     statusResetTimeoutRef.current = null;
   };
   const scheduleStatusIdle = () => {
+    if (!generationMounted.current) return;
     clearStatusResetTimeout();
     statusResetTimeoutRef.current = window.setTimeout(() => {
       setStatus('idle');
@@ -778,8 +782,9 @@ export function GeneratePageContent() {
         await startJob(res.data.id);
         await startQueue(selectedGpuIDs, 'local');
       }
-      router.push(`/jobs/${res.data.id}`);
+      if (generationMounted.current) router.push(`/jobs/${res.data.id}`);
     } catch (error: any) {
+      if (!generationMounted.current) return;
       console.error('Error creating generate job:', error);
       if (error.response?.status === 409) {
         setValidationErrors(['A job with this name already exists. Choose another name.']);
@@ -831,8 +836,10 @@ export function GeneratePageContent() {
         },
         { signal: abortController.signal },
       );
+      if (!generationMounted.current) return;
       setInlineImagePath(res.data.imagePath || res.data.image_path || '');
     } catch (error: any) {
+      if (!generationMounted.current) return;
       if (abortController.signal.aborted || error?.code === 'ERR_CANCELED' || error?.name === 'CanceledError') {
         generationCanceled = true;
         setInlineMessage('Generation canceled.');
@@ -847,11 +854,13 @@ export function GeneratePageContent() {
       if (inlineAbortControllerRef.current === abortController) {
         inlineAbortControllerRef.current = null;
       }
-      setCancelRequested(false);
-      if (generationCanceled) {
-        setStatus('idle');
-      } else {
-        scheduleStatusIdle();
+      if (generationMounted.current) {
+        setCancelRequested(false);
+        if (generationCanceled) {
+          setStatus('idle');
+        } else {
+          scheduleStatusIdle();
+        }
       }
     }
   };

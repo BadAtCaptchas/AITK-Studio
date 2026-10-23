@@ -3,7 +3,6 @@ import { reportWorkflowError } from '@/components/WorkflowFeedback';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Modal } from '@/components/Modal';
 import { createGlobalState } from 'react-global-hooks';
-import { useFromNull } from '@/hooks/useFromNull';
 import { CaptionJobConfig } from '@/types';
 import { defaultCaptionJobConfig } from '@/helpers/captionJobConfig';
 import { objectCopy } from '@/utils/basic';
@@ -19,6 +18,7 @@ import AdvancedConfigEditor from '@/components/AdvancedConfigEditor';
 import { SelectInput } from '@/components/formInputs';
 import { Loader2 } from 'lucide-react';
 import { defaultIdeogramJsonCaptionPrompt } from '@/helpers/captionOptions';
+import { parseCaptionJobSource } from '@/utils/captionJobSource';
 export interface CaptionDatasetModalState {
   datasetPath: string;
   jobId?: string | null;
@@ -55,42 +55,59 @@ export const openCaptionDatasetModal = (
 };
 export const CaptionDatasetModal: React.FC = () => {
   const [modalInfo, setModalInfo] = captionDatasetModalState.use();
-  const [jobConfig, setJobConfig] = useNestedState<CaptionJobConfig>(objectCopy(defaultCaptionJobConfig));
+  if (!modalInfo) return null;
+  return (
+    <CaptionDatasetDialog
+      key={JSON.stringify([modalInfo.jobId, modalInfo.cloneId, modalInfo.datasetPath])}
+      modalInfo={modalInfo}
+      onClose={() => setModalInfo(null)}
+    />
+  );
+};
+
+function initialCaptionConfig(modalInfo: CaptionDatasetModalState): CaptionJobConfig {
+  const config = objectCopy(defaultCaptionJobConfig);
+  const caption = config.config.process[0].caption;
+  caption.path_to_caption = modalInfo.datasetPath;
+  if (!modalInfo.jobId && !modalInfo.cloneId && modalInfo.rootCaption !== undefined) {
+    caption.system_prompt = modalInfo.rootCaption ?? '';
+  }
+  if (modalInfo.preset === 'ideogram_json') {
+    caption.output_format = 'ideogram_json';
+    caption.caption_prompt = defaultIdeogramJsonCaptionPrompt;
+    caption.caption_extension = 'json';
+    caption.source_caption_extension = 'txt';
+    caption.convert_destination = 'copy';
+    caption.max_res = 1024;
+    caption.max_new_tokens = 2048;
+  }
+  return config;
+}
+
+function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatasetModalState; onClose: () => void }) {
+  const [jobConfig, setJobConfig] = useNestedState<CaptionJobConfig>(initialCaptionConfig(modalInfo));
   const [gpuIDs, setGpuIDs] = useState<string | null>(null);
   const [existingJobName, setExistingJobName] = useState<string | null>(null);
-  const [hasLoadedExistingJob, setHasLoadedExistingJob] = useState(false);
+  const [sourceStatus, setSourceStatus] = useState<'loading' | 'ready' | 'error'>(
+    modalInfo.jobId || modalInfo.cloneId ? 'loading' : 'ready',
+  );
+  const [sourceAttempt, setSourceAttempt] = useState(0);
   const [activeTab, setActiveTab] = useState<'simple' | 'advanced'>('simple');
   const [allowDurableEncryptedResume, setAllowDurableEncryptedResume] = useState(false);
-  const open = modalInfo !== null;
-  const { gpuList, isGPUInfoLoaded } = useGPUInfo(null, null, 'local', { enabled: open });
+  const { gpuList, isGPUInfoLoaded } = useGPUInfo(null, null, 'local');
   const isSavingRef = useRef(false);
   const systemPromptTouchedRef = useRef(false);
-  const rootCaptionRequestRef = useRef(0);
+  const mountedRef = useRef(false);
   const [isSaving, setIsSaving] = useState(false);
   const showGPUSelect = !isMac();
-  const isLoadingExistingJob = !!(modalInfo?.jobId || modalInfo?.cloneId) && !hasLoadedExistingJob;
+  const isLoadingExistingJob = sourceStatus === 'loading';
   const showLoadingOverlay = isLoadingExistingJob || isSaving;
-  useFromNull(() => {
-    // reset the state
-    setJobConfig(objectCopy(defaultCaptionJobConfig));
-    setActiveTab('simple');
-    setExistingJobName(null);
-    setAllowDurableEncryptedResume(false);
-    systemPromptTouchedRef.current = false;
-    // set the path_to_caption
-    if (modalInfo?.datasetPath) {
-      setJobConfig(modalInfo.datasetPath, 'config.process[0].caption.path_to_caption');
-    }
-    if (modalInfo?.preset === 'ideogram_json') {
-      setJobConfig('ideogram_json', 'config.process[0].caption.output_format');
-      setJobConfig(defaultIdeogramJsonCaptionPrompt, 'config.process[0].caption.caption_prompt');
-      setJobConfig('json', 'config.process[0].caption.caption_extension');
-      setJobConfig('txt', 'config.process[0].caption.source_caption_extension');
-      setJobConfig('copy', 'config.process[0].caption.convert_destination');
-      setJobConfig(1024, 'config.process[0].caption.max_res');
-      setJobConfig(2048, 'config.process[0].caption.max_new_tokens');
-    }
-  }, [modalInfo]);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const applyRootCaption = useCallback(
     (systemPrompt: string | null | undefined) => {
       if (!modalInfo || modalInfo.jobId || modalInfo.cloneId || systemPromptTouchedRef.current) return;
@@ -101,57 +118,58 @@ export const CaptionDatasetModal: React.FC = () => {
   );
   useEffect(() => {
     if (!modalInfo || modalInfo.jobId || modalInfo.cloneId) return;
-    const requestId = ++rootCaptionRequestRef.current;
+    const controller = new AbortController();
     if (modalInfo.rootCaption !== undefined) {
       applyRootCaption(modalInfo.rootCaption);
       return;
     }
     if (!modalInfo.datasetName) return;
     apiClient
-      .post('/api/datasets/root-caption', {
-        datasetName: modalInfo.datasetName,
-      })
+      .post<unknown>(
+        '/api/datasets/root-caption',
+        {
+          datasetName: modalInfo.datasetName,
+        },
+        { signal: controller.signal },
+      )
       .then(res => {
-        if (rootCaptionRequestRef.current !== requestId) return;
-        if (res.data?.found) {
-          applyRootCaption(res.data.systemPrompt || '');
+        if (controller.signal.aborted) return;
+        const data = res.data;
+        if (
+          data &&
+          typeof data === 'object' &&
+          'found' in data &&
+          data.found === true &&
+          'systemPrompt' in data &&
+          typeof data.systemPrompt === 'string'
+        ) {
+          applyRootCaption(data.systemPrompt);
         }
       })
-      .catch(error => {
-        console.warn('Could not load dataset root caption:', error);
-      });
+      .catch(() => undefined);
+    return () => controller.abort();
   }, [applyRootCaption, modalInfo]);
-  // clone existing caption job
+  // A failed source read must never make defaults available for overwriting an existing job.
   useEffect(() => {
-    if (modalInfo?.cloneId) {
-      apiClient
-        .get(`/api/jobs?id=${modalInfo.cloneId}`)
-        .then(res => res.data)
-        .then(data => {
-          setGpuIDs(data.gpu_ids);
-          const newJobConfig = JSON.parse(data.job_config);
-          newJobConfig.config.name = `${newJobConfig.config.name}_copy`;
-          setJobConfig(newJobConfig);
-        })
-        .catch(error => console.error('Error fetching caption job:', error))
-        .finally(() => setHasLoadedExistingJob(true));
-    }
-  }, [modalInfo?.cloneId]);
-  // load existing caption job for editing
-  useEffect(() => {
-    if (modalInfo?.jobId) {
-      apiClient
-        .get(`/api/jobs?id=${modalInfo.jobId}`)
-        .then(res => res.data)
-        .then(data => {
-          setGpuIDs(data.gpu_ids);
-          setExistingJobName(data.name);
-          setJobConfig(JSON.parse(data.job_config));
-        })
-        .catch(error => console.error('Error fetching caption job:', error))
-        .finally(() => setHasLoadedExistingJob(true));
-    }
-  }, [modalInfo?.jobId]);
+    const sourceId = modalInfo.jobId || modalInfo.cloneId;
+    if (!sourceId) return;
+    const controller = new AbortController();
+    apiClient
+      .get<unknown>('/api/jobs', { params: { id: sourceId }, signal: controller.signal })
+      .then(res => {
+        if (controller.signal.aborted) return;
+        const source = parseCaptionJobSource(res.data);
+        if (!modalInfo.jobId) source.config.config.name = `${source.config.config.name}_copy`;
+        setGpuIDs(source.gpuIds);
+        setExistingJobName(modalInfo.jobId ? source.name : null);
+        setJobConfig(source.config);
+        setSourceStatus('ready');
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setSourceStatus('error');
+      });
+    return () => controller.abort();
+  }, [modalInfo, sourceAttempt, setJobConfig]);
   if (isGPUInfoLoaded) {
     if (gpuIDs === null && gpuList.length > 0) {
       setGpuIDs(`${gpuList[0].index}`);
@@ -161,11 +179,10 @@ export const CaptionDatasetModal: React.FC = () => {
     if (modalInfo?.onClose) {
       modalInfo.onClose();
     }
-    setHasLoadedExistingJob(false);
-    setModalInfo(null);
+    onClose();
   };
   const saveJob = async () => {
-    if (isSavingRef.current) return;
+    if (isSavingRef.current || sourceStatus !== 'ready') return;
     if (!modalInfo?.datasetPath) {
       reportWorkflowError('Dataset path is missing. Please try again.');
       return;
@@ -227,11 +244,14 @@ export const CaptionDatasetModal: React.FC = () => {
         );
         // start the queue as well
         await startQueue(gpuIDs || '');
-        isSavingRef.current = false;
-        setIsSaving(false);
-        handleClose();
+        if (mountedRef.current) {
+          isSavingRef.current = false;
+          setIsSaving(false);
+          handleClose();
+        }
       })
       .catch(error => {
+        if (!mountedRef.current) return;
         if (error.response?.status === 409) {
           reportWorkflowError('A caption job for this dataset already exists. Please check your jobs list.');
         } else {
@@ -249,11 +269,27 @@ export const CaptionDatasetModal: React.FC = () => {
         : 'border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-600'
     }`;
   return (
-    <Modal isOpen={open} onClose={handleClose} title="Caption Dataset" size={activeTab === 'advanced' ? 'xl' : 'lg'}>
+    <Modal isOpen onClose={handleClose} title="Caption Dataset" size={activeTab === 'advanced' ? 'xl' : 'lg'}>
       <div className="relative space-y-4 text-gray-200">
         {showLoadingOverlay && (
           <div className="absolute -left-6 -right-6 -top-4 -bottom-4 z-10 flex items-center justify-center backdrop-blur-sm bg-gray-900/40">
             <Loader2 className="w-10 h-10 text-brand-400 animate-spin" />
+          </div>
+        )}
+        {sourceStatus === 'error' && (
+          <div role="alert" className="rounded border border-rose-700 p-3 text-sm">
+            <p>Could not load caption job.</p>
+            <button
+              type="button"
+              className="operator-button mt-2"
+              aria-label="Retry loading caption job"
+              onClick={() => {
+                setSourceStatus('loading');
+                setSourceAttempt(attempt => attempt + 1);
+              }}
+            >
+              Retry
+            </button>
           </div>
         )}
         <div className="flex items-center border-b border-gray-700 -mt-2">
@@ -280,25 +316,26 @@ export const CaptionDatasetModal: React.FC = () => {
             saveJob();
           }}
         >
-          {activeTab === 'simple' ? (
-            <CaptionSimpleJob
-              jobConfig={jobConfig}
-              setJobConfig={setJobConfig}
-              datasetPath={modalInfo?.datasetPath || ''}
-              encryptedDatasetKeyB64={modalInfo?.encryptedDatasetKeyB64}
-              gpuIDs={gpuIDs}
-              setGpuIDs={setGpuIDs}
-              gpuList={gpuList}
-              showGPUSelect={showGPUSelect}
-              onSystemPromptChange={() => {
-                systemPromptTouchedRef.current = true;
-              }}
-            />
-          ) : (
-            <div className="h-[60vh] mt-2">
-              <AdvancedConfigEditor config={jobConfig} setConfig={setJobConfig} />
-            </div>
-          )}
+          {sourceStatus === 'ready' &&
+            (activeTab === 'simple' ? (
+              <CaptionSimpleJob
+                jobConfig={jobConfig}
+                setJobConfig={setJobConfig}
+                datasetPath={modalInfo?.datasetPath || ''}
+                encryptedDatasetKeyB64={modalInfo?.encryptedDatasetKeyB64}
+                gpuIDs={gpuIDs}
+                setGpuIDs={setGpuIDs}
+                gpuList={gpuList}
+                showGPUSelect={showGPUSelect}
+                onSystemPromptChange={() => {
+                  systemPromptTouchedRef.current = true;
+                }}
+              />
+            ) : (
+              <div className="h-[60vh] mt-2">
+                <AdvancedConfigEditor config={jobConfig} setConfig={setJobConfig} />
+              </div>
+            ))}
 
           <div className="mt-6 flex justify-end space-x-3">
             {modalInfo?.encryptedDatasetKeyB64 && (
@@ -320,7 +357,7 @@ export const CaptionDatasetModal: React.FC = () => {
             <button type="button" className="operator-button" onClick={handleClose}>
               Cancel
             </button>
-            <button type="submit" disabled={isSaving} className="operator-button-primary">
+            <button type="submit" disabled={isSaving || sourceStatus !== 'ready'} className="operator-button-primary">
               {isSaving ? 'Starting…' : 'Save & start captioning'}
             </button>
           </div>
@@ -328,4 +365,4 @@ export const CaptionDatasetModal: React.FC = () => {
       </div>
     </Modal>
   );
-};
+}

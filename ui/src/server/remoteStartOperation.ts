@@ -5,6 +5,7 @@ import {
   activeOperationForResource,
   enqueueOperation,
   getOperation,
+  operationID,
   updateOperation,
   type Operation,
 } from './operations';
@@ -15,7 +16,22 @@ function configHash(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 export async function acceptRemoteStart(jobID: string, request: JobStartRequest): Promise<Operation> {
-  const existing = await activeOperationForResource(`job:${jobID}`);
+  const prior = request.idempotencyKey
+    ? await getOperation(operationID('remote-start', request.idempotencyKey))
+    : null;
+  if (prior) {
+    if (prior.input.kind !== 'remote-start' || prior.input.jobID !== jobID) {
+      throw new JobStartError({ error: 'Idempotency key belongs to a different command', code: 'IDEMPOTENCY_KEY_CONFLICT' }, 409);
+    }
+    // Completion acknowledges the original command even while that job is still
+    // running, or a newer command owns it. Replaying must never start it again.
+    if (['completed', 'failed', 'canceled'].includes(prior.state)) return prior;
+  }
+  const active = await activeOperationForResource(`job:${jobID}`);
+  if (prior && active && prior.id !== active.id) {
+    throw new JobStartError({ error: 'Another start command owns this job', code: 'JOB_ACTIVE' }, 409);
+  }
+  const existing = prior || active;
   if (existing && existing.state !== 'needs-keys') return existing;
   const prepared = await prepareJobStart(jobID, request.encryptedDatasetKeys, request.durableEncryptedDatasetKeys, {
     operationID: existing?.id,

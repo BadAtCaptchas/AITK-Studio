@@ -57,17 +57,69 @@ export type JobModelPrefetchResult = {
 export type StartJobOptions = {
   durableEncryptedDatasetKeys?: boolean;
   background?: boolean;
+  idempotencyKey?: string;
   onRemoteStartProgress?: (progress: RemoteStartProgress) => void;
 };
-function apiErrorMessage(error: unknown, fallback = 'Request failed') {
-  if (error && typeof error === 'object' && 'response' in error) {
-    const response = error.response;
-    if (response && typeof response === 'object' && 'data' in response) {
-      const data = response.data;
-      if (data && typeof data === 'object' && 'error' in data && typeof data.error === 'string') return data.error;
-    }
+export class StartJobError extends Error {
+  readonly status?: number;
+  readonly code?: string;
+
+  constructor(
+    message: string,
+    readonly outcome: 'unknown' | 'rejected',
+    detail: { status?: number; code?: string } = {},
+  ) {
+    super(message);
+    this.name = 'StartJobError';
+    this.status = detail.status;
+    this.code = detail.code;
   }
-  return error instanceof Error ? error.message : fallback;
+}
+export function isStartJobError(error: unknown): error is StartJobError {
+  return error instanceof StartJobError;
+}
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+function startActionError(error: unknown, fallback: string, accepted: boolean): StartJobError {
+  if (isStartJobError(error)) return error;
+  const response = isRecord(error) && isRecord(error.response) ? error.response : undefined;
+  const data = response && isRecord(response.data) ? response.data : undefined;
+  const status = typeof response?.status === 'number' && Number.isInteger(response.status) ? response.status : undefined;
+  const code = typeof data?.code === 'string' ? data.code : undefined;
+  const message = typeof data?.error === 'string' ? data.error : error instanceof Error ? error.message : fallback;
+  // A failed progress read cannot reverse an already accepted start. Busy commands
+  // likewise may still finish, so callers must retry their original command key.
+  const rejected = !accepted && status !== undefined && status >= 400 && status < 500 &&
+    ![408, 425].includes(status) && code !== 'START_BUSY';
+  return new StartJobError(message, rejected ? 'rejected' : 'unknown', { status, code });
+}
+const remoteStartStatuses: readonly RemoteStartProgress['status'][] = [
+  'queued', 'preparing', 'checking-datasets', 'zipping-dataset', 'uploading-dataset', 'importing-dataset',
+  'zipping-job', 'uploading-job', 'importing-job', 'starting', 'completed', 'failed',
+];
+function isRemoteStartStatus(value: unknown): value is RemoteStartProgress['status'] {
+  return typeof value === 'string' && remoteStartStatuses.some(status => status === value);
+}
+function parseRemoteStartProgress(value: unknown, jobID: string, startID: string): RemoteStartProgress {
+  if (!isRecord(value) || value.jobID !== jobID || value.startID !== startID || !isRemoteStartStatus(value.status)) {
+    throw new StartJobError('Invalid remote start progress response. Retry to recover the start result.', 'unknown');
+  }
+  return {
+    jobID, startID, status: value.status,
+    message: typeof value.message === 'string' ? value.message : '',
+    percent: typeof value.percent === 'number' && Number.isFinite(value.percent) ? value.percent : 0,
+    datasetName: typeof value.datasetName === 'string' ? value.datasetName : null,
+    bytesProcessed: typeof value.bytesProcessed === 'number' ? value.bytesProcessed : 0,
+    bytesTotal: typeof value.bytesTotal === 'number' ? value.bytesTotal : 0,
+    warnings: Array.isArray(value.warnings) ? value.warnings.filter((warning): warning is string => typeof warning === 'string') : [],
+    error: typeof value.error === 'string' ? value.error : null,
+    remoteJobID: typeof value.remoteJobID === 'string' ? value.remoteJobID : null,
+    createdAt: typeof value.createdAt === 'string' ? value.createdAt : '',
+    updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : '',
+    ...(typeof value.operationState === 'string' ? { operationState: value.operationState } : {}),
+    ...(typeof value.phase === 'string' ? { phase: value.phase } : {}),
+  };
 }
 const runStartLikeJobAction = (
   jobID: string,
@@ -78,27 +130,31 @@ const runStartLikeJobAction = (
   options: StartJobOptions = {},
 ) => {
   return new Promise<void>((resolve, reject) => {
-    const idempotencyKey = globalThis.crypto.randomUUID();
-    const waitForRemoteStart = async (startID: string) => {
+    const idempotencyKey = options.idempotencyKey ?? globalThis.crypto.randomUUID();
+    let accepted = false;
+    const waitForRemoteStart = async (initial: RemoteStartProgress) => {
+      let progress = initial;
       while (true) {
-        await new Promise(waitResolve => window.setTimeout(waitResolve, 500));
-        const progress = await getRemoteStartProgress(jobID, startID);
         options.onRemoteStartProgress?.(progress);
         if (progress.status === 'completed') return;
         if (progress.status === 'failed') {
-          throw new Error(progress.error || 'Remote start failed');
+          throw new StartJobError(progress.error || 'Remote start failed', 'rejected', { code: 'REMOTE_START_FAILED' });
         }
+        await new Promise(waitResolve => window.setTimeout(waitResolve, 500));
+        progress = await getRemoteStartProgress(jobID, initial.startID);
       }
     };
     const postStart = async () => {
-      const res = await apiClient.post(`/api/jobs/${jobID}/${actionPath}`, {
+      const res = await apiClient.post<unknown>(`/api/jobs/${jobID}/${actionPath}`, {
         ...(actionPath === 'start' ? { idempotencyKey } : {}),
         background: options.background === true && actionPath === 'start',
       });
       const data = res.data;
-      if (data?.startID && data?.progress) {
-        options.onRemoteStartProgress?.(data.progress);
-        await waitForRemoteStart(data.startID);
+      if (isRecord(data) && typeof data.startID === 'string' && data.startID) {
+        accepted = true;
+        await waitForRemoteStart(parseRemoteStartProgress(data.progress, jobID, data.startID));
+      } else if (!isRecord(data) || data.id !== jobID || typeof data.status !== 'string' || !data.status) {
+        throw new StartJobError('Invalid job start response. Retry to recover the start result.', 'unknown');
       }
     };
     postStart()
@@ -106,10 +162,10 @@ const runStartLikeJobAction = (
         console.log(successLabel);
         resolve();
       })
-      .catch(async error => {
+      .catch((error: unknown) => {
         // Axios failures retain request bodies, headers and response configuration.
         console.error(`${failureLabel}:`);
-        reject(new Error(apiErrorMessage(error, failureLabel)));
+        reject(startActionError(error, failureLabel, accepted));
       });
   });
 };
@@ -294,7 +350,7 @@ export const sampleJobNow = async (jobID: string): Promise<void> => {
   console.log('Job set to sample on next step:');
 };
 export const getRemoteStartProgress = (jobID: string, startID: string) => {
-  return apiClient.get(`/api/jobs/${jobID}/start-progress/${startID}`).then(res => res.data as RemoteStartProgress);
+  return apiClient.get<unknown>(`/api/jobs/${jobID}/start-progress/${startID}`).then(res => parseRemoteStartProgress(res.data, jobID, startID));
 };
 export const downloadJobModelReferences = (jobID: string) => {
   return apiClient.post(`/api/jobs/${jobID}/prefetch-models`).then(res => res.data as JobModelPrefetchResult);

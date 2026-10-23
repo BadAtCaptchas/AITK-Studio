@@ -30,7 +30,15 @@ async function launchFixture(page: Page, create = false) {
       },
     }),
   );
-  const state = { ...fixture.state, saveSucceeds: true, failStart: true, failQueue: false, failSave: false, copies: 0 };
+  const state = {
+    ...fixture.state,
+    saveSucceeds: true,
+    failStart: true,
+    failQueue: false,
+    failSave: false,
+    copies: 0,
+    startKeys: [] as string[],
+  };
   await page.route('**/api/jobs', route => {
     if (route.request().method() !== 'POST') return route.continue();
     const data: unknown = route.request().postDataJSON();
@@ -42,9 +50,12 @@ async function launchFixture(page: Page, create = false) {
   });
   await page.route('**/api/jobs/caption-recovery-fixture/start', route => {
     state.starts++;
+    const body: unknown = route.request().postDataJSON();
+    if (body && typeof body === 'object' && 'idempotencyKey' in body && typeof body.idempotencyKey === 'string')
+      state.startKeys.push(body.idempotencyKey);
     return state.failStart
-      ? route.fulfill({ status: 503, json: { error: 'Fixture start failure' } })
-      : route.fulfill({ json: {} });
+      ? route.fulfill({ status: 422, json: { error: 'Fixture start preflight rejected' } })
+      : route.fulfill({ json: { ...fixture.job, status: 'queued' } });
   });
   await page.route('**/api/queue/*/start?*', route => {
     state.queueStarts++;
@@ -90,6 +101,8 @@ test('caption start retry reuses the saved new job without saving a duplicate', 
   expect(state.saves).toHaveLength(1);
   expect(state.saves[0]).toMatchObject({ gpu_ids: '0' });
   expect(state.starts).toBe(2);
+  expect(state.startKeys).toHaveLength(2);
+  expect(state.startKeys[1]).not.toBe(state.startKeys[0]);
   expect(state.queueStarts).toBe(1);
 });
 
@@ -145,6 +158,8 @@ test('caption retry saves newer edits to the same already-created job', async ({
     id: job.id,
     job_config: { config: { process: [{ caption: { caption_prompt: 'Newer retry prompt' } }] } },
   });
+  expect(state.startKeys).toHaveLength(2);
+  expect(state.startKeys[1]).not.toBe(state.startKeys[0]);
 });
 
 test('caption save retry reuses the completed dataset copy', async ({ page }) => {
@@ -167,4 +182,72 @@ test('caption save retry reuses the completed dataset copy', async ({ page }) =>
     job_ref: 'fixture/copied-caption-data',
     job_config: { config: { process: [{ caption: { path_to_caption: 'fixture/copied-caption-data' } }] } },
   });
+});
+
+for (const acceptedStatus of ['queued', 'completed'] as const) {
+  test(`caption retries recover a lost ${acceptedStatus} start acknowledgement without starting twice`, async ({
+    page,
+  }) => {
+    const { state, modal, submit, job } = await launchFixture(page, true);
+    const keys: string[] = [];
+    const accepted = new Set<string>();
+    let enqueues = 0;
+    await page.route('**/api/jobs/caption-recovery-fixture/start', async route => {
+      const body: unknown = route.request().postDataJSON();
+      const key = body && typeof body === 'object' && 'idempotencyKey' in body ? body.idempotencyKey : null;
+      expect(typeof key).toBe('string');
+      if (typeof key !== 'string') return route.abort();
+      keys.push(key);
+      if (!accepted.has(key)) {
+        accepted.add(key);
+        enqueues++;
+      }
+      if (keys.length === 1) return route.abort('failed');
+      return route.fulfill({ json: { ...job, status: acceptedStatus } });
+    });
+    await submit.click();
+    await expect(submit).toBeEnabled();
+    await expect(modal.getByRole('alert').filter({ hasText: 'Captioning may already have started' })).toBeVisible();
+    await expect(modal.getByLabel('Caption Prompt', { exact: true })).toBeDisabled();
+    await submit.click();
+    await expect(modal).toHaveCount(0);
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).toBe(keys[0]);
+    expect(enqueues).toBe(1);
+    expect(state.saves).toHaveLength(1);
+    expect(state.queueStarts).toBe(1);
+    await expect(page.getByRole('alert').filter({ hasText: 'Captioning may already have started' })).toHaveCount(0);
+  });
+}
+
+test('a definitively failed start operation can retry unchanged configuration as a new command', async ({ page }) => {
+  const { state, modal, submit, job } = await launchFixture(page);
+  const keys: unknown[] = [];
+  await page.route('**/api/jobs/caption-recovery-fixture/start', route => {
+    const body: unknown = route.request().postDataJSON();
+    keys.push(body && typeof body === 'object' && 'idempotencyKey' in body ? body.idempotencyKey : null);
+    if (keys.length > 1) return route.fulfill({ json: { ...job, status: 'queued' } });
+    return route.fulfill({
+      json: {
+        startID: 'failed-start-fixture',
+        progress: {
+          startID: 'failed-start-fixture',
+          jobID: job.id,
+          status: 'failed',
+          error: 'Fixture worker unavailable',
+        },
+      },
+    });
+  });
+  await submit.click();
+  await expect(submit).toBeEnabled();
+  await expect(modal.getByRole('alert').filter({ hasText: 'Fixture worker unavailable' })).toBeVisible();
+  await expect(modal.getByLabel('Caption Prompt', { exact: true })).toBeEnabled();
+  await submit.click();
+  await expect(modal).toHaveCount(0);
+  expect(keys).toHaveLength(2);
+  expect(typeof keys[0]).toBe('string');
+  expect(keys[1]).not.toBe(keys[0]);
+  expect(state.saves).toHaveLength(1);
+  expect(state.queueStarts).toBe(1);
 });

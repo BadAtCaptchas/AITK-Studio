@@ -32,7 +32,7 @@ export async function idempotentStart(jobID: string, key: string | undefined, st
             accepted: false,
           }))
         )
-          throw new JobStartError({ error: 'Start command is busy; retry' }, 409);
+          throw new JobStartError({ error: 'Start command is busy; retry', code: 'START_BUSY' }, 409);
       }
       const result = await start();
       const current = await db.runtime.get(recordKey);

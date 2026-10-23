@@ -11,7 +11,7 @@ import { isMac } from '@/helpers/basic';
 import useGPUInfo from '@/hooks/useGPUInfo';
 import { apiClient } from '@/utils/api';
 import { v4 as uuidv4 } from 'uuid';
-import { startJob } from '@/utils/jobs';
+import { isStartJobError, startJob } from '@/utils/jobs';
 import { startQueue } from '@/utils/queue';
 import CaptionSimpleJob from '@/components/CaptionSimpleJob';
 import AdvancedConfigEditor from '@/components/AdvancedConfigEditor';
@@ -90,7 +90,8 @@ type CaptionLaunchCheckpoint = {
   fingerprint: string;
   gpuIds: string | null;
   jobRef: string;
-  started: boolean;
+  startKey: string;
+  startState: 'saved' | 'uncertain' | 'started';
 };
 
 function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatasetModalState; onClose: () => void }) {
@@ -114,6 +115,7 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
   const systemPromptTouchedRef = useRef(false);
   const mountedRef = useRef(false);
   const [isSaving, setIsSaving] = useState(false);
+  const inputsLocked = isSaving || (!!launchCheckpoint && launchCheckpoint.startState !== 'saved');
   const showGPUSelect = !isMac();
   const isLoadingExistingJob = sourceStatus === 'loading';
   const showLoadingOverlay = isLoadingExistingJob || isSaving;
@@ -215,7 +217,7 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
     let stage: 'prepare' | 'save' | 'start' | 'queue' = 'prepare';
     let checkpoint = launchCheckpoint;
     try {
-      if (!checkpoint?.started) {
+      if (!checkpoint || checkpoint.startState === 'saved') {
         const jobConfigToSave = objectCopy(jobConfig);
         const captionConfig = jobConfigToSave.config.process[0].caption;
         let jobRef = modalInfo.datasetPath;
@@ -258,18 +260,31 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
           if (!data || typeof data !== 'object' || !('id' in data) || typeof data.id !== 'string' || !data.id.trim()) {
             throw new Error('Invalid caption job response');
           }
-          checkpoint = { id: data.id, name, fingerprint, gpuIds: gpuIDs, jobRef, started: false };
+          checkpoint = {
+            id: data.id,
+            name,
+            fingerprint,
+            gpuIds: gpuIDs,
+            jobRef,
+            startKey: uuidv4(),
+            startState: 'saved',
+          };
           if (mountedRef.current) setLaunchCheckpoint(checkpoint);
         }
+      }
+      if (checkpoint.startState !== 'started') {
         stage = 'start';
+        // Persist the command identity before sending: a lost response is not a rejection.
+        checkpoint = { ...checkpoint, startState: 'uncertain' };
+        if (mountedRef.current) setLaunchCheckpoint(checkpoint);
         await startJob(
           checkpoint.id,
           modalInfo.encryptedDatasetKeyB64
             ? [{ datasetPath: checkpoint.jobRef, keyB64: modalInfo.encryptedDatasetKeyB64 }]
             : undefined,
-          { durableEncryptedDatasetKeys: allowDurableEncryptedResume },
+          { durableEncryptedDatasetKeys: allowDurableEncryptedResume, idempotencyKey: checkpoint.startKey },
         );
-        checkpoint = { ...checkpoint, started: true };
+        checkpoint = { ...checkpoint, startState: 'started' };
         if (mountedRef.current) setLaunchCheckpoint(checkpoint);
       }
       stage = 'queue';
@@ -277,10 +292,19 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
       if (mountedRef.current) handleClose();
     } catch (error: unknown) {
       if (!mountedRef.current) return;
+      const uncertainStart = stage === 'start' && (!isStartJobError(error) || error.outcome === 'unknown');
+      if (stage === 'start' && checkpoint && !uncertainStart) {
+        // A conclusively rejected/failed command is finished. A deliberate retry
+        // gets a new identity; only an uncertain result must replay its old key.
+        checkpoint = { ...checkpoint, startKey: uuidv4(), startState: 'saved' };
+        setLaunchCheckpoint(checkpoint);
+      }
       const messages = {
         prepare: 'Failed to prepare caption dataset. Please try again.',
         save: 'Failed to save job. Please try again.',
-        start: 'Job saved, but captioning could not start. Retry to start the saved job.',
+        start: uncertainStart
+          ? 'Captioning may already have started. Retry to confirm or complete the start before editing.'
+          : 'Job saved, but captioning could not start. Retry to start the saved job.',
         queue: 'Caption start was accepted, but the queue could not start. Retry to start the queue.',
       };
       let detail: string | undefined;
@@ -330,7 +354,7 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
             </button>
           </div>
         )}
-        <div className="flex items-center border-b border-gray-700 -mt-2" inert={isSaving || launchCheckpoint?.started}>
+        <div className="flex items-center border-b border-gray-700 -mt-2" inert={inputsLocked}>
           <button type="button" className={tabButtonClass('simple')} onClick={() => setActiveTab('simple')}>
             Simple
           </button>
@@ -362,11 +386,7 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
           }}
         >
           {sourceStatus === 'ready' && (
-            <fieldset
-              className="min-w-0"
-              disabled={isSaving || launchCheckpoint?.started}
-              inert={isSaving || launchCheckpoint?.started}
-            >
+            <fieldset className="min-w-0" disabled={inputsLocked} inert={inputsLocked}>
               {activeTab === 'simple' &&
                 (isConfigValid ? (
                   <CaptionSimpleJob
@@ -398,7 +418,7 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
                     transformOnParse={parseCaptionJobConfig}
                     onValidityChange={setIsConfigValid}
                     active={activeTab === 'advanced'}
-                    readOnly={isSaving || launchCheckpoint?.started}
+                    readOnly={inputsLocked}
                   />
                 </div>
               )}
@@ -412,7 +432,7 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
                   type="checkbox"
                   className="mt-1"
                   checked={allowDurableEncryptedResume}
-                  disabled={isSaving || launchCheckpoint?.started}
+                  disabled={inputsLocked}
                   onChange={e => setAllowDurableEncryptedResume(e.target.checked)}
                 />
                 <span>
@@ -433,11 +453,13 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
             >
               {isSaving
                 ? 'Starting…'
-                : launchCheckpoint?.started
+                : launchCheckpoint?.startState === 'started'
                   ? 'Retry queue start'
-                  : launchCheckpoint
-                    ? 'Save & retry start'
-                    : 'Save & start captioning'}
+                  : launchCheckpoint?.startState === 'uncertain'
+                    ? 'Retry caption start'
+                    : launchCheckpoint
+                      ? 'Save & retry start'
+                      : 'Save & start captioning'}
             </button>
           </div>
         </form>

@@ -68,7 +68,10 @@ export async function captionFixture(page: Page) {
     const pathname = new URL(route.request().url()).pathname;
     if (pathname.endsWith('/log')) return route.fulfill({ json: { log: '', reset: true, offset: null } });
     if (pathname.endsWith('/metrics')) return route.fulfill({ json: { keys: [], series: {} } });
-    if (pathname.endsWith('/start')) state.starts += 1;
+    if (pathname.endsWith('/start')) {
+      state.starts += 1;
+      return route.fulfill({ json: { ...job, status: 'queued' } });
+    }
     return route.fulfill({ json: {} });
   });
   await page.route('**/api/queue/*/start?*', route => {

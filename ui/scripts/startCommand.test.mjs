@@ -126,3 +126,35 @@ test('start lease timeout is returned as a retryable JSON conflict instead of an
   assert.equal(response.status, 409);
   assert.equal((await response.json()).code, 'START_BUSY');
 });
+
+test('a start receipt CAS conflict preserves the retryable command identity', async () => {
+  const f = fixture();
+  const compareAndSwap = f.db.runtime.compareAndSwap;
+  f.db.runtime.compareAndSwap = async (key, version, value) => {
+    if (key === 'start-command:job:receipt-conflict' && version === null) {
+      // Another writer publishes the receipt after the initial read. Losing the
+      // CAS cannot establish that the caller's original command was rejected.
+      f.records.set(key, { version: 0, value: { jobID: 'job', accepted: true } });
+      f.job.status = 'queued';
+      return false;
+    }
+    return compareAndSwap(key, version, value);
+  };
+  const { POST } = loadSource('../src/app/api/jobs/[jobID]/start/route.ts', {
+    '@/server/commandInput': commandInput,
+    '@/server/jobStart': { JobStartError, startJobFromRequest: async () => assert.fail('conflicting command launched again') },
+    '@/server/db': { db: f.db }, '@/server/remoteClient': { isLocalWorker: () => true },
+    '@/server/remoteStartOperation': {}, '@/server/remoteStartProgress': {},
+    '@/utils/authSession': { isRequestAuthenticated: async () => true }, '@/server/startCommand': f.client(),
+  });
+  const request = () => POST(new Request('http://localhost/api/jobs/job/start', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ idempotencyKey: 'receipt-conflict' }),
+  }), { params: Promise.resolve({ jobID: 'job' }) });
+  const busy = await request();
+  const response = await busy.json();
+  const replay = await request();
+  assert.equal(replay.status, 200);
+  assert.equal((await replay.json()).status, 'queued');
+  assert.equal(busy.status, 409);
+  assert.equal(response.code, 'START_BUSY');
+});

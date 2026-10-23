@@ -21,11 +21,11 @@
 
 | Set up a training run | Generate with your models |
 | :---: | :---: |
-| [![Guided training job setup](assets/readme-ui-new-job.png)](assets/readme-ui-new-job.png) | [![Image generation with a base model or LoRA](assets/readme-ui-generate.png)](assets/readme-ui-generate.png) |
+| [![Training form with parameter navigation](assets/readme-ui-new-job.png)](assets/readme-ui-new-job.png) | [![Image generation with a base model or LoRA](assets/readme-ui-generate.png)](assets/readme-ui-generate.png) |
 
 | Edit in Caption Studio | Compose with Ideogram Regions |
 | :---: | :---: |
-| [![Caption Studio with a demo image and editable caption](assets/readme-ui-caption-studio.png)](assets/readme-ui-caption-studio.png) | [![Ideogram region composition and selected text element](assets/readme-ui-workflow-builder.png)](assets/readme-ui-workflow-builder.png) |
+| [![Caption Studio with a demo image and editable caption](assets/readme-ui-caption-studio.png)](assets/readme-ui-caption-studio.png) | [![Ideogram editing workspace with region composition and a selected text element](assets/readme-ui-workflow-builder.png)](assets/readme-ui-workflow-builder.png) |
 
 Screenshots show the running UI with demo data. GPU availability is simulated for setup; no training or generation was run, and external ComfyUI is disconnected.
 

@@ -197,6 +197,51 @@ test('Flux.1 exposes offloading controls and preserves their explicit values thr
   await expect(page.getByRole('alert').filter({ hasText: 'Fixture offload save unavailable' })).toBeVisible();
 });
 
+for (const [from, destination, label] of [
+  ['flux_kontext', 'flux', 'FLUX.1'],
+  ['flux_kontext', 'flex1', 'Flex.1'],
+  ['flux', 'flux_kontext', 'FLUX.1-Kontext-dev'],
+]) {
+test(`${destination} retains explicit Low VRAM through model selection, Config and save`, async ({ page }) => {
+  await page.getByRole('tab', { name: 'Config', exact: true }).click();
+  await expect(page.locator('[data-config-editor] textarea.inputarea')).toBeVisible();
+  const config = YAML.parse((await editorSnapshot(page)).text ?? '') as JobConfig;
+  config.config.process[0].model.arch = from;
+  config.config.process[0].model.low_vram = true;
+  config.config.process[0].sample.keep_low_vram_for_samples = true;
+  await pasteEditorText(page, YAML.stringify(config));
+  await page.getByRole('tab', { name: 'Form', exact: true }).click();
+  const lowVram = page.getByRole('switch', { name: 'Low VRAM', exact: true });
+  await expect(lowVram).toBeChecked();
+  await page.getByRole('combobox', { name: 'Model architecture', exact: true }).fill(label);
+  await page.getByRole('option', { name: label, exact: true }).click();
+  await expect(lowVram).toBeChecked();
+  await lowVram.click();
+  await page.getByRole('tab', { name: 'Config', exact: true }).click();
+  const disabled = YAML.parse((await editorSnapshot(page)).text ?? '') as JobConfig;
+  expect(disabled.config.process[0].model.low_vram).toBe(false);
+  await page.getByRole('tab', { name: 'Form', exact: true }).click();
+  await expect(lowVram).not.toBeChecked();
+  await lowVram.click();
+  await page.getByRole('tab', { name: 'Config', exact: true }).click();
+  const enabled = YAML.parse((await editorSnapshot(page)).text ?? '') as JobConfig;
+  expect(enabled.config.process[0].model.arch).toBe(destination);
+  expect(enabled.config.process[0].model.low_vram).toBe(true);
+  expect(enabled.config.process[0].sample.keep_low_vram_for_samples).toBe(true);
+  await expect(page.getByRole('button', { name: 'Create Job', exact: true })).toBeEnabled();
+  await page.route('**/api/jobs', route => route.request().method() === 'POST'
+    ? route.fulfill({ status: 503, json: { error: 'Fixture low-memory save unavailable' } })
+    : route.continue());
+  const posted = page.waitForRequest(request => request.url().endsWith('/api/jobs') && request.method() === 'POST');
+  await page.getByRole('button', { name: 'Create Job', exact: true }).click();
+  const payload = (await posted).postDataJSON() as { job_config: JobConfig };
+  expect(payload.job_config.config.process[0].model.arch).toBe(destination);
+  expect(payload.job_config.config.process[0].model.low_vram).toBe(true);
+  expect(payload.job_config.config.process[0].sample.keep_low_vram_for_samples).toBe(true);
+  await expect(page.getByRole('alert').filter({ hasText: 'Fixture low-memory save unavailable' })).toBeVisible();
+});
+}
+
 test('cyclic YAML imports report an error and preserve the current editable draft', async ({ page }) => {
   await page.getByLabel('Training name', { exact: true }).fill('retained_after_bad_import');
   const config = structuredClone(defaultJobConfig);

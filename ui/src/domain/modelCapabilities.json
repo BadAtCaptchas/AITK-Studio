@@ -473,6 +473,7 @@
       "group": "image",
       "isVideoModel": false,
       "additionalSections": [
+        "model.low_vram",
         "model.layer_offloading"
       ],
       "disableSections": [
@@ -519,6 +520,7 @@
       "additionalSections": [
         "datasets.control_path",
         "sample.ctrl_img",
+        "model.low_vram",
         "model.layer_offloading"
       ],
       "disableSections": [
@@ -562,7 +564,9 @@
       "label": "Flex.1",
       "group": "image",
       "isVideoModel": false,
-      "additionalSections": [],
+      "additionalSections": [
+        "model.low_vram"
+      ],
       "disableSections": [
         "network.conv"
       ],

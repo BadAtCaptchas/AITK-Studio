@@ -298,6 +298,7 @@ class SDTrainer(BaseSDTrainProcess):
                     output_path=output_path,
                     width=sample_item.width,
                     height=sample_item.height,
+                    num_frames=sample_item.num_frames,
                     num_layers=sample_item.num_layers,
                     ctrl_img=sample_item.ctrl_img,
                     ctrl_img_1=sample_item.ctrl_img_1,

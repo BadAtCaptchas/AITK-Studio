@@ -456,14 +456,17 @@ class MemoryManager:
         gc.collect()
         torch.cuda.empty_cache()
 
-        for fn_name in ("_accelerator_emptyHostCache", "_host_emptyCache"):
-            fn = getattr(torch._C, fn_name, None)
-            if fn is not None:
-                try:
-                    fn()
-                    break
-                except Exception:
-                    pass
+        # MPS host-cache clearing can segfault; Python exception handling cannot protect it.
+        on_mps = getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available()
+        if not on_mps:
+            for fn_name in ("_accelerator_emptyHostCache", "_host_emptyCache"):
+                fn = getattr(torch._C, fn_name, None)
+                if fn is not None:
+                    try:
+                        fn()
+                        break
+                    except Exception:
+                        pass
 
         try:
             ctypes.CDLL(None).malloc_trim(0)

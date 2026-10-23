@@ -571,6 +571,9 @@
     },
     "tests.test_oct22_upstream": {
       "group": "runtime"
+    },
+    "tests.test_oct23_upstream": {
+      "group": "runtime"
     }
   }
 }

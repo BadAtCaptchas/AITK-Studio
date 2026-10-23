@@ -181,6 +181,7 @@ function requiredSettings(arch: ModelArch): RequiredSettings {
       'sample.neg': '',
     });
   if (name === 'qwen25_omni') required['train.batch_size'] = 1;
+  if (name === 'fibo2') Object.assign(required, { 'train.train_text_encoder': false, 'train.unload_text_encoder': false });
   if (name === 'ideogram4') required['train.train_text_encoder'] = false;
   if (name === 'qwen_image_edit' || name === 'boogu_image_edit') required['train.unload_text_encoder'] = false;
   if (arch.name.startsWith('moss_image:kromoss'))

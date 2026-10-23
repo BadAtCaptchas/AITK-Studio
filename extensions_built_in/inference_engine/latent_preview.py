@@ -55,6 +55,7 @@ ARCH_LATENT_FORMAT = {
     "iris3b": None,  # pixel space
     "flux3": "Flux3Image",
     "moss_image": "Flux2",
+    "fibo2": "Flux2",
 }
 
 

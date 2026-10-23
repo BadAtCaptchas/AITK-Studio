@@ -2009,6 +2009,12 @@ def validate_configs(
 ):
     from toolkit.memory_management.offload import is_block_offload_arch_supported
 
+    if model_config.arch == "fibo2":
+        if train_config.train_text_encoder:
+            raise ValueError("Fibo 2.0 requires frozen text conditioning")
+        if train_config.unload_text_encoder:
+            raise ValueError("Fibo 2.0 sampling requires the text encoder for text-only CFG negatives")
+
     model_ref = str(model_config.name_or_path_original or model_config.name_or_path)
     is_kromoss = model_config.arch == "moss_image" and (
         model_ref == "lodestones/Kromoss" or model_ref.startswith("lodestones/Kromoss/")

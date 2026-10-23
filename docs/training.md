@@ -334,3 +334,10 @@ The opt-in `t0_velocity_equiv_weight` and `do_fft_velocity_equiv_weight` setting
 use `1 / max(sigma, 0.01)^2`, computed in float32. This increases weighting below
 sigma 0.1 compared with older Studio versions; both settings remain disabled by
 default. Studio retains its existing clean-prediction and DFE handling.
+
+
+### October 23 selective integrations
+
+- **Fibo 2.0 Dev** uses `Comfy-Org/Fibo-2.0` or an explicit Comfy-layout safetensors checkpoint. It supports text-to-image and optional ordered reference images with target-aware sizing. Qwen3-VL conditioning stays frozen and available for text-only CFG negatives; text-encoder training/unloading is rejected. The FLUX.2 VAE is reusable, and decode remains differentiable for DFE losses. Caption `text_render` image entries are not encoded by this integration.
+- **Automagic V4** is experimental. Its group controller is isolated from Studio's existing V3 behavior and checkpoints. The first step measures sensitivity without updating weights. Studio uses non-fused steps and ordinary visible PyTorch gradient accumulation to preserve clipping and recovery; `fused: true` is rejected. Factored second moments stay in FP32, including on resume, to prevent FP16 overflow (at an increased moment-state memory cost versus upstream).
+- Cached preview prompts now retain frame count as well as dimensions. Compiled model exports remove compiler wrapper keys and reject collisions. MPS memory release skips the unsafe native host-cache call; rotary phases use FP32 on MPS.

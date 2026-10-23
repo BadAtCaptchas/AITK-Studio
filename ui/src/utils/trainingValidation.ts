@@ -75,6 +75,10 @@ export function validateTrainingConfig(
       message: 'Select or enter a base model path.',
     });
   }
+  if (modelConfig?.arch === 'fibo2' && (trainConfig?.train_text_encoder || trainConfig?.unload_text_encoder)) {
+    messages.push({ target: { step: 'raw', label: 'Raw configuration' }, level: 'error',
+      message: 'Fibo 2.0 requires a frozen, available text encoder for sampling.' });
+  }
   if (modelConfig?.arch === 'minimax_h3' || modelConfig?.arch === 'minimax_h3_vsa_v2' || modelConfig?.arch === 'minimax_h3_omni') {
     if (modelConfig.layer_offloading) {
       messages.push({

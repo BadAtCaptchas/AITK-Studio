@@ -915,7 +915,14 @@ class OstrisModelMixin:
                 value = value.to(dtype=dtype)
             state_dict[key] = value.detach().to("cpu").contiguous()
         state_dict.update(q_entries)
-        state_dict = self.convert_state_dict_on_save(state_dict)
+        # Compiled blocks add wrappers that are not part of checkpoint identity.
+        normalized = {}
+        for key, value in state_dict.items():
+            clean_key = ".".join(part for part in key.split(".") if part != "_orig_mod")
+            if clean_key in normalized:
+                raise ValueError(f"Compiled checkpoint key collision: {clean_key}")
+            normalized[clean_key] = value
+        state_dict = self.convert_state_dict_on_save(normalized)
 
         parent = os.path.dirname(output_path)
         if parent:

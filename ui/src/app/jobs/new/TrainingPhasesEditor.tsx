@@ -18,6 +18,7 @@ const optimizerOptions = [
   { value: 'automagic', label: 'Automagic' },
   { value: 'automagic2', label: 'Automagic v2' },
   { value: 'automagic3', label: 'Automagic v3' },
+    { value: 'automagic4', label: 'Automagic v4 (experimental)' },
   { value: 'prodigyopt', label: 'Prodigy' },
   { value: 'prodigy8bit', label: 'Prodigy8Bit' },
 ];

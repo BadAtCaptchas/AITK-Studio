@@ -84,6 +84,15 @@ function initialCaptionConfig(modalInfo: CaptionDatasetModalState): CaptionJobCo
   return config;
 }
 
+type CaptionLaunchCheckpoint = {
+  id: string;
+  name: string;
+  fingerprint: string;
+  gpuIds: string | null;
+  jobRef: string;
+  started: boolean;
+};
+
 function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatasetModalState; onClose: () => void }) {
   const [jobConfig, setJobConfig] = useNestedState<CaptionJobConfig>(initialCaptionConfig(modalInfo));
   const [gpuIDs, setGpuIDs] = useState<string | null>(null);
@@ -95,6 +104,10 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
   const [activeTab, setActiveTab] = useState<'simple' | 'advanced'>('simple');
   const [hasOpenedConfig, setHasOpenedConfig] = useState(false);
   const [isConfigValid, setIsConfigValid] = useState(true);
+  const [createName] = useState(() => uuidv4());
+  const preparedCopyRef = useRef<{ source: string; path: string } | null>(null);
+  const [launchCheckpoint, setLaunchCheckpoint] = useState<CaptionLaunchCheckpoint | null>(null);
+  const clearLaunchError = useRef<(() => void) | null>(null);
   const [allowDurableEncryptedResume, setAllowDurableEncryptedResume] = useState(false);
   const { gpuList, isGPUInfoLoaded } = useGPUInfo(null, null, 'local');
   const isSavingRef = useRef(false);
@@ -185,84 +198,107 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
   };
   const saveJob = async () => {
     if (isSavingRef.current || sourceStatus !== 'ready' || !isConfigValid) return;
+    clearLaunchError.current?.();
+    clearLaunchError.current = null;
     if (!modalInfo?.datasetPath) {
-      reportWorkflowError('Dataset path is missing. Please try again.');
+      clearLaunchError.current = reportWorkflowError('Dataset path is missing. Please try again.');
       return;
     }
     if (jobConfig.config.process[0].type === 'OpenRouterCaptioner' && modalInfo.encryptedDatasetKeyB64) {
-      reportWorkflowError(
+      clearLaunchError.current = reportWorkflowError(
         'OpenRouter captioning is not supported for encrypted datasets. Caption an unencrypted copy, then encrypt it afterward if needed.',
       );
       return;
     }
     isSavingRef.current = true;
     setIsSaving(true);
-    const isEdit = !!modalInfo.jobId;
-    const jobConfigToSave = objectCopy(jobConfig);
-    let jobRef = modalInfo.datasetPath;
+    let stage: 'prepare' | 'save' | 'start' | 'queue' = 'prepare';
+    let checkpoint = launchCheckpoint;
     try {
-      const captionConfig = jobConfigToSave.config.process[0].caption;
-      const outputFormat = captionConfig.output_format || 'text';
-      const shouldCopyDataset =
-        (outputFormat === 'ideogram_json' || outputFormat === 'json') &&
-        captionConfig.convert_destination === 'copy' &&
-        !isEdit;
-      if (shouldCopyDataset) {
-        const copied = await apiClient
-          .post('/api/datasets/copy', {
-            datasetPath: modalInfo.datasetPath,
-            suffix: 'json_captions',
-          })
-          .then(res => res.data);
-        if (!copied?.path) {
-          throw new Error('Dataset copy failed');
+      if (!checkpoint?.started) {
+        const jobConfigToSave = objectCopy(jobConfig);
+        const captionConfig = jobConfigToSave.config.process[0].caption;
+        let jobRef = modalInfo.datasetPath;
+        const shouldCopyDataset =
+          (captionConfig.output_format === 'ideogram_json' || captionConfig.output_format === 'json') &&
+          captionConfig.convert_destination === 'copy' &&
+          !modalInfo.jobId;
+        if (shouldCopyDataset) {
+          if (preparedCopyRef.current?.source !== modalInfo.datasetPath) {
+            const { data } = await apiClient.post<unknown>('/api/datasets/copy', {
+              datasetPath: modalInfo.datasetPath,
+              suffix: 'json_captions',
+            });
+            if (
+              !data ||
+              typeof data !== 'object' ||
+              !('path' in data) ||
+              typeof data.path !== 'string' ||
+              !data.path.trim()
+            ) {
+              throw new Error('Invalid dataset copy response');
+            }
+            preparedCopyRef.current = { source: modalInfo.datasetPath, path: data.path };
+          }
+          jobRef = preparedCopyRef.current.path;
+          captionConfig.path_to_caption = jobRef;
         }
-        captionConfig.path_to_caption = copied.path;
-        jobRef = copied.path;
-      }
-    } catch (error: any) {
-      reportWorkflowError(error?.response?.data?.error || error?.message || 'Failed to prepare caption dataset.');
-      isSavingRef.current = false;
-      setIsSaving(false);
-      return;
-    }
-    apiClient
-      .post('/api/jobs', {
-        id: isEdit ? modalInfo.jobId : null,
-        name: isEdit && existingJobName ? existingJobName : uuidv4(),
-        gpu_ids: gpuIDs,
-        job_config: jobConfigToSave,
-        job_type: 'caption',
-        job_ref: jobRef,
-      })
-      .then(async res => {
-        const jobId = res.data.id;
+        const fingerprint = JSON.stringify({ config: jobConfigToSave, jobRef, gpuIDs });
+        stage = 'save';
+        if (!checkpoint || checkpoint.fingerprint !== fingerprint) {
+          const name = checkpoint?.name || existingJobName || createName;
+          const { data } = await apiClient.post<unknown>('/api/jobs', {
+            id: checkpoint?.id || modalInfo.jobId || null,
+            name,
+            gpu_ids: gpuIDs,
+            job_config: jobConfigToSave,
+            job_type: 'caption',
+            job_ref: jobRef,
+          });
+          if (!data || typeof data !== 'object' || !('id' in data) || typeof data.id !== 'string' || !data.id.trim()) {
+            throw new Error('Invalid caption job response');
+          }
+          checkpoint = { id: data.id, name, fingerprint, gpuIds: gpuIDs, jobRef, started: false };
+          if (mountedRef.current) setLaunchCheckpoint(checkpoint);
+        }
+        stage = 'start';
         await startJob(
-          jobId,
+          checkpoint.id,
           modalInfo.encryptedDatasetKeyB64
-            ? [{ datasetPath: jobRef, keyB64: modalInfo.encryptedDatasetKeyB64 }]
+            ? [{ datasetPath: checkpoint.jobRef, keyB64: modalInfo.encryptedDatasetKeyB64 }]
             : undefined,
           { durableEncryptedDatasetKeys: allowDurableEncryptedResume },
         );
-        // start the queue as well
-        await startQueue(gpuIDs || '');
-        if (mountedRef.current) {
-          isSavingRef.current = false;
-          setIsSaving(false);
-          handleClose();
+        checkpoint = { ...checkpoint, started: true };
+        if (mountedRef.current) setLaunchCheckpoint(checkpoint);
+      }
+      stage = 'queue';
+      await startQueue(checkpoint.gpuIds || '');
+      if (mountedRef.current) handleClose();
+    } catch (error: unknown) {
+      if (!mountedRef.current) return;
+      const messages = {
+        prepare: 'Failed to prepare caption dataset. Please try again.',
+        save: 'Failed to save job. Please try again.',
+        start: 'Job saved, but captioning could not start. Retry to start the saved job.',
+        queue: 'Caption start was accepted, but the queue could not start. Retry to start the queue.',
+      };
+      let detail: string | undefined;
+      if (error && typeof error === 'object' && 'response' in error) {
+        const response = error.response;
+        if (response && typeof response === 'object' && 'data' in response) {
+          const data = response.data;
+          if (data && typeof data === 'object' && 'error' in data && typeof data.error === 'string')
+            detail = data.error;
         }
-      })
-      .catch(error => {
-        if (!mountedRef.current) return;
-        if (error.response?.status === 409) {
-          reportWorkflowError('A caption job for this dataset already exists. Please check your jobs list.');
-        } else {
-          reportWorkflowError('Failed to save job. Please try again.');
-        }
-        console.log('Error saving training:', error);
-        isSavingRef.current = false;
-        setIsSaving(false);
-      });
+      }
+      // startJob exposes the actionable API reason as an Error, without the transport object.
+      if (!detail && stage === 'start' && error instanceof Error) detail = error.message;
+      clearLaunchError.current = reportWorkflowError(`${messages[stage]}${detail ? ` ${detail}` : ''}`);
+    } finally {
+      isSavingRef.current = false;
+      if (mountedRef.current) setIsSaving(false);
+    }
   };
   const tabButtonClass = (tab: 'simple' | 'advanced') =>
     `px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
@@ -294,7 +330,7 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
             </button>
           </div>
         )}
-        <div className="flex items-center border-b border-gray-700 -mt-2">
+        <div className="flex items-center border-b border-gray-700 -mt-2" inert={isSaving || launchCheckpoint?.started}>
           <button type="button" className={tabButtonClass('simple')} onClick={() => setActiveTab('simple')}>
             Simple
           </button>
@@ -326,7 +362,11 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
           }}
         >
           {sourceStatus === 'ready' && (
-            <>
+            <fieldset
+              className="min-w-0"
+              disabled={isSaving || launchCheckpoint?.started}
+              inert={isSaving || launchCheckpoint?.started}
+            >
               {activeTab === 'simple' &&
                 (isConfigValid ? (
                   <CaptionSimpleJob
@@ -358,11 +398,11 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
                     transformOnParse={parseCaptionJobConfig}
                     onValidityChange={setIsConfigValid}
                     active={activeTab === 'advanced'}
-                    readOnly={isSaving}
+                    readOnly={isSaving || launchCheckpoint?.started}
                   />
                 </div>
               )}
-            </>
+            </fieldset>
           )}
 
           <div className="mt-6 flex justify-end space-x-3">
@@ -372,6 +412,7 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
                   type="checkbox"
                   className="mt-1"
                   checked={allowDurableEncryptedResume}
+                  disabled={isSaving || launchCheckpoint?.started}
                   onChange={e => setAllowDurableEncryptedResume(e.target.checked)}
                 />
                 <span>
@@ -390,7 +431,13 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
               disabled={isSaving || sourceStatus !== 'ready' || !isConfigValid}
               className="operator-button-primary"
             >
-              {isSaving ? 'Starting…' : 'Save & start captioning'}
+              {isSaving
+                ? 'Starting…'
+                : launchCheckpoint?.started
+                  ? 'Retry queue start'
+                  : launchCheckpoint
+                    ? 'Save & retry start'
+                    : 'Save & start captioning'}
             </button>
           </div>
         </form>

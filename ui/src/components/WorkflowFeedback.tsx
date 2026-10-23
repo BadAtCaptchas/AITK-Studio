@@ -3,8 +3,17 @@ import { createGlobalState } from 'react-global-hooks';
 import { X } from 'lucide-react';
 
 const feedback = createGlobalState<string | null>(null);
-export function reportWorkflowError(message: string) {
+let feedbackOwner: symbol | null = null;
+export function reportWorkflowError(message: string): () => void {
+  const owner = Symbol();
+  feedbackOwner = owner;
   feedback.set(message);
+  // A recovered operation may dismiss only its own message, never a newer failure.
+  return () => {
+    if (feedbackOwner !== owner) return;
+    feedbackOwner = null;
+    feedback.set(null);
+  };
 }
 
 export default function WorkflowFeedback() {

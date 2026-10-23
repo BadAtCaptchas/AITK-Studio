@@ -71,6 +71,62 @@ test.beforeEach(async ({ page }) => {
   await expect(page.getByRole('combobox', { name: 'Compute', exact: true })).toBeVisible();
 });
 
+test('query-only training navigation renews the dirty guard while retaining the draft', async ({ page }) => {
+  await page.goto('/jobs/new?dataset=portraits_v2');
+  await expect(page.getByLabel('Training name', { exact: true })).toBeEnabled();
+  await page.getByLabel('Training name', { exact: true }).fill('query_draft_before');
+  await page.getByRole('link', { name: 'New training', exact: true }).click();
+  await page.getByRole('button', { name: 'Leave setup', exact: true }).click();
+  await expect(page).toHaveURL(/\/jobs\/new$/);
+  await expect(page.getByLabel('Training name', { exact: true })).toHaveValue('query_draft_before');
+  await page.getByLabel('Training name', { exact: true }).fill('query_draft_after');
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Train', exact: true }).click();
+  await expect(page.getByText('Leave training setup?', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(page).toHaveURL(/\/jobs\/new$/);
+  await expect(page.getByLabel('Training name', { exact: true })).toHaveValue('query_draft_after');
+});
+
+test('reverting a draft clears stale recovery and does not resurrect canceled edits on return', async ({ page }) => {
+  const originalName = await page.getByLabel('Training name', { exact: true }).inputValue();
+  await page.getByLabel('Training name', { exact: true }).fill('reverted_draft_fixture');
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Train', exact: true }).click();
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  expect(await page.evaluate(() => sessionStorage.getItem('aitk:training-draft:v1:new') !== null)).toBe(true);
+  await page.getByLabel('Training name', { exact: true }).fill(originalName);
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('aitk:training-draft:v1:new') !== null)).toBe(false);
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Train', exact: true }).click();
+  await expect(page).toHaveURL(/\/jobs$/);
+  await page.goBack();
+  await expect(page.getByLabel('Training name', { exact: true })).toHaveValue(originalName);
+  await expect(page.getByRole('region', { name: 'Recover training draft', exact: true })).toHaveCount(0);
+});
+
+test('saving clears parsed and raw drafts before opening another new training job', async ({ page }) => {
+  const originalName = await page.getByLabel('Training name', { exact: true }).inputValue();
+  await page.getByLabel('Training name', { exact: true }).fill('saved_lifecycle_fixture');
+  await page.getByRole('tab', { name: 'Config', exact: true }).click();
+  const input = page.locator('[data-config-editor] textarea.inputarea');
+  await expect(input).toBeVisible();
+  await input.focus();
+  await page.keyboard.press('Control+End');
+  await page.keyboard.insertText('\n# saved-memory-only-fixture');
+  await page.route('**/api/jobs', async route => {
+    if (route.request().method() !== 'POST') return route.continue();
+    return route.fulfill({ json: { id: 'saved-lifecycle-fixture' } });
+  });
+  await page.getByRole('button', { name: 'Create Job', exact: true }).click();
+  await expect(page).toHaveURL(/\/jobs\/saved-lifecycle-fixture$/);
+  expect(await page.evaluate(() => sessionStorage.getItem('aitk:training-draft:v1:new') !== null)).toBe(false);
+  await page.getByRole('link', { name: 'New training', exact: true }).click();
+  await expect(page.getByLabel('Training name', { exact: true })).toHaveValue(originalName);
+  await page.getByRole('tab', { name: 'Config', exact: true }).click();
+  await expect(input).toBeVisible();
+  expect((await editorSnapshot(page)).text).not.toContain('saved-memory-only-fixture');
+  expect((await editorSnapshot(page)).text).not.toContain('saved_lifecycle_fixture');
+  await expect(page.getByRole('button', { name: 'Create Job', exact: true })).toBeEnabled();
+});
+
 test('source jobs load before editing and a failed clone load can retry without default-state saves', async ({ page }) => {
   const source = structuredClone(defaultJobConfig);
   source.config.name = 'loaded_source';

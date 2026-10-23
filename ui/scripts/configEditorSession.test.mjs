@@ -5,6 +5,7 @@ import { loadTrainingSource, trainingFixture } from './trainingMigrationFixture.
 const { createConfigEditorSession, updateConfigEditorSession, syncConfigEditorSession,
   readConfigEditorSession, rememberConfigEditorSession, clearConfigEditorSession } = loadTrainingSource('utils/configEditorSession.ts');
 const { isEditableTrainingConfig } = loadTrainingSource('utils/trainingValidation.ts');
+const { migrateJobConfig } = loadTrainingSource('app/jobs/new/jobConfig.ts');
 const validate = value => {
   if (!isEditableTrainingConfig(value)) throw new Error('Not an editable training configuration');
   return value;
@@ -49,6 +50,24 @@ test('invalid editable structures stay recoverable and restoring the original cl
   assert.equal(updateConfigEditorSession(session, original, validate).valid, true);
   assert.equal(session.error, '');
   assert.equal(session.dirty, false);
+});
+
+test('additive migration defaults reach applied configuration without rewriting the raw document', () => {
+  const config = trainingFixture();
+  config.config.process[0].model.low_vram = true;
+  config.config.process[0].model.quantize = true;
+  config.config.process[0].model.qtype = 'orbit4';
+  const session = createConfigEditorSession(config);
+  const rawText = `${session.text}\n# preserve this raw document\n`;
+  const result = updateConfigEditorSession(session, rawText, value => migrateJobConfig(validate(value)));
+  assert.equal(result.valid, true);
+  assert.equal(result.config.config.process[0].train.batch_size, 3);
+  assert.equal(result.config.config.process[0].model.layer_offloading, true);
+  assert.equal(result.config.config.process[0].model.layer_offloading_transformer_percent, 0.7);
+  assert.equal(result.config.config.process[0].model.layer_offloading_text_encoder_percent, 0.5);
+  assert.equal(syncConfigEditorSession(session, result.config), false);
+  assert.equal(session.text, rawText);
+  assert.equal(session.dirty, true);
 });
 
 test('raw sessions and editor positions stay separate for new, edit and migration drafts and clear after save', () => {

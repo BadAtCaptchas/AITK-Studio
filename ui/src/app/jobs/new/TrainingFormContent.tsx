@@ -70,7 +70,10 @@ export function TrainingFormContent() {
   const runId = migrationId ? null : searchParams.get('id');
   const cloneId = migrationId ? null : searchParams.get('cloneId');
   const key = migrationId ? `migrate:${migrationId}` : runId ? `edit:${runId}` : cloneId ? `clone:${cloneId}` : 'new';
-  return hydrated ? <TrainingDraftRecovery key={key} draftKey={key} /> : <div className="p-6 text-gray-400">Loading training setup…</div>;
+  // A query-only navigation is still a new editor visit. Remount its guards and
+  // async request lifetime, while preserving the draft under its stable key.
+  const visitKey = `${key}?${searchParams.toString()}`;
+  return hydrated ? <TrainingDraftRecovery key={visitKey} draftKey={key} /> : <div className="p-6 text-gray-400">Loading training setup…</div>;
 }
 
 function TrainingDraftRecovery({ draftKey }: { draftKey: string }) {

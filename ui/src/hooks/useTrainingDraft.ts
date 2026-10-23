@@ -36,7 +36,13 @@ export function useTrainingDraft(key: string, draft: TrainingDraft, hasUnsavedCo
     }
     if (!interacted.current) baseline.current = serialize(draft);
     dirty.current = hasUnsavedConfigText || serialize(draft) !== baseline.current;
-    if (!dirty.current) return;
+    if (!dirty.current) {
+      // An earlier autosave or canceled leave may have captured values that the
+      // user has since reverted. Do not resurrect them on the next visit.
+      drafts.delete(key);
+      removeStoredTrainingDraft(key);
+      return;
+    }
     const timer = window.setTimeout(() => {
       if (dirty.current && !allowing.current) saveStoredTrainingDraft(key, { draft: current.current, baseline: baseline.current });
     }, 400);

@@ -130,6 +130,7 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
   const [hasOpenedConfig, setHasOpenedConfig] = useState(false);
   const [isConfigValid, setIsConfigValid] = useState(true);
   const [createName] = useState(() => uuidv4());
+  const [copyKey] = useState(() => uuidv4());
   const preparedCopyRef = useRef<{ source: string; path: string } | null>(null);
   const [launchCheckpoint, setLaunchCheckpoint] = useState<CaptionLaunchCheckpoint | null>(null);
   const [pendingCreate, setPendingCreate] = useState<PendingCaptionCreate | null>(null);
@@ -256,6 +257,7 @@ function CaptionDatasetDialog({ modalInfo, onClose }: { modalInfo: CaptionDatase
             const { data } = await apiClient.post<unknown>('/api/datasets/copy', {
               datasetPath: modalInfo.datasetPath,
               suffix: 'json_captions',
+              idempotencyKey: copyKey,
             });
             if (
               !data ||

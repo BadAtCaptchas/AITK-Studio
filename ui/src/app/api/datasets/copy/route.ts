@@ -1,14 +1,16 @@
 import { withPlainDatasetCommand } from '@/server/plainDatasetCommand';
-import { readJsonCommand } from '@/server/commandInput';
+import { commandError, readJsonCommand } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { NextResponse } from 'next/server';
 import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 import { copyDatasetBetweenRoots } from '@/server/datasetCopy';
+import { validateDatasetCopyKey } from '@/server/datasetCopyRecovery';
 
 async function postCommand(request: Request) {
   try {
     const body = assertGlobalPayload(await readJsonCommand(request));
     const datasetPath = typeof body?.datasetPath === 'string' ? body.datasetPath : '';
+    const idempotencyKey = validateDatasetCopyKey(body.idempotencyKey);
     const destinationScope = await resolveDatasetScope();
     const sourceScope = destinationScope;
     const destination = await copyDatasetBetweenRoots({
@@ -17,10 +19,13 @@ async function postCommand(request: Request) {
       destinationDatasetsRoot: destinationScope.datasetsRoot,
       requestedName: typeof body?.name === 'string' ? body.name : undefined,
       suffix: typeof body?.suffix === 'string' ? body.suffix : 'copy',
+      idempotencyKey,
     });
 
     return NextResponse.json(destination);
   } catch (error) {
+    const invalid = commandError(error);
+    if (invalid) return NextResponse.json({ error: invalid.error, code: invalid.code }, { status: invalid.status });
     const status = error instanceof DatasetScopeError ? error.status : 400;
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to copy dataset' }, { status });
   }

@@ -4,6 +4,7 @@ import fsp from 'fs/promises';
 import path from 'path';
 import { resolveDatasetDirectoryInsideRoot, isPathInside } from './remoteCaptionSecurity';
 import { listLayeredImages } from './layeredImages';
+import { recoverDatasetCopy, validateDatasetCopyKey } from './datasetCopyRecovery';
 
 function safeDatasetCopyName(baseName: string, suffix: string) {
   const safeBase = baseName
@@ -60,10 +61,15 @@ async function reserveDatasetPath(datasetsRoot: string, requestedName: string, s
   }
 }
 
-type DatasetCopyEntry = { relativePath: string; kind: 'directory' | 'file' };
+type DatasetCopyEntry = { relativePath: string; kind: 'directory' | 'file'; identity: string };
+
+function entryIdentity(stat: fs.Stats): string {
+  return [stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs].join(':');
+}
 
 async function collectSafeDatasetCopyTree(sourceRoot: string) {
   const canonicalRoot = await fsp.realpath(sourceRoot);
+  const rootIdentity = entryIdentity(await fsp.lstat(canonicalRoot));
   const collected: DatasetCopyEntry[] = [];
 
   const walk = async (relativePath = ''): Promise<void> => {
@@ -81,10 +87,10 @@ async function collectSafeDatasetCopyTree(sourceRoot: string) {
         throw new Error(`Dataset copy source escaped its declared root: ${childRelativePath}`);
       }
       if (stat.isDirectory()) {
-        collected.push({ relativePath: childRelativePath, kind: 'directory' });
+        collected.push({ relativePath: childRelativePath, kind: 'directory', identity: entryIdentity(stat) });
         await walk(childRelativePath);
       } else if (stat.isFile()) {
-        collected.push({ relativePath: childRelativePath, kind: 'file' });
+        collected.push({ relativePath: childRelativePath, kind: 'file', identity: entryIdentity(stat) });
       } else {
         throw new Error(`Dataset copy cannot include special filesystem entries: ${childRelativePath}`);
       }
@@ -92,7 +98,7 @@ async function collectSafeDatasetCopyTree(sourceRoot: string) {
   };
 
   await walk();
-  return { canonicalRoot, entries: collected };
+  return { canonicalRoot, rootIdentity, entries: collected.sort((left, right) => left.relativePath.localeCompare(right.relativePath)) };
 }
 
 async function copySafeDatasetTree(
@@ -128,15 +134,38 @@ export async function copyDatasetBetweenRoots({
   destinationDatasetsRoot,
   requestedName,
   suffix = 'copy',
+  idempotencyKey,
 }: {
   datasetPath: string;
   sourceDatasetsRoot: string;
   destinationDatasetsRoot: string;
   requestedName?: string;
   suffix?: string;
+  idempotencyKey?: string;
 }) {
   if (!datasetPath.trim()) {
     throw new Error('datasetPath is required');
+  }
+
+  const key = validateDatasetCopyKey(idempotencyKey);
+  if (key) {
+    const name = requestedName?.trim() ? normalizeRequestedDatasetName(requestedName) : '';
+    return recoverDatasetCopy({
+      idempotencyKey: key, datasetPath, sourceDatasetsRoot, destinationDatasetsRoot,
+      requestedName: name, suffix,
+      preferredName: source => name || safeDatasetCopyName(path.basename(source), suffix),
+      prepare: async () => {
+        const sourcePath = await resolveDatasetDirectoryInsideRoot(path.resolve(datasetPath), sourceDatasetsRoot);
+        await assertPlainDatasetPath(sourcePath, sourceDatasetsRoot);
+        await listLayeredImages(sourcePath);
+        const tree = await collectSafeDatasetCopyTree(sourcePath);
+        return { sourcePath, copyTo: async destination => {
+          await copySafeDatasetTree(sourcePath, destination, tree.entries, tree.canonicalRoot);
+          const after = await collectSafeDatasetCopyTree(sourcePath);
+          if (JSON.stringify(after) !== JSON.stringify(tree)) throw new Error('Dataset copy source changed during transfer; retry the copy');
+        } };
+      },
+    });
   }
 
   const sourcePath = await resolveDatasetDirectoryInsideRoot(path.resolve(datasetPath), sourceDatasetsRoot);

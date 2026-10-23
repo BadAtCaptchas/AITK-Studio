@@ -336,3 +336,29 @@ test('a recovered caption job changed elsewhere is never started or replaced aut
   expect(state.starts).toBe(0);
   expect(state.queueStarts).toBe(0);
 });
+
+test('caption copy retry reuses its command after a lost publication acknowledgement', async ({ page }) => {
+  const { state, modal, submit } = await launchFixture(page, true);
+  const bodies: Record<string, unknown>[] = [];
+  await page.route('**/api/datasets/copy', route => {
+    bodies.push(route.request().postDataJSON() as Record<string, unknown>);
+    if (bodies.length === 1) return route.abort('failed');
+    return route.fulfill({ json: { path: 'fixture/recovered-copy' } });
+  });
+  await modal.getByRole('combobox', { name: 'Caption Output', exact: true }).click();
+  await page.getByRole('option', { name: 'Convert to JSON', exact: true }).click();
+  await modal.getByRole('combobox', { name: 'Destination', exact: true }).click();
+  await page.getByRole('option', { name: 'Make dataset copy', exact: true }).click();
+  await submit.click();
+  await expect(submit).toBeEnabled();
+  await expect(modal.getByRole('alert').filter({ hasText: 'Failed to prepare caption dataset' })).toBeVisible();
+  state.failStart = false;
+  await submit.click();
+  await expect(modal).toHaveCount(0);
+  expect(bodies).toHaveLength(2);
+  expect(bodies[0].idempotencyKey).toEqual(expect.any(String));
+  expect(bodies[1]).toEqual(bodies[0]);
+  expect(state.saves).toHaveLength(1);
+  expect(state.saves[0]).toMatchObject({ job_ref: 'fixture/recovered-copy' });
+  expect(state.starts).toBe(1);
+});

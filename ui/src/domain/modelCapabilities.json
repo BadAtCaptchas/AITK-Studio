@@ -472,7 +472,9 @@
       "label": "FLUX.1",
       "group": "image",
       "isVideoModel": false,
-      "additionalSections": [],
+      "additionalSections": [
+        "model.layer_offloading"
+      ],
       "disableSections": [
         "network.conv"
       ],
@@ -505,7 +507,7 @@
         "multipleAfterFirst": 1
       },
       "offloading": {
-        "layers": false
+        "layers": true
       }
     },
     {

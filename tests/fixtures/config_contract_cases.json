@@ -1,5 +1,27 @@
 [
   {
+    "name": "Flux.1 block offloading with explicit fractions",
+    "valid": true,
+    "config": {
+      "config": {
+        "process": [
+          {
+            "type": "diffusion_trainer",
+            "device": "cuda",
+            "model": {
+              "arch": "flux",
+              "name_or_path": "fixture/flux",
+              "layer_offloading": true,
+              "layer_offloading_backend": "block",
+              "layer_offloading_transformer_percent": 0.64,
+              "layer_offloading_text_encoder_percent": 0.42
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
     "name": "guided image",
     "valid": true,
     "config": {

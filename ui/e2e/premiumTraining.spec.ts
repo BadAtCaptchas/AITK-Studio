@@ -152,6 +152,51 @@ test(`explicit Orbit configuration settings survive applying a complete ${mode} 
 });
 }
 
+test('Flux.1 exposes offloading controls and preserves their explicit values through Config and save', async ({ page }) => {
+  await page.getByRole('tab', { name: 'Config', exact: true }).click();
+  await expect(page.locator('[data-config-editor] textarea.inputarea')).toBeVisible();
+  const config = YAML.parse((await editorSnapshot(page)).text ?? '') as JobConfig;
+  Object.assign(config.config.process[0].model, {
+    arch: 'flux', name_or_path: 'black-forest-labs/FLUX.1-dev',
+    layer_offloading: true, layer_offloading_backend: 'block',
+    layer_offloading_transformer_percent: 0.64, layer_offloading_text_encoder_percent: 0.42,
+  });
+  await pasteEditorText(page, YAML.stringify(config));
+  await page.getByRole('tab', { name: 'Form', exact: true }).click();
+  const toggle = page.getByRole('switch', { name: 'Layer Offloading', exact: true });
+  await expect(toggle).toBeChecked();
+  const transformer = page.getByRole('slider', { name: 'Transformer Offload %', exact: true });
+  const textEncoder = page.getByRole('slider', { name: 'Text Encoder Offload %', exact: true });
+  await expect(transformer).toHaveAttribute('aria-valuenow', '64');
+  await expect(textEncoder).toHaveAttribute('aria-valuenow', '42');
+  await transformer.focus();
+  await page.keyboard.press('ArrowRight');
+  await textEncoder.focus();
+  await page.keyboard.press('ArrowLeft');
+  await toggle.click();
+  await expect(transformer).toHaveCount(0);
+  await toggle.click();
+  await expect(transformer).toHaveAttribute('aria-valuenow', '65');
+  await expect(textEncoder).toHaveAttribute('aria-valuenow', '41');
+  await page.getByRole('combobox', { name: 'Offloading backend', exact: true }).fill('Legacy');
+  await page.getByRole('option', { name: 'Legacy', exact: true }).click();
+  await page.getByRole('tab', { name: 'Config', exact: true }).click();
+  const changed = (YAML.parse((await editorSnapshot(page)).text ?? '') as JobConfig).config.process[0].model;
+  expect(changed.layer_offloading).toBe(true);
+  expect(changed.layer_offloading_backend).toBe('legacy');
+  expect(changed.layer_offloading_transformer_percent).toBeCloseTo(0.65);
+  expect(changed.layer_offloading_text_encoder_percent).toBeCloseTo(0.41);
+  await expect(page.getByRole('button', { name: 'Create Job', exact: true })).toBeEnabled();
+  await page.route('**/api/jobs', route => route.request().method() === 'POST'
+    ? route.fulfill({ status: 503, json: { error: 'Fixture offload save unavailable' } })
+    : route.continue());
+  const posted = page.waitForRequest(request => request.url().endsWith('/api/jobs') && request.method() === 'POST');
+  await page.getByRole('button', { name: 'Create Job', exact: true }).click();
+  const payload = (await posted).postDataJSON() as { job_config: JobConfig };
+  expect(payload.job_config.config.process[0].model).toEqual(changed);
+  await expect(page.getByRole('alert').filter({ hasText: 'Fixture offload save unavailable' })).toBeVisible();
+});
+
 test('cyclic YAML imports report an error and preserve the current editable draft', async ({ page }) => {
   await page.getByLabel('Training name', { exact: true }).fill('retained_after_bad_import');
   const config = structuredClone(defaultJobConfig);

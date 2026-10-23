@@ -1062,17 +1062,59 @@ export default function SimpleJob({
                       required
                     />
                   </div>
-                  {modelArch?.additionalSections?.includes('model.low_vram') && (
+                  {(modelArch?.additionalSections?.includes('model.low_vram') ||
+                    modelArch?.additionalSections?.includes('model.layer_offloading')) && (
                     <div className="space-y-2">
                       <h3 className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Memory</h3>
-                      <Checkbox
-                        label="Low VRAM"
-                        checked={processConfig.model.low_vram}
-                        onChange={value => {
-                          setJobConfig(value, 'config.process[0].model.low_vram');
-                          if (value) setJobConfig(true, 'config.process[0].sample.keep_low_vram_for_samples');
-                        }}
-                      />
+                      {modelArch?.additionalSections?.includes('model.low_vram') && (
+                        <Checkbox
+                          label="Low VRAM"
+                          checked={processConfig.model.low_vram}
+                          onChange={value => {
+                            setJobConfig(value, 'config.process[0].model.low_vram');
+                            if (value) setJobConfig(true, 'config.process[0].sample.keep_low_vram_for_samples');
+                          }}
+                        />
+                      )}
+                      {modelArch?.additionalSections?.includes('model.layer_offloading') && (
+                        <>
+                          <Checkbox
+                            label="Layer Offloading"
+                            docKey="model.layer_offloading"
+                            checked={Boolean(processConfig.model.layer_offloading)}
+                            onChange={value => {
+                              setJobConfig(value, 'config.process[0].model.layer_offloading');
+                              if (value) {
+                                setJobConfig(processConfig.model.layer_offloading_backend ?? layerOffloadingMemoryProfile.backend, 'config.process[0].model.layer_offloading_backend');
+                                setJobConfig(processConfig.model.layer_offloading_transformer_percent ?? layerOffloadingMemoryProfile.transformerPercent, 'config.process[0].model.layer_offloading_transformer_percent');
+                                setJobConfig(processConfig.model.layer_offloading_text_encoder_percent ?? layerOffloadingMemoryProfile.textEncoderPercent, 'config.process[0].model.layer_offloading_text_encoder_percent');
+                              }
+                            }}
+                          />
+                          {processConfig.model.layer_offloading && (
+                            <>
+                              <SelectInput
+                                label="Offloading backend"
+                                value={processConfig.model.layer_offloading_backend ?? layerOffloadingMemoryProfile.backend}
+                                onChange={value => setJobConfig(value, 'config.process[0].model.layer_offloading_backend')}
+                                options={layerOffloadingBackendOptions}
+                              />
+                              <SliderInput
+                                label="Transformer Offload %"
+                                value={Math.round((processConfig.model.layer_offloading_transformer_percent ?? layerOffloadingMemoryProfile.transformerPercent) * 100)}
+                                onChange={value => setJobConfig(value * 0.01, 'config.process[0].model.layer_offloading_transformer_percent')}
+                                min={0} max={100} step={1} disabled={readOnly}
+                              />
+                              <SliderInput
+                                label="Text Encoder Offload %"
+                                value={Math.round((processConfig.model.layer_offloading_text_encoder_percent ?? layerOffloadingMemoryProfile.textEncoderPercent) * 100)}
+                                onChange={value => setJobConfig(value * 0.01, 'config.process[0].model.layer_offloading_text_encoder_percent')}
+                                min={0} max={100} step={1} disabled={readOnly}
+                              />
+                            </>
+                          )}
+                        </>
+                      )}
                     </div>
                   )}
                   {modelArch?.additionalSections?.includes('model.model_kwargs.kv_cache') && (

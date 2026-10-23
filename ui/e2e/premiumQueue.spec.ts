@@ -360,7 +360,10 @@ test('notes load can retry without leaving the retained monitor panel', async ({
 });
 
 for (const surface of ['compact inspector', 'full monitor']) {
-  test(`metrics failure stays visible with cached points in ${surface}`, async ({ page }) => {
+  for (const failure of ['HTTP error', 'malformed payload']) {
+  test(`metrics ${failure} stays visible with cached points in ${surface}`, async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
     await mockQueue(page);
     if (surface === 'compact inspector') {
       await page.goto('/jobs');
@@ -374,7 +377,9 @@ for (const surface of ['compact inspector', 'full monitor']) {
         : page.getByRole('tabpanel', { name: 'Metrics', exact: true });
     await expect(scope.locator('.uplot')).toBeVisible();
     const pattern = '**/api/jobs/portrait_flux_v3/metrics?*';
-    await page.route(pattern, route => route.fulfill({ status: 503, json: { error: 'Fixture metrics unavailable' } }));
+    await page.route(pattern, route => route.fulfill(failure === 'HTTP error'
+      ? { status: 503, json: { error: 'Fixture metrics unavailable' } }
+      : { json: { keys: { malformed: true }, series: {} } }));
     await scope.getByRole('button', { name: 'Refresh', exact: true }).click();
     await expect(
       scope.getByText('Metrics could not be refreshed. Showing the last loaded data.', { exact: true }),
@@ -385,7 +390,9 @@ for (const surface of ['compact inspector', 'full monitor']) {
     await expect(
       scope.getByText('Metrics could not be refreshed. Showing the last loaded data.', { exact: true }),
     ).toHaveCount(0);
+    expect(errors).toEqual([]);
   });
+  }
 }
 
 test('queue commands cannot reorder an incomplete snapshot with no remaining cursor', async ({ page }) => {

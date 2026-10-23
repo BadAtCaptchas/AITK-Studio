@@ -31,6 +31,10 @@ export interface MetricsResponse {
 
 type SeriesMap = Record<string, MetricPoint[]>;
 type LatestMap = Record<string, MetricPoint | null>;
+type ValidatedMetricsResponse = {
+  keys: string[];
+  series: Record<string, Pick<MetricSeriesPayload, 'latest' | 'points'>>;
+};
 type Status = 'idle' | 'loading' | 'success' | 'error' | 'refreshing';
 type UseJobMetricsOptions =
   | number
@@ -44,6 +48,65 @@ type UseJobMetricsOptions =
 const DEFAULT_METRIC_KEYS = ['*'];
 const DEFAULT_MAX_POINTS = 4000;
 const COMPACT_THRESHOLD = 5000;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item: unknown) => typeof item === 'string');
+}
+
+function parseMetricPoint(value: unknown): MetricPoint {
+  if (
+    !isRecord(value) ||
+    typeof value.step !== 'number' ||
+    !Number.isFinite(value.step) ||
+    (value.value !== null && (typeof value.value !== 'number' || !Number.isFinite(value.value))) ||
+    (value.wall_time !== undefined && (typeof value.wall_time !== 'number' || !Number.isFinite(value.wall_time))) ||
+    (value.value_text !== undefined && value.value_text !== null && typeof value.value_text !== 'string')
+  ) {
+    throw new Error('Invalid job metrics response.');
+  }
+
+  return {
+    step: value.step,
+    value: value.value,
+    ...(value.wall_time !== undefined ? { wall_time: value.wall_time } : {}),
+    ...(value.value_text !== undefined ? { value_text: value.value_text } : {}),
+  };
+}
+
+function parseMetricsResponse(value: unknown): ValidatedMetricsResponse {
+  if (
+    !isRecord(value) ||
+    !isStringArray(value.keys) ||
+    value.keys.some(key => Object.hasOwn(Object.prototype, key)) ||
+    !isRecord(value.series)
+  ) {
+    throw new Error('Invalid job metrics response.');
+  }
+
+  // Validate every consumed field before publishing any part of this response.
+  // Older workers may omit unused series metadata, points, or latest values.
+  const series = Object.fromEntries(
+    Object.entries(value.series).map(([key, payload]): [string, Pick<MetricSeriesPayload, 'latest' | 'points'>] => {
+      // Cache maps must not invoke prototype setters or read inherited values.
+      if (
+        Object.hasOwn(Object.prototype, key) ||
+        !isRecord(payload) ||
+        (payload.points != null && !Array.isArray(payload.points))
+      ) {
+        throw new Error('Invalid job metrics response.');
+      }
+      const points = payload.points == null ? [] : payload.points.map(parseMetricPoint);
+      const latest = payload.latest == null ? null : parseMetricPoint(payload.latest);
+      return [key, { points, latest }];
+    }),
+  );
+
+  return { keys: [...value.keys], series };
+}
 
 function isTerminalStatus(status?: string) {
   return status === 'completed' || status === 'error' || status === 'stopped';
@@ -152,9 +215,9 @@ export default function useJobMetrics(
           params.since_steps = encodeSinceSteps(lastStepByKeyRef.current);
         }
 
-        const response = await apiClient
-          .get(`/api/jobs/${jobID}/metrics`, { params, signal: controller.signal })
-          .then(res => res.data as MetricsResponse);
+        const data = await apiClient
+          .get<unknown>(`/api/jobs/${jobID}/metrics`, { params, signal: controller.signal })
+          .then(res => res.data);
 
         if (
           controller.signal.aborted ||
@@ -163,7 +226,8 @@ export default function useJobMetrics(
         ) {
           return;
         }
-        setKeys(response.keys ?? []);
+        const response = parseMetricsResponse(data);
+        setKeys(response.keys);
         setLatest(prev => {
           const next = full ? {} : { ...prev };
           for (const [key, payload] of Object.entries(response.series ?? {})) {

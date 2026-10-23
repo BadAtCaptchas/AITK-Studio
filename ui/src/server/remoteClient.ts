@@ -394,14 +394,18 @@ export async function remoteFetch(worker: WorkerNodeRecord, routePath: string, i
 export async function remoteJson<T>(
   worker: WorkerNodeRecord,
   routePath: string,
-  init: RemoteRequestInit = {},
+  init: RemoteRequestInit & { maxResponseBytes?: number } = {},
 ): Promise<T> {
-  const headers = new Headers(init.headers);
-  if (init.body != null && !headers.has('Content-Type') && !(init.body instanceof FormData)) {
+  const { maxResponseBytes = 8 * 1024 * 1024, ...requestInit } = init;
+  if (!Number.isSafeInteger(maxResponseBytes) || maxResponseBytes <= 0) {
+    throw new Error('Invalid remote JSON response byte limit');
+  }
+  const headers = new Headers(requestInit.headers);
+  if (requestInit.body != null && !headers.has('Content-Type') && !(requestInit.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json');
   }
-  const response = await remoteRequest(worker, routePath, { timeoutMs: 30_000, ...init, headers });
-  const payload: unknown = JSON.parse(await readBoundedResponseText(response, 8 * 1024 * 1024));
+  const response = await remoteRequest(worker, routePath, { timeoutMs: 30_000, ...requestInit, headers });
+  const payload: unknown = JSON.parse(await readBoundedResponseText(response, maxResponseBytes));
   return payload as T;
 }
 

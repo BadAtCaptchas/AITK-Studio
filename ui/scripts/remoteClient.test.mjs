@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
 import { createRequire } from 'node:module';
+import fs from 'node:fs';
+import path from 'node:path';
+import ts from 'typescript';
 
 import {
   RemoteClientError,
@@ -87,6 +90,78 @@ afterEach(() => {
   dbModule.db.settings = originalSettings;
   resetRemoteBackgroundPollingStateForTests();
   restoreEnv();
+});
+
+test('remote metrics route accepts multi-series histories above the generic 8 MiB limit', async () => {
+  installRemotePolicyDb();
+  const keys = Array.from({ length: 32 }, (_, i) => `train/metric_${i}`);
+  const points = Array.from({ length: 4000 }, (_, step) => ({
+    step, wall_time: 1792700000.123, value: 0.1234567890123456, value_text: null,
+  }));
+  const payload = {
+    keys,
+    keyInfo: keys.map(key => ({ key })),
+    series: Object.fromEntries(keys.map(key => [key, {
+      key, totalCount: 4000, firstStep: 0, lastStep: 3999,
+      latest: points.at(-1), downsampled: false, points,
+    }])),
+  };
+  const body = JSON.stringify(payload);
+  assert.ok(Buffer.byteLength(body) > 8 * 1024 * 1024);
+  const requests = [];
+  globalThis.fetch = async (url, init) => {
+    requests.push({ url: String(url), init });
+    return new Response(body);
+  };
+  await assert.rejects(remoteJson(makeWorker(), '/ordinary-json'), /8388608 byte limit/);
+
+  const code = ts.transpileModule(
+    fs.readFileSync(new URL('../src/app/api/jobs/[jobID]/metrics/route.ts', import.meta.url), 'utf8'),
+    { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } },
+  ).outputText;
+  const dependencies = {
+    '../../../../../utils/jobIdentity': {},
+    'next/server': { NextResponse: Response },
+    path,
+    '@/server/db': { db: { jobs: { findById: async () => ({ worker_id: 'worker-1', remote_job_id: 'remote/job' }) } } },
+    '@/server/trainingPaths': {},
+    '@/server/remoteClient': { isLocalWorker: () => false, getRemoteWorker: async () => makeWorker(), remoteJson, isRemoteJobMissingError: () => false },
+  };
+  const loadedModule = { exports: {} };
+  new Function('require', 'module', 'exports', code)(name => {
+    assert.ok(Object.hasOwn(dependencies, name), `Unexpected dependency ${name}`);
+    return dependencies[name];
+  }, loadedModule, loadedModule.exports);
+  const query = 'keys=train%2F*&max_points=4000&since_steps=train%252Fmetric_0%3A-1';
+  const response = await loadedModule.exports.GET(new Request(`http://localhost/api/jobs/mirror/metrics?${query}`), {
+    params: Promise.resolve({ jobID: 'mirror' }),
+  });
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.deepEqual(result.keys, keys);
+  for (const key of keys) {
+    assert.deepEqual(result.series[key], payload.series[key]);
+  }
+  assert.equal(requests.at(-1).url, `https://worker.example/api/jobs/remote%2Fjob/metrics?${query}`);
+  assert.equal(Object.hasOwn(requests.at(-1).init, 'maxResponseBytes'), false);
+});
+
+test('remote JSON custom limit bounds chunked bodies and cancels oversized responses', async () => {
+  installRemotePolicyDb();
+  let cancelled = false;
+  globalThis.fetch = async () => new Response(new ReadableStream({
+    pull(controller) { controller.enqueue(new TextEncoder().encode(' '.repeat(1024))); },
+    cancel() { cancelled = true; },
+  }));
+  await assert.rejects(remoteJson(makeWorker(), '/bounded', { maxResponseBytes: 2048 }), /2048 byte limit/);
+  assert.equal(cancelled, true);
+});
+
+test('remote JSON rejects invalid byte limits before making a request', async () => {
+  globalThis.fetch = async () => { assert.fail('Invalid limit must not initiate a request'); };
+  for (const maxResponseBytes of [NaN, Infinity, 0, -1, 1.5]) {
+    await assert.rejects(remoteJson(makeWorker(), '/invalid', { maxResponseBytes }), /Invalid remote JSON response byte limit/);
+  }
 });
 
 test('remoteJson can reject a redirect before a secret-bearing POST is replayed', async () => {

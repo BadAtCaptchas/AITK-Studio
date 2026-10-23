@@ -14,6 +14,8 @@ import {
 export const runtime = 'nodejs';
 
 const DEFAULT_KEYS = ['loss*', 'learning_rate*', 'lr*', 'phase/*', 'event/*', 'train/*'];
+// max_points applies per series; multi-series histories can exceed the generic JSON limit.
+const MAX_REMOTE_METRICS_BYTES = 64 * 1024 * 1024;
 
 function parseKeys(value: string | null) {
   if (!value) return DEFAULT_KEYS;
@@ -52,7 +54,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     try {
       const worker = await getRemoteWorker(job.worker_id);
       return NextResponse.json(
-        await remoteJson(worker, `/api/jobs/${encodeURIComponent(job.remote_job_id)}/metrics?${url.searchParams}`),
+        await remoteJson<unknown>(worker, `/api/jobs/${encodeURIComponent(job.remote_job_id)}/metrics?${url.searchParams}`, {
+          maxResponseBytes: MAX_REMOTE_METRICS_BYTES,
+          signal: request.signal,
+        }),
       );
     } catch (error) {
       if (isRemoteJobMissingError(error)) {

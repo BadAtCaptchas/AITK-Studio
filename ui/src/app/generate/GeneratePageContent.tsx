@@ -30,6 +30,7 @@ import {
 import JobsTable from '@/components/JobsTable';
 import useGPUInfo from '@/hooks/useGPUInfo';
 import useSettings from '@/hooks/useSettings';
+import useCommittedRef from '@/hooks/useCommittedRef';
 import { apiClient } from '@/utils/api';
 import { startJob } from '@/utils/jobs';
 import { getMediaUrl } from '@/utils/media';
@@ -293,6 +294,7 @@ export function GeneratePageContent() {
   const inlineAbortControllerRef = useRef<AbortController | null>(null);
   const statusResetTimeoutRef = useRef<number | null>(null);
   const generationMounted = useRef(true);
+  const promptImportRevision = useRef(0);
   const { settings, isSettingsLoaded } = useSettings();
   const { gpuData, gpuList, isGPUInfoLoaded } = useGPUInfo();
   const [gpuIDs, setGpuIDs] = useState<string | null>(null);
@@ -338,6 +340,18 @@ export function GeneratePageContent() {
   const [cancelRequested, setCancelRequested] = useState(false);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [appliedModel, setAppliedModel] = useState('');
+  const loraSelectionSnapshot = JSON.stringify({
+    useLora,
+    loraPath,
+    modelConfig,
+    loraUploadTriggerWords,
+    sampler,
+    width,
+    height,
+    guidanceScale,
+    sampleSteps,
+  });
+  const currentLoraSelection = useCommittedRef(loraSelectionSnapshot);
   if (isGPUInfoLoaded && gpuIDs === null) {
     setGpuIDs(gpuList.length > 0 ? `${gpuList[0].index}` : '0');
   }
@@ -477,45 +491,54 @@ export function GeneratePageContent() {
       return;
     }
     setLoraUploadStatus('uploading');
+    const selectionAtStart = loraSelectionSnapshot;
     setLoraUploadProgress(0);
     setLoraUploadMessage('');
     try {
       const res = await uploadLoraFile(file, {
         triggerWords: loraUploadTriggerWords,
         onUploadProgress: progressEvent => {
-          if (!progressEvent.total) return;
+          if (!generationMounted.current || !progressEvent.total) return;
           setLoraUploadProgress(Math.round((progressEvent.loaded * 100) / progressEvent.total));
         },
       });
+      if (!generationMounted.current) return;
       const uploaded = res.data.lora as GeneratedLora;
       setLoras(current => [uploaded, ...current.filter(item => item.path !== uploaded.path)]);
-      setUseLora(true);
-      setLoraPath(uploaded.path);
-      applyLoraModelDefaults(uploaded);
-      if (!loraUploadTriggerWords.trim() && uploaded.triggerWords?.length) {
-        setLoraUploadTriggerWords(uploaded.triggerWords.join(', '));
+      const keepCurrentSelection = currentLoraSelection.current !== selectionAtStart;
+      if (!keepCurrentSelection) {
+        setUseLora(true);
+        setLoraPath(uploaded.path);
+        applyLoraModelDefaults(uploaded);
+        if (!loraUploadTriggerWords.trim() && uploaded.triggerWords?.length) {
+          setLoraUploadTriggerWords(uploaded.triggerWords.join(', '));
+        }
       }
       setLoraUploadStatus('success');
       setLoraUploadMessage(
-        uploaded.triggerWords?.length
-          ? `Uploaded with trigger: ${uploaded.triggerWords.join(', ')}`
-          : 'Uploaded. No trigger metadata found.',
+        keepCurrentSelection
+          ? 'Uploaded. Your current model settings were kept.'
+          : uploaded.triggerWords?.length
+            ? `Uploaded with trigger: ${uploaded.triggerWords.join(', ')}`
+            : 'Uploaded. No trigger metadata found.',
       );
       void refreshLoras();
     } catch (error: any) {
+      if (!generationMounted.current) return;
       console.error('Error uploading LoRA:', error);
       setLoraUploadStatus('error');
       setLoraUploadMessage(error.response?.data?.error || 'Failed to upload LoRA.');
     } finally {
-      setLoraUploadProgress(0);
-      if (loraFileInputRef.current) {
-        loraFileInputRef.current.value = '';
+      if (generationMounted.current) {
+        setLoraUploadProgress(0);
+        if (loraFileInputRef.current) loraFileInputRef.current.value = '';
       }
     }
   };
   const insertSelectedLoraTrigger = () => {
     const triggerWords = selectedLora?.triggerWords?.filter(Boolean) ?? [];
     if (triggerWords.length === 0) return;
+    promptImportRevision.current += 1;
     const triggerText = triggerWords.join(', ');
     setPrompts(current => {
       const lines = current.split(/\r?\n/);
@@ -555,6 +578,7 @@ export function GeneratePageContent() {
     }));
   };
   const handlePromptTextChange = (value: string) => {
+    promptImportRevision.current += 1;
     setPrompts(value);
     setJsonPromptItems(null);
     setImportSummary('');
@@ -562,8 +586,11 @@ export function GeneratePageContent() {
     setInlineMessage('');
   };
   const handlePromptFileImport = async (file: File) => {
+    const revision = ++promptImportRevision.current;
+    const isCurrentImport = () => generationMounted.current && promptImportRevision.current === revision;
     try {
       const fileText = await file.text();
+      if (!isCurrentImport()) return;
       const isJsonFile = file.name.toLowerCase().endsWith('.json') || file.type === 'application/json';
       if (isJsonFile) {
         const importedItems = promptItemsFromJsonText(fileText);
@@ -588,12 +615,9 @@ export function GeneratePageContent() {
       setInlineError('');
       setInlineMessage('');
     } catch (error) {
+      if (!isCurrentImport()) return;
       console.error('Error importing prompt file:', error);
       reportWorkflowError('Failed to import prompt file.');
-    } finally {
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
     }
   };
   const getGenerationValidationErrors = (promptItems: PromptImageSettings[], model: GeneratorModelConfig) => {
@@ -768,6 +792,7 @@ export function GeneratePageContent() {
       return;
     }
     clearStatusResetTimeout();
+    promptImportRevision.current += 1;
     setStatus('saving');
     try {
       const res = await apiClient.post('/api/jobs', {
@@ -822,6 +847,7 @@ export function GeneratePageContent() {
     let generationCanceled = false;
     inlineAbortControllerRef.current = abortController;
     clearStatusResetTimeout();
+    promptImportRevision.current += 1;
     setCancelRequested(false);
     setStatus('generating');
     setInlineImagePath('');
@@ -1001,6 +1027,7 @@ export function GeneratePageContent() {
                 className="hidden"
                 onChange={event => {
                   const file = event.target.files?.[0];
+                  event.currentTarget.value = '';
                   if (file) void handlePromptFileImport(file);
                 }}
               />

@@ -2,7 +2,7 @@
 import useCommittedRef from './useCommittedRef';
 import useScopedState from './useScopedState';
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { apiClient } from '@/utils/api';
 import usePollLoop from './usePollLoop';
 import { parseSampleMetadataMap, type SampleMetadata } from '@/utils/sampleMetadata';
@@ -11,14 +11,15 @@ export default function useSampleImages(jobID: string, reloadInterval: null | nu
   const [sampleImages, setSampleImages] = useScopedState<string[]>(jobID, []);
   const [sampleMetadata, setSampleMetadata] = useScopedState<Record<string, SampleMetadata>>(jobID, {});
   const requestScope = JSON.stringify([jobID, includeMetadata]);
-  const activeScopeRef = useCommittedRef(requestScope);
+  const currentRequestScope = useMemo(() => ({ requestScope }), [requestScope]);
+  const activeScopeRef = useCommittedRef(currentRequestScope);
+  const mounted = useRef(false);
   const requestGeneration = useRef(0);
   const [status, setStatus] = useScopedState<'idle' | 'loading' | 'success' | 'error'>(jobID, 'idle');
 
   const refreshSampleImages = useCallback(
     (signal?: AbortSignal) => {
-      const currentRequestScope = requestScope;
-      if (signal?.aborted || activeScopeRef.current !== currentRequestScope) return;
+      if (signal?.aborted || !mounted.current || activeScopeRef.current !== currentRequestScope) return;
       const generation = ++requestGeneration.current;
       setStatus('loading');
       return apiClient
@@ -27,6 +28,7 @@ export default function useSampleImages(jobID: string, reloadInterval: null | nu
         .then(data => {
           if (
             signal?.aborted ||
+            !mounted.current ||
             activeScopeRef.current !== currentRequestScope ||
             generation !== requestGeneration.current
           )
@@ -46,6 +48,7 @@ export default function useSampleImages(jobID: string, reloadInterval: null | nu
         .catch(error => {
           if (
             signal?.aborted ||
+            !mounted.current ||
             activeScopeRef.current !== currentRequestScope ||
             generation !== requestGeneration.current
           )
@@ -54,14 +57,16 @@ export default function useSampleImages(jobID: string, reloadInterval: null | nu
           setStatus('error');
         });
     },
-    [jobID, includeMetadata, requestScope, setStatus, setSampleImages, setSampleMetadata],
+    [jobID, includeMetadata, currentRequestScope, activeScopeRef, setStatus, setSampleImages, setSampleMetadata],
   );
 
   useEffect(() => {
+    mounted.current = true;
     return () => {
+      mounted.current = false;
       requestGeneration.current += 1;
     };
-  }, [requestScope]);
+  }, [currentRequestScope]);
 
   usePollLoop(signal => refreshSampleImages(signal), reloadInterval, [jobID, includeMetadata]);
 

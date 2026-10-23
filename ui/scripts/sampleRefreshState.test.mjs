@@ -33,7 +33,7 @@ function fixture(t) {
   }).default;
   const render = (jobID = 'sample-fixture', includeMetadata = true) => harness.render(() => hook(jobID, 5000, includeMetadata));
   return {
-    requests, render,
+    requests, render, unmount: () => harness.cleanup(),
     poll: (signal = new AbortController().signal) => { render(); return polls.at(-1)(signal); },
   };
 }
@@ -123,4 +123,35 @@ test('changing metadata options invalidates callbacks from the previous sample s
   f.requests[0].resolve({ samples: ['/synthetic/current.png'], metadata: { '/synthetic/current.png': metadata(2) } });
   await current;
   assert.equal(f.render().sampleMetadata['/synthetic/current.png'].seed, 2);
+});
+
+for (const changedScope of ['job', 'metadata']) {
+  test(`old sample callback cannot invalidate a returned ${changedScope} visit or its current metadata`, async t => {
+    const f = fixture(t);
+    const previous = f.render().refreshSampleImages;
+    if (changedScope === 'job') f.render('other-sample-job');
+    else f.render('sample-fixture', false);
+    const current = f.render().refreshSampleImages();
+    const old = previous();
+    const count = f.requests.length;
+    f.requests.slice(1).forEach(request => request.resolve({ samples: ['/synthetic/old.png'] }));
+    await old;
+    f.requests[0].resolve({ samples: ['/synthetic/current.png'], metadata: { '/synthetic/current.png': metadata(42) } });
+    await current;
+    assert.equal(count, 1);
+    assert.equal(f.render().status, 'success');
+    assert.deepEqual(f.render().sampleImages, ['/synthetic/current.png']);
+    assert.equal(f.render().sampleMetadata['/synthetic/current.png'].seed, 42);
+  });
+}
+
+test('captured sample callback cannot start a new request after unmount', async t => {
+  const f = fixture(t);
+  const previous = f.render().refreshSampleImages;
+  f.unmount();
+  const pending = previous();
+  const count = f.requests.length;
+  f.requests.forEach(request => request.resolve({ samples: ['/synthetic/old.png'] }));
+  await pending;
+  assert.equal(count, 0);
 });

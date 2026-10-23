@@ -1,7 +1,7 @@
 'use client';
 import useCommittedRef from './useCommittedRef';
 import useScopedState from './useScopedState';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { Job } from '@/types';
 import { apiClient } from '@/utils/api';
 import usePollLoop from './usePollLoop';
@@ -10,12 +10,12 @@ export default function useJob(jobID: string, reloadInterval: null | number = nu
   const [status, setStatus] = useScopedState<'idle' | 'loading' | 'success' | 'error'>(jobID, 'idle');
   const requestGeneration = useRef(0);
   const requestScope = jobID;
-  const activeScopeRef = useCommittedRef(requestScope);
+  const currentRequestScope = useMemo(() => ({ requestScope }), [requestScope]);
+  const activeScopeRef = useCommittedRef(currentRequestScope);
+  const mounted = useRef(false);
   const refreshJob = useCallback(
     (signal?: AbortSignal) => {
-      if (!jobID) return;
-      const currentRequestScope = requestScope;
-      if (activeScopeRef.current !== currentRequestScope) return;
+      if (!jobID || signal?.aborted || !mounted.current || activeScopeRef.current !== currentRequestScope) return;
       const generation = ++requestGeneration.current;
       setStatus('loading');
       return apiClient
@@ -29,6 +29,7 @@ export default function useJob(jobID: string, reloadInterval: null | number = nu
         .then(data => {
           if (
             signal?.aborted ||
+            !mounted.current ||
             activeScopeRef.current !== currentRequestScope ||
             generation !== requestGeneration.current
           )
@@ -39,6 +40,7 @@ export default function useJob(jobID: string, reloadInterval: null | number = nu
         .catch(error => {
           if (
             signal?.aborted ||
+            !mounted.current ||
             activeScopeRef.current !== currentRequestScope ||
             generation !== requestGeneration.current
           )
@@ -47,13 +49,15 @@ export default function useJob(jobID: string, reloadInterval: null | number = nu
           setStatus('error');
         });
     },
-    [jobID, requestScope, setStatus, setJob],
+    [jobID, currentRequestScope, activeScopeRef, setStatus, setJob],
   );
   useEffect(() => {
+    mounted.current = true;
     return () => {
+      mounted.current = false;
       requestGeneration.current += 1;
     };
-  }, [jobID]);
+  }, [currentRequestScope]);
   usePollLoop(signal => refreshJob(signal), reloadInterval, [jobID]);
   return { job, setJob, status, refreshJob: () => refreshJob() };
 }

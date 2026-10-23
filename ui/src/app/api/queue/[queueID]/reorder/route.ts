@@ -9,12 +9,13 @@ async function postCommand(request: NextRequest, { params }: { params: Promise<{
   try {
     const body = assertGlobalPayload(await readJsonCommand(request));
     const workerID = typeof body.worker_id === 'string' && body.worker_id.trim() ? body.worker_id.trim() : 'local';
-    const jobIDs = Array.isArray(body.job_ids) ? body.job_ids : [];
-    const jobs = await reorderQueueJobs(queueID, jobIDs, workerID);
+    const jobs = await reorderQueueJobs(queueID, body.job_ids, workerID, undefined, {
+      expectedJobIDs: body.expected_job_ids,
+    });
     return NextResponse.json({ jobs });
   } catch (error) {
     if (error instanceof QueueReorderError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
     }
     console.error(error);
     return NextResponse.json({ error: 'Failed to reorder queue' }, { status: 500 });

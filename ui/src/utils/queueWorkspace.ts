@@ -47,7 +47,21 @@ export const rememberQueueWorkspace = (patch: Partial<QueueWorkspaceState>): voi
   if (typeof window !== 'undefined') memory.write(patch);
 };
 
-type QueueOrderJob = { id: string; status: string; worker_id: string; gpu_ids: string; queue_position?: number | null };
+type QueueOrderJob = {
+  id: string;
+  status: string;
+  worker_id: string;
+  gpu_ids: string;
+  queue_position?: number | null;
+  remote_job_id?: string | null;
+};
+
+/** Match the database's queue_position/id ordering even when legacy positions tie. */
+export function compareQueueOrder(a: QueueOrderJob, b: QueueOrderJob): number {
+  const aID = a.worker_id === 'local' ? a.id : a.remote_job_id || a.id;
+  const bID = b.worker_id === 'local' ? b.id : b.remote_job_id || b.id;
+  return (a.queue_position ?? 0) - (b.queue_position ?? 0) || (aID < bID ? -1 : aID > bID ? 1 : 0);
+}
 
 /** Paging can finish before a concurrent queue insertion is reflected in the loaded rows. */
 export function hasCompleteQueuedJobs(jobs: readonly QueueOrderJob[], queuedCount: number | null | undefined): boolean {
@@ -69,7 +83,7 @@ export function matchesQueuedLaneOrder(
 ): boolean {
   const queued = jobs
     .filter(job => job.status === 'queued' && job.worker_id === workerID && job.gpu_ids === gpuIDs)
-    .sort((a, b) => (a.queue_position ?? Number.MAX_SAFE_INTEGER) - (b.queue_position ?? Number.MAX_SAFE_INTEGER));
+    .sort(compareQueueOrder);
   return queued.length === expectedJobIDs.length && queued.every((job, index) => job.id === expectedJobIDs[index]);
 }
 

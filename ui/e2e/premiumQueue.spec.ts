@@ -178,10 +178,55 @@ test('queue rows support keyboard inspection, bounded resizing and worker-safe A
   expect(reorders).toHaveLength(0);
   await page.getByRole('button', { name: 'Apply order', exact: true }).click();
   await expect.poll(() => reorders.length).toBe(1);
-  expect(reorders[0]).toEqual({ worker_id: 'local', job_ids: ['material_study', 'style_flux_v2'] });
+  expect(reorders[0]).toEqual({
+    worker_id: 'local',
+    job_ids: ['material_study', 'style_flux_v2'],
+    expected_job_ids: ['style_flux_v2', 'material_study'],
+  });
   await page.screenshot({ path: '.review-build/premium-queue-desktop.png' });
   await page.getByLabel('Search jobs', { exact: true }).fill('style');
   await expect(page.locator('[data-queue-row="style_flux_v2"]')).toHaveAttribute('draggable', 'false');
+});
+
+test('server reorder conflicts refresh the lane and discard the obsolete draft', async ({ page }) => {
+  const { jobs } = await mockQueue(page);
+  jobs.push(job('lighting_study', 'queued', 'local', 3000));
+  let payload: unknown;
+  await page.route('**/api/queue/*/reorder', async route => {
+    payload = route.request().postDataJSON();
+    jobs.find(job => job.id === 'lighting_study')!.queue_position = 2000;
+    jobs.find(job => job.id === 'material_study')!.queue_position = 3000;
+    await route.fulfill({
+      status: 409,
+      json: {
+        error: 'Queue changed while you were arranging jobs. Review the current order and try again.',
+        code: 'QUEUE_CHANGED',
+      },
+    });
+  });
+  await page.goto('/jobs');
+  await page.getByRole('button', { name: 'Inspect material_study', exact: true }).click();
+  await page.getByRole('button', { name: 'Move up', exact: true }).click();
+  await page.getByRole('button', { name: 'Apply order', exact: true }).click();
+  await expect(page.getByText('Queue order was not saved', { exact: true })).toBeVisible();
+  expect(payload).toEqual({
+    worker_id: 'local',
+    job_ids: ['material_study', 'style_flux_v2', 'lighting_study'],
+    expected_job_ids: ['style_flux_v2', 'material_study', 'lighting_study'],
+  });
+  await expect(page.getByText('Unsaved order', { exact: true })).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page
+        .locator('[data-queue-row]')
+        .evaluateAll(rows =>
+          rows
+            .map(row => row.getAttribute('data-queue-row'))
+            .filter(id => ['style_flux_v2', 'material_study', 'lighting_study'].includes(id || '')),
+        ),
+    )
+    .toEqual(['style_flux_v2', 'lighting_study', 'material_study']);
+  await expect(page.getByRole('button', { name: 'Move up', exact: true })).toBeEnabled();
 });
 
 test('queue return restores filter, sort, selected row, loaded pages and scroll without browser storage', async ({

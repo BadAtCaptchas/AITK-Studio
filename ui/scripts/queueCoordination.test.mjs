@@ -284,6 +284,47 @@ test('cron does not claim work when the queue stops during Python preflight', as
 
 const { startInferenceEngine } = loadSource('../src/utils/startInferenceEngine.ts', {});
 
+test('cron does not claim the former queue head after reordering during Python preflight', async () => {
+  const f = fixture();
+  f.setJob({ status: 'queued', queue_position: 1000 });
+  const preflight = deferred(), releasePreflight = deferred();
+  let manual = false, manualClaims = 0;
+  const start = loadSource('../cron/actions/startJob.ts', {
+    '../../src/server/db': { db: f.db }, '../../src/server/jobProcess': {},
+    '../../src/server/jobAttempts': { claimJobAttempt: async () => {
+      assert.equal(manual, true, 'former queue head must not be claimed');
+      manualClaims++;
+      return null;
+    } },
+    '../../src/server/queueCoordination': f.coordination, '../../src/server/processLease': {},
+    '../../src/utils/jobIdentity': {}, '../../src/server/inferenceToken': {}, child_process: {}, path: {}, fs: {},
+    '../paths': {}, '../../src/server/tensorboard': {}, '../../src/server/pythonPath': {
+      assertPythonRuntimeReady: async () => { preflight.resolve(); await releasePreflight.promise; },
+    },
+    '../../src/server/trainingPaths': {}, '../../src/server/hfTokenEnv': {}, '../../src/server/encryptedDatasets': {},
+    '../../src/server/encryptedDatasetSecrets': {}, '../../src/server/secureRemoteCaptionJobs': {},
+    '../../src/server/remoteOllamaWorkers': {}, '../../src/server/networkPolicy': {},
+    '../../src/server/telemetry': {}, '../../src/utils/telemetry': {},
+    '../../src/utils/trainingPhases': loadSource('../src/utils/trainingPhases.ts', {}),
+  });
+  const launch = start.startJobNow('job', { requireRunningQueue: true });
+  await preflight.promise;
+  await f.coordination.withLocalQueueTransition('0', async () => {
+    f.setJob({ queue_position: 2000 });
+    f.db.jobs.findFirst = async options => {
+      assert.deepEqual(options, { status: 'queued', gpu_ids: '0', worker_id: 'local', order: 'queue_asc' });
+      return { ...f.job, id: 'new-head', queue_position: 1000 };
+    };
+  });
+  releasePreflight.resolve();
+  assert.equal(await launch, false);
+  assert.equal(f.job.status, 'queued');
+  manual = true;
+  f.db.jobs.findFirst = async () => assert.fail('explicit/manual starts must not use the cron queue-head guard');
+  await start.startJobNow('job');
+  assert.equal(manualClaims, 1);
+});
+
 test('live inference starts a new or stopped queue using the engine job GPU', async () => {
   for (const missingQueue of [true, false]) {
     const f = fixture({ missingQueue, running: false, gpuIds: '2' });

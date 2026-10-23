@@ -91,6 +91,22 @@ test('reordering requires loaded queued rows to match the server count even afte
   assert.equal(hasCompleteQueuedJobs([], 0), true);
 });
 
+test('legacy equal positions use the same ID tie-break as server queue ordering', () => {
+  const jobs = [
+    job('c', { queue_position: 1000 }),
+    job('a', { queue_position: 1000 }),
+    job('b', { queue_position: 1000 }),
+  ];
+  assert.equal(matchesQueuedLaneOrder(jobs, ['a', 'b', 'c'], 'local', '0'), true);
+  assert.equal(matchesQueuedLaneOrder(jobs, ['c', 'a', 'b'], 'local', '0'), false);
+  const remote = jobs.map(item => ({
+    ...item,
+    worker_id: 'worker-1',
+    remote_job_id: { a: 'remote-z', b: 'remote-a', c: 'remote-m' }[item.id],
+  }));
+  assert.equal(matchesQueuedLaneOrder(remote, ['b', 'c', 'a'], 'worker-1', '0'), true);
+});
+
 test('route memory restores working context without retaining job/config payloads', () => {
   const memory = createQueueWorkspaceMemory();
   memory.write({

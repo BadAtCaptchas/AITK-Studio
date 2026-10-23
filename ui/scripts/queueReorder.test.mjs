@@ -38,6 +38,11 @@ function makeDeps(initialJobs) {
   };
   const deps = {
     findJobById: async jobID => jobs.get(jobID) || null,
+    listQueuedJobs: async (queueID, workerID) =>
+      [...jobs.values()]
+        .filter(job => job.gpu_ids === queueID && job.worker_id === workerID && job.status === 'queued')
+        .sort((a, b) => a.queue_position - b.queue_position || a.id.localeCompare(b.id)),
+    withQueueTransition: async (_queueID, _workerID, work) => work(),
     updateJob: async (jobID, data) => {
       calls.updates.push({ jobID, data });
       const next = { ...jobs.get(jobID), ...data };
@@ -100,10 +105,7 @@ test('rejects duplicate job ids', async () => {
 });
 
 test('rejects jobs outside the requested lane', async () => {
-  const { deps, calls } = makeDeps([
-    makeJob({ id: 'job-a', gpu_ids: '0' }),
-    makeJob({ id: 'job-b', gpu_ids: '1' }),
-  ]);
+  const { deps, calls } = makeDeps([makeJob({ id: 'job-a', gpu_ids: '0' }), makeJob({ id: 'job-b', gpu_ids: '1' })]);
 
   await assert.rejects(
     () => reorderQueueJobs('0', ['job-a', 'job-b'], 'local', deps),

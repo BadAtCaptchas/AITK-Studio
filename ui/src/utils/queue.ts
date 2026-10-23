@@ -31,11 +31,12 @@ export const stopQueue = (queueID: string, workerID = 'local') => {
   });
 };
 
-export const reorderQueue = (queueID: string, jobIDs: string[], workerID = 'local') => {
+export const reorderQueue = (queueID: string, jobIDs: string[], workerID = 'local', expectedJobIDs?: string[]) => {
   return apiClient
     .post(`/api/queue/${encodeURIComponent(queueID)}/reorder`, {
       worker_id: workerID,
       job_ids: jobIDs,
+      ...(expectedJobIDs === undefined ? {} : { expected_job_ids: expectedJobIDs }),
     })
     .then(res => res.data);
 };

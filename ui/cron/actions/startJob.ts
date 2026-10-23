@@ -337,6 +337,10 @@ export async function startJobNow(jobID: string, options: StartJobOptions = {}):
         if (!current || current.status !== 'queued' || current.gpu_ids !== candidate.gpu_ids || current.worker_id !== candidate.worker_id) return null;
         const queue = await db.queues.findByGpuIds(current.gpu_ids, 'local');
         if (!queue?.is_running) return null;
+        // Python preflight happens outside the lease; an accepted reorder may have
+        // changed the head since cron selected this candidate.
+        const next = await db.jobs.findFirst({ status: 'queued', gpu_ids: current.gpu_ids, worker_id: 'local', order: 'queue_asc' });
+        if (next?.id !== current.id) return null;
         return claimJobAttempt(current);
       }, { wait: false })
     : await claimJobAttempt(candidate);

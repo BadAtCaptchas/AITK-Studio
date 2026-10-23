@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { DragEvent, KeyboardEvent, ReactNode } from 'react';
 import { Dialog, DialogBackdrop, DialogPanel, DialogTitle } from '@headlessui/react';
+import { isAxiosError } from 'axios';
 import Link from 'next/link';
 import classNames from 'classnames';
 import { ArrowDown, ArrowUp, ArrowUpRight, GripVertical, Loader2, Play, RefreshCcw, Square, X } from 'lucide-react';
@@ -25,6 +26,7 @@ import { ACTIVE_JOB_STATUSES } from '@/utils/jobStatus';
 import { reorderQueue, startQueue, stopQueue } from '@/utils/queue';
 import {
   clampInspectorWidth,
+  compareQueueOrder,
   hasCompleteQueuedJobs,
   matchesQueuedLaneOrder,
   moveQueuedJob,
@@ -510,9 +512,7 @@ export default function QueueWorkbench({ filterText, emptyAction, focusGpuIDs, o
     return [...lanes.values()]
       .map(group => ({
         ...group,
-        jobs: group.jobs.sort(
-          (a, b) => (a.queue_position ?? Number.MAX_SAFE_INTEGER) - (b.queue_position ?? Number.MAX_SAFE_INTEGER),
-        ),
+        jobs: group.jobs.sort(compareQueueOrder),
       }))
       .sort(
         (a, b) =>
@@ -574,11 +574,15 @@ export default function QueueWorkbench({ filterText, emptyAction, focusGpuIDs, o
     setReorderBusy(true);
     setReorderError(null);
     try {
-      await reorderQueue(group.gpuIDs, pendingReorder.jobIDs, group.workerID);
+      await reorderQueue(group.gpuIDs, pendingReorder.jobIDs, group.workerID, pendingReorder.baseJobIDs);
       setPendingReorder(null);
       refresh();
     } catch (error: unknown) {
       setReorderError(errorMessage(error));
+      if (isAxiosError(error) && error.response?.status === 409) {
+        setPendingReorder(null);
+        refresh();
+      }
     } finally {
       setReorderBusy(false);
     }

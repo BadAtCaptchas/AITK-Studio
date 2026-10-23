@@ -2,6 +2,7 @@ import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { pathJoin } from '../src/utils/basic';
+import { installLocalMonaco } from './localMonaco';
 
 const origin = 'http://127.0.0.1:15875';
 const headers = { Origin: origin };
@@ -21,6 +22,7 @@ test.beforeEach(async ({ page }) => {
   const errors: string[] = [];
   pageErrors.set(page, errors);
   page.on('pageerror', error => errors.push(error.message));
+  await installLocalMonaco(page);
   await page.setViewportSize({ width: 1487, height: 1058 });
   await page.route('**/api/monitor', route => route.abort());
   await page.route('**/api/gpu?*', route =>

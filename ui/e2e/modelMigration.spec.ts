@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { defaultJobConfig } from '../src/app/jobs/new/jobConfig';
+import { installLocalMonaco } from './localMonaco';
 
 const headers = { Origin: 'http://127.0.0.1:15875' };
 test.setTimeout(120_000);
@@ -9,6 +10,7 @@ test.use({ navigationTimeout: 60_000 });
 test('migrate a training job, review requirements, and create an independent run at step zero', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
+  await installLocalMonaco(page);
   await page.route('**/api/monitor', route => route.abort());
   await page.route('**/api/gpu?*', route =>
     route.fulfill({

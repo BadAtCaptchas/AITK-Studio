@@ -1,7 +1,6 @@
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import type { editor } from 'monaco-editor';
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
+import { installLocalMonaco } from './localMonaco';
 import YAML from 'yaml';
 import { defaultJobConfig } from '../src/app/jobs/new/jobConfig';
 import type { JobConfig } from '../src/types';
@@ -34,13 +33,7 @@ async function installTrainingFixtures(page: Page) {
   await page.route('**/api/datasets/list*', route => route.fulfill({ json: {
     datasets: [{ name: 'portraits_v2', encrypted: false }], errors: [],
   } }));
-  // Serve the installed editor assets locally so browser tests never depend on a CDN.
-  await page.route('https://cdn.jsdelivr.net/npm/monaco-editor@*/min/vs/**', async route => {
-    const relative = new URL(route.request().url()).pathname.split('/min/vs/')[1];
-    if (!relative || relative.split('/').includes('..')) return route.abort();
-    const filename = path.join(process.cwd(), 'node_modules/monaco-editor/min/vs', relative);
-    await route.fulfill({ body: await readFile(filename), contentType: relative.endsWith('.css') ? 'text/css' : 'application/javascript' });
-  });
+  await installLocalMonaco(page);
   await page.route('**/api/monitor', route => route.abort());
   await page.route('**/api/gpu?*', route => route.fulfill({ json: {
     hasNvidiaSmi: true, isMac: false, gpus: [{ index: 0, name: 'Fixture GPU', driverVersion: 'fixture', temperature: 48,

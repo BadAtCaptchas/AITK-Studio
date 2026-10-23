@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
+import { installLocalMonaco } from './localMonaco';
 
 test.setTimeout(120_000);
 test.use({ navigationTimeout: 60_000 });
@@ -8,6 +9,7 @@ async function prepareRemoteForm(page: Page) {
   const errors: string[] = [];
   const imports: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
+  await installLocalMonaco(page);
   await page.route('**/api/monitor', route => route.abort());
   await page.route('**/api/gpu?*', route =>
     route.fulfill({

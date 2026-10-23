@@ -1,5 +1,6 @@
 'use client';
 import useScopedState from './useScopedState';
+import useCommittedRef from './useCommittedRef';
 
 import { useCallback, useEffect, useRef } from 'react';
 import { apiClient } from '@/utils/api';
@@ -26,23 +27,39 @@ function parseJobLogResponse(data: unknown): JobLogResponse {
   };
 }
 
-export default function useJobLog(jobID: string, reloadInterval: null | number = null) {
-  const [log, setLog] = useScopedState<string>(jobID, '');
+export default function useJobLog(
+  jobID: string,
+  reloadInterval: null | number = null,
+  attemptId: string | null = null,
+) {
+  const requestScope = JSON.stringify([jobID, attemptId]);
+  const [log, setLog] = useScopedState<string>(requestScope, '');
   const terminalRef = useRef<TerminalEmulator | null>(null);
   if (terminalRef.current === null) {
     terminalRef.current = new TerminalEmulator();
   }
   const didInitialLoadRef = useRef(false);
   const offsetRef = useRef<number | null>(null);
-  const isRefreshingRef = useRef(false);
-  const activeJobIDRef = useRef(jobID);
-  const [status, setStatus] = useScopedState<'idle' | 'loading' | 'success' | 'error' | 'refreshing'>(jobID, 'idle');
+  const inFlightRef = useRef<AbortController | null>(null);
+  const activeScopeRef = useCommittedRef(requestScope);
+  const [status, setStatus] = useScopedState<'idle' | 'loading' | 'success' | 'error' | 'refreshing'>(
+    requestScope,
+    'idle',
+  );
 
   const refresh = useCallback(
     (signal?: AbortSignal) => {
-      if (!jobID || isRefreshingRef.current) return;
-      isRefreshingRef.current = true;
-      const requestJobID = jobID;
+      if (!jobID || signal?.aborted || inFlightRef.current || activeScopeRef.current !== requestScope) return;
+      const controller = new AbortController();
+      inFlightRef.current = controller;
+      const abort = () => {
+        // A changed poll interval can immediately need a final one-shot request.
+        if (inFlightRef.current === controller) inFlightRef.current = null;
+        controller.abort();
+      };
+      signal?.addEventListener('abort', abort, { once: true });
+      const isCurrent = () =>
+        !controller.signal.aborted && inFlightRef.current === controller && activeScopeRef.current === requestScope;
       let loadStatus: 'loading' | 'refreshing' = 'loading';
       if (didInitialLoadRef.current) {
         loadStatus = 'refreshing';
@@ -52,11 +69,11 @@ export default function useJobLog(jobID: string, reloadInterval: null | number =
       return apiClient
         .get(`/api/jobs/${jobID}/log`, {
           ...(offset !== null ? { params: { offset } } : {}),
-          signal,
+          signal: controller.signal,
         })
         .then(res => res.data)
         .then(data => {
-          if (activeJobIDRef.current !== requestJobID) return;
+          if (!isCurrent()) return;
           const payload = parseJobLogResponse(data);
           offsetRef.current = payload.offset;
           const terminal = terminalRef.current;
@@ -70,29 +87,30 @@ export default function useJobLog(jobID: string, reloadInterval: null | number =
           didInitialLoadRef.current = true;
         })
         .catch(error => {
-          if (signal?.aborted) return;
-          if (activeJobIDRef.current !== requestJobID) return;
+          if (!isCurrent()) return;
           console.error('Error fetching log:', error);
           setStatus('error');
         })
         .finally(() => {
-          if (activeJobIDRef.current === requestJobID) {
-            isRefreshingRef.current = false;
-          }
+          signal?.removeEventListener('abort', abort);
+          if (inFlightRef.current === controller) inFlightRef.current = null;
         });
     },
-    [jobID, setStatus, setLog],
+    [jobID, requestScope, activeScopeRef, setStatus, setLog],
   );
 
   useEffect(() => {
-    activeJobIDRef.current = jobID;
-    isRefreshingRef.current = false;
     offsetRef.current = null;
     didInitialLoadRef.current = false;
     terminalRef.current?.reset();
-  }, [jobID]);
+    return () => {
+      const controller = inFlightRef.current;
+      inFlightRef.current = null;
+      controller?.abort();
+    };
+  }, [requestScope]);
 
-  usePollLoop(signal => refresh(signal), reloadInterval, [jobID]);
+  usePollLoop(signal => refresh(signal), reloadInterval, [requestScope]);
 
   return { log, status, refresh: () => refresh() };
 }

@@ -95,8 +95,8 @@ function HardwareStrip() {
   );
 }
 
-function RunOutput({ jobID, expanded = true }: { jobID: string; expanded?: boolean }) {
-  const { log, status, refresh } = useJobLog(jobID, 3000);
+function RunOutput({ job, expanded = true }: { job: Job; expanded?: boolean }) {
+  const { log, status, refresh } = useJobLog(job.id, isActiveJobStatus(job.status) ? 3000 : null, job.attempt_id ?? null);
   return (
     <details className="studio-output" open={expanded}>
       <summary>
@@ -201,7 +201,7 @@ function RunMonitor({ id, workerName }: { id: string; workerName: (id: string) =
               <JobConfigViewer job={job} />
             </div>
           )}
-          {tab === 'Logs' && <RunOutput key={job.id} jobID={job.id} />}
+          {tab === 'Logs' && <RunOutput key={job.id} job={job} />}
         </section>
         <aside className="studio-monitor-inspector" aria-label="Run inspector">
           <h2 className="mb-3 break-words text-sm font-semibold">{job.name}</h2>
@@ -237,7 +237,7 @@ function RunMonitor({ id, workerName }: { id: string; workerName: (id: string) =
           </Link>
         </aside>
       </div>
-      {tab !== 'Logs' && <RunOutput key={job.id} jobID={job.id} />}
+      {tab !== 'Logs' && <RunOutput key={job.id} job={job} />}
     </>
   );
 }

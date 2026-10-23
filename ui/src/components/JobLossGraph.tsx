@@ -6,6 +6,7 @@ import type { Job, GpuInfo } from '@/types';
 import useJobMetrics, { type MetricPoint } from '@/hooks/useJobMetrics';
 import useGPUInfo from '@/hooks/useGPUInfo';
 import { getTotalSteps } from '@/utils/jobs';
+import { isActiveJobStatus } from '@/utils/jobStatus';
 import { assignSeriesColors } from '@/utils/seriesColors';
 import { Activity, Clock, Gauge, Image as ImageIcon, RotateCcw, Save, TrendingDown, Zap } from 'lucide-react';
 import {
@@ -664,17 +665,11 @@ function JobLossGraphContent({ job, compact = false }: Props) {
   const { series, latest, lossKeys, phasePoints, phaseNamePoints, status, version, refreshMetrics } = useJobMetrics(
     job.id,
     job.stop && job.status === 'running' ? 'stopping' : job.status,
-    CHART_MAX_POINTS,
+    { maxPoints: CHART_MAX_POINTS, attemptId: job.attempt_id ?? null },
   );
 
   const gpuIds = useMemo(() => getGpuIds(job), [job.gpu_ids]);
-  const gpuPollInterval =
-    job.status === 'queued' ||
-    job.status === 'running' ||
-    job.status === 'stopping' ||
-    (job.stop && job.status === 'running')
-      ? 5000
-      : null;
+  const gpuPollInterval = isActiveJobStatus(job.status) ? 5000 : null;
   const { gpuList } = useGPUInfo(gpuIds, gpuPollInterval, job.worker_id || 'local');
 
   const [initialSettings] = useState(readGraphSettings);

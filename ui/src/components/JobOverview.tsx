@@ -88,7 +88,7 @@ export default function JobOverview({ job }: JobOverviewProps) {
   const logPollInterval = shouldPoll ? 5000 : null;
   const downloadPollInterval = shouldPoll ? 2000 : null;
   const systemPollInterval = shouldPoll ? 10000 : null;
-  const { log, status: statusLog } = useJobLog(job.id, logPollInterval);
+  const { log, status: statusLog } = useJobLog(job.id, logPollInterval, job.attempt_id ?? null);
   const { progress: hfDownloadProgress } = useJobDownloadProgress(
     job.id,
     job.hf_download_progress || null,
@@ -128,8 +128,9 @@ export default function JobOverview({ job }: JobOverviewProps) {
       keys: ['phase/*'],
       maxPoints: 100,
       enabled: hasPhaseOverview,
+      attemptId: job.attempt_id ?? null,
     }),
-    [hasPhaseOverview],
+    [hasPhaseOverview, job.attempt_id],
   );
   const { latest: phaseMetricLatest } = useJobMetrics(job.id, job.status, phaseMetricsOptions);
   const phaseSummary = useMemo(

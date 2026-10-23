@@ -88,6 +88,51 @@ test('header utility menu exposes theme, updates and logout to keyboard users', 
   await expect(page).toHaveURL(/\/models$/);
 });
 
+test('Overview output resets for a new attempt and stops polling completed runs', async ({ page }) => {
+  await page.route('**/api/monitor', route => route.abort());
+  await page.route('**/api/gpu?*', route => route.fulfill({ json: { gpus: [], hasNvidiaSmi: false, isMac: false } }));
+  await page.route('**/api/jobs/*/metrics*', route => route.fulfill({ json: { keys: [], series: {} } }));
+  const job = {
+    id: 'output-attempt-fixture', name: 'Output attempt fixture', status: 'running', attempt_id: 'attempt-old',
+    job_type: 'train', worker_id: 'local', gpu_ids: '0', step: 100, stop: false, queue_position: 0,
+    info: '', speed_string: '', created_at: '2026-10-23T10:00:00Z', updated_at: '2026-10-23T10:00:00Z',
+    job_config: JSON.stringify({ config: { process: [{ train: { steps: 1000 }, model: { arch: 'flux' } }] } }),
+  };
+  const logRequests: Array<{ attempt: string; offset: string | null }> = [];
+  await page.route('**/api/jobs?*', route => {
+    const params = new URL(route.request().url()).searchParams;
+    return route.fulfill({ json: params.has('id') ? job : {
+      jobs: params.get('view') === 'active' ? [job] : [], nextCursor: null, statusCounts: { [job.status]: 1 },
+    } });
+  });
+  await page.route('**/api/jobs/output-attempt-fixture/log*', route => {
+    const offset = new URL(route.request().url()).searchParams.get('offset');
+    logRequests.push({ attempt: job.attempt_id, offset });
+    return route.fulfill({ json: {
+      log: offset === null ? `${job.attempt_id} beginning\n` : '', offset: 100, reset: offset === null,
+    } });
+  });
+  await login(page);
+  await page.clock.install();
+  await page.goto('/dashboard');
+  await expect(page.getByLabel('Training output', { exact: true })).toContainText('attempt-old beginning');
+  job.attempt_id = 'attempt-new';
+  job.step = 0;
+  await page.clock.fastForward(5500);
+  await expect(page.getByLabel('Training output', { exact: true })).toContainText('attempt-new beginning');
+  await expect(page.getByLabel('Training output', { exact: true })).not.toContainText('attempt-old');
+  expect(logRequests.some(request => request.attempt === 'attempt-new' && request.offset === null)).toBe(true);
+  job.status = 'completed';
+  await page.clock.fastForward(5500);
+  await expect(page.getByRole('complementary', { name: 'Run inspector' })).toContainText('completed');
+  // Let the final one-shot request settle before measuring inactive polling.
+  await expect.poll(() => page.getByText('Training log', { exact: true }).count()).toBe(1);
+  const settled = logRequests.length;
+  await page.clock.fastForward(12000);
+  await expect(page.getByLabel('Training output', { exact: true })).toContainText('attempt-new beginning');
+  expect(logRequests).toHaveLength(settled);
+});
+
 test('Overview keeps starting jobs active and exposes independent history freshness failures', async ({ page }) => {
   await page.route('**/api/monitor', route => route.abort());
   await page.route('**/api/gpu?*', route => route.fulfill({ json: { gpus: [], hasNvidiaSmi: false, isMac: false } }));

@@ -38,6 +38,7 @@ type UseJobMetricsOptions =
       maxPoints?: number;
       keys?: string[];
       enabled?: boolean;
+      attemptId?: string | null;
     };
 
 const DEFAULT_METRIC_KEYS = ['*'];
@@ -65,6 +66,7 @@ function normalizeOptions(options: UseJobMetricsOptions | undefined) {
       maxPoints: options,
       keys: DEFAULT_METRIC_KEYS,
       enabled: true,
+      attemptId: null,
     };
   }
 
@@ -73,6 +75,7 @@ function normalizeOptions(options: UseJobMetricsOptions | undefined) {
     maxPoints: options?.maxPoints ?? DEFAULT_MAX_POINTS,
     keys: keys?.length ? keys : DEFAULT_METRIC_KEYS,
     enabled: options?.enabled ?? true,
+    attemptId: options?.attemptId ?? null,
   };
 }
 
@@ -95,7 +98,8 @@ export default function useJobMetrics(
   const maxPoints = normalizedOptions.maxPoints;
   const metricKeys = normalizedOptions.keys.join(',');
   const enabled = normalizedOptions.enabled;
-  const requestScope = JSON.stringify([enabled, jobID, maxPoints, metricKeys]);
+  const attemptId = normalizedOptions.attemptId;
+  const requestScope = JSON.stringify([enabled, jobID, attemptId, maxPoints, metricKeys]);
   const [series, setSeries] = useScopedState<SeriesMap>(requestScope, {});
   const [latest, setLatest] = useScopedState<LatestMap>(requestScope, {});
   const [keys, setKeys] = useScopedState<string[]>(requestScope, []);
@@ -235,7 +239,7 @@ export default function useJobMetrics(
       inFlightRef.current = false;
       controller?.abort();
     };
-  }, [enabled, jobID, maxPoints, metricKeys]);
+  }, [enabled, jobID, attemptId, maxPoints, metricKeys]);
 
   const pollInterval = useMemo(() => {
     if (!enabled) return null;
@@ -247,6 +251,7 @@ export default function useJobMetrics(
   usePollLoop(signal => refreshMetrics({ full: needsFullRefreshRef.current, signal }), pollInterval, [
     enabled,
     jobID,
+    attemptId,
     maxPoints,
     metricKeys,
   ]);

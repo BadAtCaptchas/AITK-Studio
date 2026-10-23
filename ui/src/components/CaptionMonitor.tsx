@@ -31,7 +31,7 @@ export default function CaptionMonitor({ datasetPath, onHeightChange }: CaptionM
     return job.gpu_ids.split(',').map(id => parseInt(id));
   }, [job?.gpu_ids]);
   const { gpuList, isGPUInfoLoaded } = useGPUInfo(gpuIds, 5000);
-  const { log, status: statusLog } = useJobLog(job?.id ?? '', isActive ? 2000 : null);
+  const { log, status: statusLog } = useJobLog(job?.id ?? '', isActive ? 2000 : null, job?.attempt_id ?? null);
   const totalSteps = (job ? getTotalSteps(job) : 0) ?? 0;
   const progress = totalSteps > 0 ? (job!.step / totalSteps) * 100 : 0;
   const logRef = useRef<HTMLDivElement>(null);

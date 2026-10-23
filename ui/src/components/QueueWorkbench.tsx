@@ -303,7 +303,7 @@ function JobRow({
 }
 
 function SelectedJobInspector({ job, onClose, onRefresh }: { job: Job; onClose: () => void; onRefresh: () => void }) {
-  const { log, status } = useJobLog(job.id, activeStatuses.has(job.status) ? 5000 : null);
+  const { log, status } = useJobLog(job.id, activeStatuses.has(job.status) ? 5000 : null, job.attempt_id ?? null);
   const { job: fullJob, status: detailStatus, refreshJob } = useJob(job.id);
   const actionJob = fullJob ? { ...job, job_config: fullJob.job_config } : null;
   const total = totalSteps(job);

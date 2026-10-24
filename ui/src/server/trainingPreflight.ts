@@ -5,6 +5,7 @@ import { fetchWorkerHealth, getRemoteWorker, isLocalWorker, remoteJson } from '.
 import { parseRemoteDatasetRef } from '../utils/remoteDatasetRefs';
 import path from 'path';
 import { resolveDatasetScope } from './datasetScope';
+import { continuationProcesses, validateContinuationSources } from './loraContinuation';
 import { resolveDatasetDirectoryInsideRoot } from './remoteCaptionSecurity';
 
 export async function readWorkerDatasetCheck(value: unknown, resolveRoot = async () => (await resolveDatasetScope()).datasetsRoot): Promise<DatasetScanSummary> {
@@ -90,6 +91,20 @@ export async function runTrainingPreflight(jobConfig: JobConfig, gpuIds: string 
     }
   }
   const result = analyzeTrainingAdvisor(jobConfig, { gpuIds, datasetChecks, skipControlPaths: !isLocalWorker(workerId) });
+  if (continuationProcesses(jobConfig).length) {
+    try {
+      if (!isLocalWorker(workerId)) {
+        const health = await fetchWorkerHealth(await getRemoteWorker(workerId));
+        if (health.loraContinuationVersion !== 1) throw new Error('Selected worker requires an update for LoRA continuation.');
+      }
+      await validateContinuationSources(jobConfig, undefined, workerId || 'local');
+    } catch (error) {
+      result.findings.push({ id: 'continuation.invalid', severity: 'critical', stage: 'preflight', category: 'config',
+        title: 'Continuation source is not ready', message: error instanceof Error ? error.message : 'Inspection failed.', recommendation: 'Inspect the source LoRA and verify the selected worker.' });
+      result.summary.critical++;
+      result.summary.text = 'Resolve continuation errors before starting';
+    }
+  }
   if (!isLocalWorker(workerId) && (jobConfig.config.process[0]?.datasets || []).some(dataset => !parseRemoteDatasetRef(dataset.folder_path))) {
     target = { workerId, state: 'unknown', detail: `${target.detail} Local source datasets were checked here; transferred files and control paths still need verification on the target.` };
   }

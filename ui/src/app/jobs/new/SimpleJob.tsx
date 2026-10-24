@@ -76,6 +76,7 @@ import {
   supportsKrea2TextFusionExclusion,
 } from '@/utils/krea2TextFusion';
 import TrainingPhasesEditor from './TrainingPhasesEditor';
+import LoraContinuationEditor from './LoraContinuationEditor';
 import { apiClient } from '@/utils/api';
 import { getRememberedEncryptedDatasetKey } from '@/utils/encryptedDatasets';
 import { normalizeDetectedCaptionExt } from '@/utils/jobDatasetDefaults';
@@ -94,6 +95,7 @@ type Props = {
   readOnly?: boolean;
   onOpenConfig?: () => void;
   setJobConfig: (value: any, key?: string) => void;
+  workerID?: string;
   handleSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
   runId: string | null;
   datasetOptions: Array<
@@ -134,6 +136,7 @@ const comfyOnErrorOptions: SelectOption[] = [
 ];
 export default function SimpleJob({
   jobConfig,
+  workerID = 'local',
   readOnly = false,
   onOpenConfig,
   setJobConfig,
@@ -896,9 +899,11 @@ export default function SimpleJob({
                 ))}
 
                 <div className="grid grid-cols-1 gap-5">
+                  {(['krea2', 'krea2:turbo'].includes(processConfig.model.arch) || processConfig.network?.continuation) &&
+                    <LoraContinuationEditor config={jobConfig} setConfig={setJobConfig} datasets={datasetOptions} workerID={workerID} disabled={readOnly || !!runId} />}
                   {!processConfig.model.arch.startsWith('minimax_h3') && (
                     <details className={`studio-disclosure ${styles.continuation}`} open={processConfig.model.base_lora_path ? true : undefined}>
-                      <summary><ChevronRight className={styles.disclosureChevron} size={14} aria-hidden="true" />Continue from an existing LoRA</summary>
+                      <summary><ChevronRight className={styles.disclosureChevron} size={14} aria-hidden="true" />Use a LoRA as the training base</summary>
                       <div>
                         <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
                           <TextInput
@@ -926,7 +931,7 @@ export default function SimpleJob({
                             )}
                           </button>
                         </div>
-                        <p className="mt-1 text-xs text-gray-500">Use this to continue training from a base LoRA.</p>
+                        <p className="mt-1 text-xs text-gray-500">Merge this LoRA into the base, then train a new adapter on top. This does not update the source adapter itself.</p>
                         {baseLoraUploadMessage && (
                           <div
                             className={`mt-2 border px-3 py-2 text-xs ${

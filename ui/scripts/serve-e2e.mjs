@@ -32,6 +32,7 @@ const env = {
 await execute(process.execPath, ['scripts/prepare-db.mjs'], { cwd: ui, env, timeout: 60_000 });
 const db = new sqlite3.Database(env.AITK_SQLITE_PATH);
 for (const [key, name] of [
+  ['DATA_ROOT', 'data'],
   ['DATASETS_FOLDER', 'datasets'],
   ['TRAINING_FOLDER', 'output'],
   ['MODELS_PATH', 'models'],

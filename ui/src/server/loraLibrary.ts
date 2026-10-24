@@ -1,5 +1,5 @@
 import fs from 'fs';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import path from 'path';
 import { getDataRoot } from './settings';
 
@@ -349,7 +349,14 @@ async function readSidecar(filePath: string): Promise<UploadedLoraSidecar> {
 }
 
 export async function writeUploadedLoraSidecar(filePath: string, sidecar: UploadedLoraSidecar) {
-  await fs.promises.writeFile(sidecarPathFor(filePath), JSON.stringify(sidecar, null, 2), 'utf8');
+  const destination = sidecarPathFor(filePath);
+  const temporary = `${destination}.${randomUUID()}.tmp`;
+  try {
+    await fs.promises.writeFile(temporary, JSON.stringify(sidecar, null, 2), { encoding: 'utf8', flag: 'wx' });
+    await fs.promises.rename(temporary, destination);
+  } finally {
+    await fs.promises.rm(temporary, { force: true });
+  }
 }
 
 export async function buildUploadedLoraEntry(filePath: string): Promise<LoraLibraryEntry | null> {

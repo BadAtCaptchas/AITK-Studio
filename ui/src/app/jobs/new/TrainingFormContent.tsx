@@ -798,6 +798,7 @@ function TrainingFormEditor({ draftKey, initialDraft }: { draftKey: string; init
         )}
         <ErrorBoundary key={formRevision} fallback={<div className="p-6 text-sm text-amber-800 dark:text-amber-300">This configuration requires the Config editor. <button type="button" className="underline" onClick={() => setShowAdvancedView(true)}>Open Config</button></div>}>
           <SimpleJob jobConfig={jobConfig} setJobConfig={setJobConfig} readOnly={!rawEditorValid || editorLocked}
+            workerID={workerID}
             handleSubmit={handleSubmit} runId={runId} datasetOptions={datasetOptions}
             validationMessages={currentFindings} focusTarget={focusTarget} onOpenConfig={() => setShowAdvancedView(true)}
             isLoading={settingsStatus === 'loading' || !isGPUInfoLoaded || workerStatus === 'loading' || ['idle', 'loading'].includes(datasetFetchStatus)}

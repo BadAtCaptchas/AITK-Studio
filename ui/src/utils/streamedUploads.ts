@@ -7,6 +7,7 @@ export async function uploadLoraFile(
   file: File,
   options: {
     triggerWords?: string;
+    workerID?: string;
     onUploadProgress?: (event: AxiosProgressEvent) => void;
   } = {},
 ) {
@@ -14,6 +15,7 @@ export async function uploadLoraFile(
     headers: {
       'Content-Type': 'application/octet-stream',
       'X-AITK-File-Name': encodedHeaderValue(file.name),
+      ...(options.workerID && options.workerID !== 'local' ? { 'X-AITK-Worker-ID': encodedHeaderValue(options.workerID) } : {}),
       ...(options.triggerWords?.trim()
         ? { 'X-AITK-Trigger-Words': encodedHeaderValue(options.triggerWords.trim()) }
         : {}),

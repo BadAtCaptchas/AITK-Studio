@@ -36,7 +36,24 @@ def write_sample_metadata(config, media_path, count):
         'iteration_id': config.sample_iteration_id,
         'prompt_identity': hashlib.sha256(prompt_identity.encode('utf-8')).hexdigest(),
     }
+    if isinstance(getattr(config, 'source_lora_sha256', None), str):
+        # Metadata is published before the image. Bind it to the staged bytes so
+        # curation cannot pair a new caption with the previous image mid-commit.
+        digest = hashlib.sha256()
+        with open(media_path, 'rb') as media:
+            for chunk in iter(lambda: media.read(1024 * 1024), b''):
+                digest.update(chunk)
+        metadata['media_sha256'] = digest.hexdigest()
     with open(str(media_path) + '.metadata.json', 'w', encoding='utf-8') as handle:
+        for key in ('source_lora_sha256', 'source_base'):
+            value = getattr(config, key, None)
+            if isinstance(value, str):
+                metadata[key] = value
+        source_generation = getattr(config, 'source_generation', None)
+        if isinstance(source_generation, dict):
+            metadata['source_generation'] = {key: source_generation[key] for key in
+                ('schedule_mu', 'quantize', 'qtype', 'quantize_te', 'qtype_te', 'dtype', 'vae_dtype')
+                if key in source_generation}
         json.dump(metadata, handle, ensure_ascii=False, allow_nan=False)
 
 

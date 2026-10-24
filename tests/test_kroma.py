@@ -193,9 +193,11 @@ class KromaTests(unittest.TestCase):
         for guidance, expected, calls in [(0, -2, 1), (0.5, -2.5, 2), (4, -6, 2)]:
             captured = []
             def decode(latents, **_kwargs):
+                self.assertEqual(_kwargs['dtype'], torch.float32)
                 captured.append(latents.clone())
                 return torch.zeros(1, 3, 16, 16)
-            base = SimpleNamespace(device_torch=torch.device('cpu'), torch_dtype=torch.float32,
+            base = SimpleNamespace(device_torch=torch.device('cpu'), torch_dtype=torch.bfloat16,
+                                   vae_device_torch=torch.device('cpu'), vae_torch_dtype=torch.float32,
                                    transformer=SimpleNamespace(config=SimpleNamespace(channels=2)),
                                    patch_size=2, vae_scale_factor=8, kv_cache=False,
                                    model_config=SimpleNamespace(model_kwargs={'schedule_mu': 1.15}),

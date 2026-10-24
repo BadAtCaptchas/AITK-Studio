@@ -125,6 +125,11 @@ function JobSampleImages({ job, layout = 'page' }: SampleImagesProps) {
   const baseSetRef = useRef<Set<string>>(new Set());
   const [deleteProgress, setDeleteProgress] = useState<{ done: number; total: number } | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [preservationOpen, setPreservationOpen] = useState(false);
+  const [preservationName, setPreservationName] = useState('');
+  const [preservationBusy, setPreservationBusy] = useState(false);
+  const [preservationMessage, setPreservationMessage] = useState('');
+  const preservationRequest = useRef('');
   const [scrollParent, setScrollParent] = useState<HTMLDivElement | null>(null);
   const scrollParentCallback = useCallback((el: HTMLDivElement | null) => setScrollParent(el), []);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
@@ -143,6 +148,24 @@ function JobSampleImages({ job, layout = 'page' }: SampleImagesProps) {
 
   const selectedPaths = useMemo(() => sampleImages.filter(sample => selectedSet.has(sample)), [sampleImages, selectedSet]);
   const isSelecting = selectionMode || selectedPaths.length > 0;
+  const createPreservation = async () => {
+    setPreservationBusy(true);
+    setPreservationMessage('');
+    try {
+      if (!preservationRequest.current) preservationRequest.current = crypto.randomUUID();
+      const samples = selectedPaths.map(sample => decodeURIComponent(sample.split('/').pop() || ''));
+      const { data } = await apiClient.post<unknown>('/api/training/lora/preservation', {
+        job_id: job.id, name: preservationName, request_id: preservationRequest.current, samples,
+      });
+      if (!data || typeof data !== 'object' || !('name' in data) || typeof data.name !== 'string') throw new Error('Invalid preservation response.');
+      setPreservationMessage(`Created ${data.name}. Select this dataset in the continuation job’s preservation settings.`);
+      setPreservationOpen(false);
+    } catch (error: unknown) {
+      const response = error && typeof error === 'object' && 'response' in error ? error.response : null;
+      const data = response && typeof response === 'object' && 'data' in response ? response.data : null;
+      setPreservationMessage(data && typeof data === 'object' && 'error' in data && typeof data.error === 'string' ? data.error : error instanceof Error ? error.message : 'Could not create preservation dataset.');
+    } finally { setPreservationBusy(false); }
+  };
   const clearSelection = useCallback(() => {
     setSelectedSet(new Set());
     anchorIdxRef.current = null;
@@ -386,6 +409,12 @@ function JobSampleImages({ job, layout = 'page' }: SampleImagesProps) {
                 <LuTrash2 aria-hidden="true" />
                 Delete selected
               </Button>
+              {job.job_type === 'generate' && <Button
+                className="rounded px-3 py-2 text-blue-300 hover:bg-gray-700 disabled:opacity-50"
+                disabled={!selectedPaths.length || preservationBusy}
+                onClick={() => { preservationRequest.current = ''; setPreservationOpen(true); setPreservationMessage(''); }}>
+                Use selected samples for preservation
+              </Button>}
             </>
           )}
           <Button
@@ -453,6 +482,22 @@ function JobSampleImages({ job, layout = 'page' }: SampleImagesProps) {
           />
         )}
       </div>
+      {preservationMessage && <p role="status" className="p-3 text-sm text-blue-300">{preservationMessage}</p>}
+      <Dialog open={preservationOpen} onClose={() => { if (!preservationBusy) setPreservationOpen(false); }} className="relative z-30">
+        <DialogBackdrop className="fixed inset-0 bg-gray-900/75" />
+        <div className="fixed inset-0 flex items-center justify-center p-4">
+          <DialogPanel className="w-full max-w-md rounded-lg bg-white p-6 text-gray-900 dark:bg-gray-900 dark:text-gray-200">
+            <DialogTitle className="font-semibold">Create preservation dataset</DialogTitle>
+            <p className="my-3 text-sm">Use these {selectedPaths.length} reviewed images and their recorded prompts to preserve the source LoRA. Keep separate prompts and seeds for evaluation.</p>
+            <label className="block text-sm">Dataset name<input aria-label="Preservation dataset name" className="my-2 w-full rounded border p-2 dark:border-gray-700 dark:bg-gray-950" value={preservationName} onChange={event => { setPreservationName(event.target.value); preservationRequest.current = ''; }} disabled={preservationBusy} /></label>
+            {preservationMessage && <p role="alert" className="my-2 text-sm text-red-400">{preservationMessage}</p>}
+            <div className="mt-4 flex justify-end gap-3">
+              <Button disabled={preservationBusy} onClick={() => setPreservationOpen(false)}>Cancel</Button>
+              <Button className="rounded bg-blue-600 px-3 py-2 text-white disabled:opacity-50" disabled={preservationBusy || !preservationName.trim()} onClick={() => void createPreservation()}>{preservationBusy ? 'Creating…' : 'Create dataset'}</Button>
+            </div>
+          </DialogPanel>
+        </div>
+      </Dialog>
       <Dialog open={deleteProgress !== null} onClose={() => {}} className="relative z-20">
         <DialogBackdrop className="fixed inset-0 bg-gray-900/75" />
         <div className="fixed inset-0 z-10 flex items-center justify-center p-4">

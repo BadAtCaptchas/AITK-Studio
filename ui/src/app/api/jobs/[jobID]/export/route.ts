@@ -1,4 +1,5 @@
 import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
+import { collectContinuationAssets } from '@/server/loraContinuation';
 import { jobStorageKey } from '../../../../../utils/jobIdentity';
 import { getDatasetsRoot } from '@/server/settings';
 import archiver from 'archiver';
@@ -228,7 +229,9 @@ async function performTrainingJobExport(
   throwIfExportCanceled(shouldCancel);
 
   const modelReferences = collectModelReferences(jobConfig);
+  const continuation = await collectContinuationAssets(jobConfig, jobFolder);
   const manifest: TrainingJobExportManifest = {
+    ...(continuation.assets.length ? { continuationAssets: continuation.assets } : {}),
     format: TRAINING_JOB_EXPORT_FORMAT,
     version: TRAINING_JOB_EXPORT_VERSION,
     exportedAt: new Date().toISOString(),
@@ -265,6 +268,10 @@ async function performTrainingJobExport(
   const trainingFiles = latestCheckpoint.files.map(entry => ({
     sourcePath: entry.sourcePath, archivePath: toArchivePath('training', entry.relativePath), size: entry.size,
   }));
+  for (const file of continuation.files) {
+    if (!trainingFiles.some(entry => entry.archivePath === file.archivePath))
+      trainingFiles.push({ ...file, size: (await fsp.stat(file.sourcePath)).size });
+  }
   throwIfExportCanceled(shouldCancel);
   const datasetFiles = (
     await Promise.all(

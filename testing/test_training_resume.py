@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from toolkit.training_resume import (
     ResumableDataIterator, capture_rng, capture_training_resume, loader_resume_reason,
-    preserve_rng, restore_rng, restore_training_resume, training_signature,
+    preserve_rng, restore_rng, restore_training_resume, restore_preservation_schedule, training_signature,
 )
 
 
@@ -35,6 +35,49 @@ class BucketFixtureDataset(torch.utils.data.Dataset):
 
 
 class TrainingResumeTests(unittest.TestCase):
+    def test_approximate_resume_retains_preservation_cadence(self):
+        process = self.process()
+        process._resume_approximate_reasons = ['Multiple data loader workers']
+        process._preservation_batch_index = 7
+        state = capture_training_resume(process)
+        self.assertEqual(state['mode'], 'approximate')
+        resumed = self.process()
+        restore_preservation_schedule(resumed, state)
+        self.assertEqual(resumed._preservation_batch_index % 4, 3)
+        # Explicit step overrides intentionally restart the schedule.
+        resumed.train_config.start_step = 0
+        resumed._preservation_batch_index = 0
+        restore_preservation_schedule(resumed, state)
+        self.assertEqual(resumed._preservation_batch_index, 0)
+        resumed.train_config.start_step = None
+        with self.assertRaisesRegex(ValueError, 'preservation counter'):
+            restore_preservation_schedule(resumed, {**state, 'preservation_batch_index': True})
+
+    def test_source_preservation_loader_and_mixing_resume_together(self):
+        self.seed()
+        process = self.process()
+        process._preservation_batch_index = 0
+        process._training_data_iterators = {'train': ResumableDataIterator(self.loader()),
+            'source_preservation': ResumableDataIterator(self.loader())}
+        def advance(owner, count):
+            output = []
+            for _ in range(count):
+                role = 'source_preservation' if owner._preservation_batch_index % 4 == 3 else 'train'
+                output.append((role, next(owner._training_data_iterators[role])))
+                owner._preservation_batch_index += 1
+            return output
+        advance(process, 3)
+        state = capture_training_resume(process)
+        expected = advance(process, 5)
+        resumed = self.process()
+        resumed._training_data_iterators = {key: ResumableDataIterator(self.loader(), value) for key, value in state['loaders'].items()}
+        restore_training_resume(resumed, state)
+        actual = advance(resumed, 5)
+        self.assertEqual(actual[0][0], 'source_preservation')
+        for (expected_role, expected_batch), (actual_role, actual_batch) in zip(expected, actual):
+            self.assertEqual(expected_role, actual_role)
+            torch.testing.assert_close(expected_batch, actual_batch, rtol=0, atol=0)
+
     def seed(self):
         random.seed(123)
         np.random.seed(456)

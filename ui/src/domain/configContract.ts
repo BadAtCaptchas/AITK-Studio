@@ -1,4 +1,5 @@
 import contract from './modelCapabilities.json';
+import { continuationConfigErrors } from './loraContinuation';
 import { trainingPhaseErrors } from '../utils/trainingPhases';
 
 export const CAPABILITY_VERSION = contract.version;
@@ -63,6 +64,7 @@ export function configContractErrors(value: unknown, context: { deviceBackend?: 
     if (!contract.processKinds.includes(process.type) && !extraProcesses.has(process.type))
       errors.push(`Unknown process type: ${process.type}. Declare custom processes in a namespaced extensions entry.`);
     const train = process.train;
+    errors.push(...continuationConfigErrors(process));
     if (train !== undefined && !record(train)) errors.push('train must be an object.');
     if (record(train)) {
       errors.push(...trainingPhaseErrors(train));

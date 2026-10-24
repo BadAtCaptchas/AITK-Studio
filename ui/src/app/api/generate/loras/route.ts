@@ -1,5 +1,8 @@
 import fs from 'fs';
 import path from 'path';
+import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
+import { isRecord } from '@/server/commandInput';
+import { makeRemoteLoraRef } from '@/utils/remoteLoraRefs';
 import { db } from '@/server/db';
 import { getTrainingFolder } from '@/server/settings';
 
@@ -112,6 +115,18 @@ async function getSafeJobFolder(trainingRoot: string, jobName: string) {
 }
 
 export async function GET(request: Request) {
+  const workerID = new URL(request.url).searchParams.get('worker_id') || 'local';
+  if (!isLocalWorker(workerID)) {
+    try {
+      const value: unknown = await remoteJson(await getRemoteWorker(workerID), '/api/generate/loras', { signal: request.signal });
+      if (!isRecord(value) || !Array.isArray(value.loras)) throw new Error('Invalid worker LoRA library response.');
+      const loras = value.loras.filter(isRecord).flatMap(item => typeof item.path === 'string'
+        ? [{ ...item, path: makeRemoteLoraRef(workerID, item.path) }] : []);
+      return Response.json({ loras });
+    } catch (error) {
+      return Response.json({ error: error instanceof Error ? error.message : 'Worker LoRA library is unavailable.' }, { status: 502 });
+    }
+  }
   try {
     const loras: LoraLibraryItem[] = [];
 

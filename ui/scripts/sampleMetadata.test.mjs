@@ -13,7 +13,12 @@ const metadata = (overrides = {}) => ({ version: 1, prompt: `original prompt ${o
 
 test('metadata boundaries reject malformed settings and ignore arbitrary untrusted fields', () => {
   assert.equal(parseSampleMetadata({ ...metadata(), api_token: 'secret' }).api_token, undefined);
+  const sourceGeneration = { schedule_mu: 1.15, quantize: true, qtype: 'float8', quantize_te: true, qtype_te: 'float8', dtype: 'torch.bfloat16', vae_dtype: 'torch.float32' };
+  assert.deepEqual(parseSampleMetadata(metadata({ source_generation: { ...sourceGeneration, api_token: 'secret' } })).source_generation, sourceGeneration);
+  assert.equal(parseSampleMetadata(metadata({ source_generation: { ...sourceGeneration, schedule_mu: '1.15' } })), null);
   assert.equal(parseSampleMetadata(metadata({ negative_prompt: null })).negative_prompt, '');
+  assert.equal(parseSampleMetadata(metadata({ media_sha256: 'a'.repeat(64) })).media_sha256, 'a'.repeat(64));
+  assert.equal(parseSampleMetadata(metadata({ media_sha256: 'invalid' })), null);
   for (const value of [null, {}, metadata({ version: 2 }), metadata({ seed: -1 }), metadata({ guidance_scale: NaN }),
     metadata({ prompt_index: '0' }), metadata({ iteration_id: '../bad' })]) assert.equal(parseSampleMetadata(value), null);
   const remote = 'remote://mirror/img/encoded/sample.png';

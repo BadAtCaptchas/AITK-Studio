@@ -381,7 +381,7 @@ class Krea2Pipeline:
                 emit(latents - float(tcurr) * v, i, num_steps)
             latents = latents + (tprev - tcurr) * v
 
-        images = model.decode_latents(latents, device=device, dtype=dtype)
+        images = model.decode_latents(latents, device=model.vae_device_torch, dtype=model.vae_torch_dtype)
         images = images.float().clamp(-1.0, 1.0)
         images = ((images + 1.0) * 127.5).round().to(torch.uint8)
         images = images.permute(0, 2, 3, 1).cpu().numpy()

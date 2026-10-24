@@ -31,6 +31,7 @@ from toolkit.train_tools import get_torch_dtype, apply_snr_weight, add_all_snr_t
     apply_learnable_snr_gos, LearnableSNRGamma
 import gc
 import torch
+from toolkit.lora_continuation import source_teacher_context, preservation_loss as source_preservation_loss
 from jobs.process import BaseSDTrainProcess
 from torchvision import transforms
 from diffusers import EMAModel
@@ -2743,6 +2744,16 @@ class SDTrainer(BaseSDTrainProcess):
                             noise = next_sample_noise
                             timesteps = stepped_timesteps
                 sega_teacher_pred = None
+                source_teacher_pred = None
+                source_mode = getattr(self.train_config, 'source_preservation', {}).get('mode', 'none')
+                if getattr(self, 'source_teacher', None) is not None and all(getattr(item, 'role', 'training') == 'source_preservation' for item in batch.file_items):
+                    with source_teacher_context(self.network, self.source_teacher, getattr(self.sd, 'assistant_lora', None)):
+                        source_teacher_pred = self.predict_noise(
+                            noisy_latents=noisy_latents.to(self.device_torch, dtype=dtype),
+                            timesteps=timesteps,
+                            conditional_embeds=conditional_embeds.to(self.device_torch, dtype=dtype),
+                            unconditional_embeds=unconditional_embeds, batch=batch, **pred_kwargs
+                        ).detach()
                 if self._should_do_sega_distill(batch):
                     with self.timer('sega_teacher_predict'):
                         sega_teacher_pred = self.get_sega_teacher_prediction(
@@ -2835,6 +2846,11 @@ class SDTrainer(BaseSDTrainProcess):
                         if sega_teacher_pred is not None:
                             loss = self._add_sega_distill_aux_loss(loss, noise_pred, sega_teacher_pred)
                             self._record_monitor_metric('train/loss_final', loss)
+                        if source_teacher_pred is not None:
+                            source_loss = source_preservation_loss(noise_pred, source_teacher_pred, source_mode,
+                                self.train_config.source_preservation['teacher_weight'], mask_multiplier)
+                            self.additional_logs['loss/source_preservation'] = source_loss.detach().item()
+                            loss = source_loss if source_mode == 'teacher' else loss + source_loss
 
                         loss = self._add_authenlora_aux_loss(
                             loss=loss,

@@ -1,4 +1,7 @@
 import fs from 'fs';
+import { uploadLoraToWorker } from '@/server/remoteLoraUpload';
+import { hashContinuationAsset } from '@/server/loraContinuation';
+import { validSha256 } from '@/domain/loraContinuation';
 import {
   buildUploadedLoraEntry,
   extractTriggerWordsFromMetadata,
@@ -27,7 +30,6 @@ function isDestinationCollision(error: unknown) {
 
 export async function POST(request: Request) {
   let savedPath: string | null = null;
-  let createdPath: string | null = null;
   let stagingPath: string | null = null;
 
   try {
@@ -43,6 +45,8 @@ export async function POST(request: Request) {
     if (!originalFilename.toLowerCase().endsWith('.safetensors')) {
       return Response.json({ error: 'LoRA upload must be a .safetensors file' }, { status: 400 });
     }
+    const workerID = decodedUploadHeader(request, 'x-aitk-worker-id', 128).trim();
+    if (workerID && workerID !== 'local') return Response.json(await uploadLoraToWorker(request, workerID));
 
     const root = await getUploadedLoraRoot();
     await fs.promises.mkdir(root, { recursive: true });
@@ -53,6 +57,9 @@ export async function POST(request: Request) {
     const pendingUploadPath = staged.stagingPath;
     stagingPath = pendingUploadPath;
     const metadata = await readSafetensorsMetadataStrict(pendingUploadPath);
+    const sha256 = await hashContinuationAsset(pendingUploadPath);
+    const expected = request.headers.get('x-aitk-expected-sha256');
+    if (expected !== null && (!validSha256(expected) || expected !== sha256)) throw new InvalidUploadError('LoRA upload checksum mismatch');
     let duplicatePath = await findDuplicateUploadedLoraFile(root, originalFilename, pendingUploadPath);
     let reused = duplicatePath !== null;
     if (duplicatePath) {
@@ -65,7 +72,6 @@ export async function POST(request: Request) {
         try {
           await moveStagedUploadNoReplace(pendingUploadPath, savedPath);
           stagingPath = null;
-          createdPath = savedPath;
           break;
         } catch (error) {
           if (!isDestinationCollision(error)) throw error;
@@ -101,12 +107,11 @@ export async function POST(request: Request) {
     }
 
     const lora = await buildUploadedLoraEntry(savedPath);
-    return Response.json({ lora, reused });
+    return Response.json({ lora, reused, sha256 });
   } catch (error) {
     await cleanupStagedUpload(stagingPath);
-    if (createdPath) {
-      await fs.promises.unlink(createdPath).catch(() => {});
-    }
+    // Once published, another upload may already have reused this file. Keep
+    // it if sidecar/response work fails; a retry can safely reuse the same bytes.
 
     console.error('LoRA upload error:', error);
     const message = error instanceof Error ? error.message : 'Error uploading LoRA';

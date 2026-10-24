@@ -1,4 +1,5 @@
 import json
+import hashlib
 import os
 from pathlib import Path
 import tempfile
@@ -12,6 +13,14 @@ from toolkit.sample_metadata import publish_sample_files
 
 
 class SampleMetadataTest(unittest.TestCase):
+    def test_source_metadata_is_bound_to_published_image_bytes(self):
+        config = self.config()
+        config.source_lora_sha256 = 'a' * 64
+        config.source_base = 'krea/Krea-2-Turbo'
+        config.save_image_atomic(Image.new('RGB', (64, 64)))
+        metadata = json.loads((self.root / 'sample.png.metadata.json').read_text())
+        self.assertEqual(metadata['media_sha256'], hashlib.sha256((self.root / 'sample.png').read_bytes()).hexdigest())
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix='aitk-sample-provenance-')
         self.addCleanup(temporary.cleanup)

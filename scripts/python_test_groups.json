@@ -492,6 +492,9 @@
       "group": "manual",
       "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
     },
+    "tests.test_lora_continuation": {
+      "group": "runtime"
+    },
     "tests.test_kromoss": {
       "group": "runtime"
     },

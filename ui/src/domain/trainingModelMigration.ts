@@ -112,6 +112,8 @@ const freshStartPaths = [
   'name',
   'train.start_step',
   'network.pretrained_lora_path',
+  'network.continuation',
+  'train.source_preservation',
   'network.network_weights',
   'model.lora_path',
   'model.base_lora_path',
@@ -123,6 +125,7 @@ export function prepareFreshTrainingConfig(source: JobConfig): { config: JobConf
   const config = clone(source);
   const changes: MigrationChange[] = [];
   for (let index = 0; index < config.config.process.length; index++) {
+    config.config.process[index].datasets = config.config.process[index].datasets.filter(dataset => dataset.role !== 'source_preservation');
     for (const path of freshStartPaths) {
       const fullPath = `config.process[${index}].${path}`;
       if (read(config, fullPath) !== undefined) {

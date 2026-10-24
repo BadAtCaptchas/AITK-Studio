@@ -26,6 +26,7 @@ export type ModelReference = {
 };
 
 export type TrainingJobExportManifest = {
+  continuationAssets?: import('./loraContinuation').ContinuationArchiveAsset[];
   format: typeof TRAINING_JOB_EXPORT_FORMAT;
   version: typeof TRAINING_JOB_EXPORT_VERSION;
   exportedAt: string;

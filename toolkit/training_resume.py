@@ -242,7 +242,8 @@ def capture_training_resume(process):
     if getattr(process.train_config, 'do_paramiter_swapping', False):
         reasons.append('Optimizer parameter swapping has no exact continuation contract')
     if reasons:
-        return {'version': 1, 'mode': 'approximate', 'reasons': reasons}
+        return {'version': 1, 'mode': 'approximate', 'reasons': reasons,
+                'preservation_batch_index': getattr(process, '_preservation_batch_index', 0)}
     from toolkit.memory_management import sync_grad_transfers
     sync_grad_transfers()
     parameters = list({id(param): param for group in process.optimizer.param_groups for param in group['params']}.values())
@@ -255,6 +256,7 @@ def capture_training_resume(process):
             'accelerator_step': getattr(process.accelerator, 'step', 0),
             'grad_accumulation_step': process.grad_accumulation_step + int(in_step),
             'accumulated_microbatches': getattr(process, '_accumulated_microbatches', 0),
+            'preservation_batch_index': getattr(process, '_preservation_batch_index', 0),
             'boundary_index': getattr(process, 'current_boundary_index', 0),
             'boundary_steps': getattr(process, 'steps_this_boundary', 0),
             'parameters': [parameter.detach().cpu().clone() for parameter in parameters],
@@ -262,11 +264,26 @@ def capture_training_resume(process):
             'private_gradients': [getattr(parameter, '_accum_grad').detach().cpu().clone() if getattr(parameter, '_accum_grad', None) is not None else None for parameter in parameters]}
 
 
+def restore_preservation_schedule(process, state):
+    """Replay cadence remains resumable even when exact data order is unavailable."""
+    if (not isinstance(state, dict) or state.get('version') != 1
+            or state.get('mode') not in ('exact', 'approximate')
+            or 'preservation_batch_index' not in state
+            or getattr(process.train_config, 'start_step', None) is not None):
+        return
+    index = state['preservation_batch_index']
+    if type(index) is not int or index < 0:
+        raise ValueError('Invalid saved source preservation counter')
+    process._preservation_batch_index = index
+
+
 def restore_training_resume(process, state):
     if not isinstance(state, dict) or state.get('version') != 1 or state.get('mode') != 'exact':
         raise ValueError('Checkpoint does not contain exact training state')
     if state.get('signature') != training_signature(process):
         raise ValueError('Training configuration changed since the checkpoint')
+    if type(state.get('preservation_batch_index', 0)) is not int or state.get('preservation_batch_index', 0) < 0:
+        raise ValueError('Invalid saved source preservation counter')
     for key in ('next_step', 'epoch', 'accelerator_step', 'grad_accumulation_step', 'accumulated_microbatches', 'boundary_index', 'boundary_steps'):
         if type(state.get(key)) is not int or state[key] < 0:
             raise ValueError(f'Invalid saved training counter: {key}')
@@ -301,6 +318,7 @@ def restore_training_resume(process, state):
     process.epoch_num = state['epoch']
     process.grad_accumulation_step = state['grad_accumulation_step']
     process._accumulated_microbatches = state['accumulated_microbatches']
+    process._preservation_batch_index = state.get('preservation_batch_index', 0)
     process.current_boundary_index = state['boundary_index']
     process.steps_this_boundary = state['boundary_steps']
     restore_rng(state['rng'])

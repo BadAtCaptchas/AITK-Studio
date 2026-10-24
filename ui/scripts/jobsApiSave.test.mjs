@@ -25,6 +25,7 @@ const commandInput = loadSource('../src/server/commandInput.ts', {
   '../utils/obsoleteWorkspaceGuard': obsoleteWorkspaceGuard,
 });
 const configContract = loadSource('../src/domain/configContract.ts', {
+  './loraContinuation': loadSource('../src/domain/loraContinuation.ts'),
   '../utils/trainingPhases': loadSource('../src/utils/trainingPhases.ts'),
   './modelCapabilities.json': JSON.parse(
     fs.readFileSync(new URL('../src/domain/modelCapabilities.json', import.meta.url), 'utf8'),

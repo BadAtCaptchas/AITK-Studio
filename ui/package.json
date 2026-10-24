@@ -78,6 +78,7 @@
     "test:model-migration": "node --test scripts/trainingModelMigration.test.mjs scripts/jobsApiSave.test.mjs",
     "test:job-save": "node --test scripts/trainingJobSave.test.mjs scripts/jobsApiSave.test.mjs",
     "test:lora-library": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/loraLibrary.test.mjs",
+    "test:lora-continuation": "node --test scripts/loraContinuation.test.mjs",
     "test:scripts": "node node_modules/typescript/bin/tsc -p tsconfig.worker.json && node --test scripts/scriptRunner.test.mjs",
     "migrate_sqlite_to_mongo": "node scripts/migrate-sqlite-to-mongo.mjs",
     "format": "prettier --write \"**/*.{js,jsx,ts,tsx,css,scss}\"",

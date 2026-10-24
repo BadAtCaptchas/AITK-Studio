@@ -33,6 +33,8 @@ from toolkit.memory_management.cuda_telemetry import (
 from toolkit.basic import value_map
 from toolkit.base_lora import fuse_base_lora_into_model
 from toolkit.base_lora_metadata import add_base_lora_metadata, add_distillation_lora_metadata
+from toolkit.lora_continuation import (prepare_continuation, validate_targets, load_strict,
+                                       inspect_lora, build_source_teacher)
 from toolkit.buckets import get_bucket_for_image_size
 from toolkit.checkpoint_cleanup import (
     check_save_permissions,
@@ -92,7 +94,7 @@ from toolkit.config_modules import SaveConfig, LoggingConfig, SampleConfig, Netw
 from toolkit.logging_aitk import create_logger
 from toolkit.training_phases import TrainingPhaseManager
 from toolkit.training_resume import (
-    ResumableDataIterator, capture_training_resume, loader_resume_reason,
+    ResumableDataIterator, capture_training_resume, loader_resume_reason, restore_preservation_schedule,
     preserve_rng, restore_training_resume, training_signature,
 )
 from diffusers import FluxTransformer2DModel
@@ -265,6 +267,11 @@ class BaseSDTrainProcess(BaseTrainProcess):
             raw_datasets = preprocess_dataset_raw_config(raw_datasets)
         self.datasets = None
         self.datasets_reg = None
+        self.datasets_preservation = None
+        self.data_loader_preservation = None
+        self.source_teacher = None
+        self._preservation_batch_index = 0
+        self._continuation_inspected = None
         self.dataset_configs: List[DatasetConfig] = []
         self.params = []
 
@@ -277,12 +284,16 @@ class BaseSDTrainProcess(BaseTrainProcess):
             for raw_dataset in raw_datasets:
                 dataset = DatasetConfig(**raw_dataset)
                 # handle trigger word per dataset
-                if dataset.trigger_word is None and self.trigger_word is not None:
+                if dataset.role != 'source_preservation' and dataset.trigger_word is None and self.trigger_word is not None:
                     dataset.trigger_word = self.trigger_word
                 is_caching = dataset.cache_latents or dataset.cache_latents_to_disk
                 if not is_caching:
                     self.is_latents_cached = False
-                if dataset.is_reg:
+                if dataset.role == 'source_preservation':
+                    if self.datasets_preservation is None:
+                        self.datasets_preservation = []
+                    self.datasets_preservation.append(dataset)
+                elif dataset.is_reg:
                     if self.datasets_reg is None:
                         self.datasets_reg = []
                     self.datasets_reg.append(dataset)
@@ -621,6 +632,10 @@ class BaseSDTrainProcess(BaseTrainProcess):
         o_dict['ss_base_model_version'] = self.sd.get_base_model_version()
         add_base_lora_metadata(o_dict, self.model_config)
         add_distillation_lora_metadata(o_dict, self.model_config)
+        if getattr(self, '_continuation_provenance', None):
+            o_dict['aitk_continuation'] = self._continuation_provenance
+            o_dict['aitk_continuation_training_base'] = self.network_config.continuation['training_base']
+            o_dict['aitk_continuation_scale'] = '1'
 
         # o_dict = add_base_model_info_to_meta(
         #     o_dict,
@@ -811,7 +826,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 reason = 'Explicit start_step overrides saved training continuation'
             elif pending.get('signature') != training_signature(self):
                 reason = 'Training configuration changed since the checkpoint'
-            elif any(loader_resume_reason(value) for value in (loader, regularization_loader)):
+            elif any(loader_resume_reason(value) for value in (loader, regularization_loader, getattr(self, 'data_loader_preservation', None))):
                 reason = 'Current data-loader mode does not support exact continuation'
             if reason:
                 pending = None
@@ -823,6 +838,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
         try:
             iterator = self._training_iterator(loader, 'train', states.get('train'))
             reg_iterator = self._training_iterator(regularization_loader, 'regularization', states.get('regularization'))
+            self._preservation_iterator = self._training_iterator(getattr(self, 'data_loader_preservation', None), 'source_preservation', states.get('source_preservation'))
         except ValueError as error:
             if pending is None:
                 raise
@@ -830,10 +846,12 @@ class BaseSDTrainProcess(BaseTrainProcess):
             pending = None
             iterator = self._training_iterator(loader, 'train')
             reg_iterator = self._training_iterator(regularization_loader, 'regularization')
+            self._preservation_iterator = self._training_iterator(getattr(self, 'data_loader_preservation', None), 'source_preservation')
         if pending is not None:
             restore_training_resume(self, pending)
             print_acc(f"Restored RNG, data order and accumulated gradients; continuing at step {self.step_num}")
         elif getattr(self, '_resume_checkpoint_path', None):
+            restore_preservation_schedule(self, getattr(self, '_pending_training_resume_state', None))
             print_acc(f"Approximate training resume: {reason}")
         self._pending_training_resume_state = None
         return iterator, reg_iterator
@@ -1458,7 +1476,13 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 required_stages = tuple(stage for stage in ('high', 'low')
                                         if getattr(getattr(self, 'sd', None), f'train_{stage}_noise', False))
                 validate_legacy_checkpoint(path, required_stages)
-            extra_weights = self.network.load_weights(path)
+            if getattr(self, '_continuation_inspected', None) is not None:
+                is_source = os.path.realpath(path) == os.path.realpath(self.network_config.pretrained_lora_path)
+                inspected = self._continuation_inspected if is_source else inspect_lora(path)
+                load_strict(self.network, inspected)
+                extra_weights = None
+            else:
+                extra_weights = self.network.load_weights(path)
             self.load_training_state_from_metadata(path)
             return extra_weights
         else:
@@ -1631,6 +1655,10 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 conditioned_prompts = []
 
                 for prompt, is_reg in zip(prompts, is_reg_list):
+
+                    if all(getattr(item, 'role', 'training') == 'source_preservation' for item in batch.file_items):
+                        conditioned_prompts.append(prompt)
+                        continue
 
                     # make sure the embedding is in the prompts
                     if self.embedding is not None:
@@ -2683,6 +2711,9 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 model_config_to_load.refiner_name_or_path = previous_refiner_save
                 self.load_training_state_from_metadata(previous_refiner_save)
 
+        self._continuation_inspected = prepare_continuation(self)
+        if self._continuation_inspected is not None:
+            model_config_to_load = self.model_config
         self.sd = ModelClass(
             # todo handle single gpu and multi gpu here
             # device=self.device,
@@ -2817,7 +2848,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
         unet.requires_grad_(False)
         unet.eval()
         if vae is not None:
-            vae = vae.to(torch.device('cpu'), dtype=dtype)
+            vae = vae.to(torch.device('cpu'), dtype=self.sd.vae_torch_dtype)
             vae.requires_grad_(False)
             vae.eval()
         if self.train_config.learnable_snr_gos:
@@ -2843,7 +2874,11 @@ class BaseSDTrainProcess(BaseTrainProcess):
         if not self.is_fine_tuning:
             if self.network_config is not None:
                 # TODO should we completely switch to LycorisSpecialNetwork?
-                network_kwargs = self.network_config.network_kwargs
+                network_kwargs = dict(self.network_config.network_kwargs)
+                if self._continuation_inspected is not None:
+                    validate_targets(self._continuation_inspected, self.sd.get_model_to_train())
+                    network_kwargs.update(self._continuation_inspected.network_kwargs())
+                    self.network_config.transformer_only = False
                 is_lycoris = False
                 is_lorm = self.network_config.type.lower() == 'lorm'
                 # default to LoCON if there are any conv layers or if it is named
@@ -2985,6 +3020,11 @@ class BaseSDTrainProcess(BaseTrainProcess):
                         self.network,
                         self.device_torch
                     )
+
+                if self._continuation_inspected is not None:
+                    self.network.can_merge_in = False
+                    if self.train_config.source_preservation['mode'] in ('teacher', 'replay_teacher'):
+                        self.source_teacher = build_source_teacher(self, self._continuation_inspected)
 
             if self.embed_config is not None:
                 # we are doing embedding training as well
@@ -3130,6 +3170,11 @@ class BaseSDTrainProcess(BaseTrainProcess):
             if self.datasets_reg is not None:
                 self.data_loader_reg = get_dataloader_from_datasets(
                     self.datasets_reg, self.train_config.batch_size, self.sd, pool_datasets=self.train_config.pool_datasets
+                )
+            if self.datasets_preservation is not None:
+                self.data_loader_preservation = get_dataloader_from_datasets(
+                    self.datasets_preservation, self.train_config.batch_size, self.sd,
+                    pool_datasets=self.train_config.pool_datasets
                 )
 
             # A fresh text-embedding cache leaves the text encoder on the GPU.
@@ -3427,7 +3472,17 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     # keep track to alternate on an accumulation step for reg
                     batch_step = step
                     # don't do a reg step on sample or save steps as we dont want to normalize on those
-                    if batch_step % 2 == 0 and dataloader_reg is not None and not is_save_step and not is_sample_step:
+                    preservation_config = self.train_config.source_preservation
+                    use_preservation = (self.data_loader_preservation is not None and
+                        self._preservation_batch_index % (preservation_config['new_batches'] + 1) == preservation_config['new_batches'])
+                    if use_preservation:
+                        try:
+                            batch = next(self._preservation_iterator)
+                        except StopIteration:
+                            trigger_dataloader_setup_epoch(self.data_loader_preservation)
+                            self._preservation_iterator = self._training_iterator(self.data_loader_preservation, 'source_preservation')
+                            batch = next(self._preservation_iterator)
+                    elif batch_step % 2 == 0 and dataloader_reg is not None and not is_save_step and not is_sample_step:
                         try:
                             with self.timer('get_batch:reg'):
                                 batch = next(dataloader_iterator_reg)
@@ -3459,6 +3514,7 @@ class BaseSDTrainProcess(BaseTrainProcess):
                     else:
                         batch = None
                     batch_list.append(batch)
+                    self._preservation_batch_index += 1
                     batch_step += 1
 
                 # setup accumulation

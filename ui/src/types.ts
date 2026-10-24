@@ -390,6 +390,8 @@ export interface MonitorInit extends MonitorSample {
  */
 
 export interface NetworkConfig {
+  pretrained_lora_path?: string;
+  continuation?: import('./domain/loraContinuation').LoraContinuation;
   type: string;
   linear: number;
   linear_alpha: number;
@@ -426,6 +428,7 @@ export interface SaveConfig {
 }
 
 export interface DatasetConfig {
+  role?: 'training' | 'source_preservation';
   folder_path: string;
   encrypted?: boolean;
   mask_path: string | null;
@@ -544,6 +547,8 @@ export interface ValidationConfig {
 }
 
 export interface TrainConfig {
+  start_step?: number | null;
+  source_preservation?: import('./domain/loraContinuation').SourcePreservation;
   batch_size: number;
   bypass_guidance_embedding?: boolean;
   steps: number;

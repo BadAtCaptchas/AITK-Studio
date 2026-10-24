@@ -465,6 +465,19 @@ export function GeneratePageContent() {
     setUseLora(true);
     setLoraPath(matching.path);
     applyLoraModelDefaults(matching);
+    const continuationBase = searchParams.get('continuation_base');
+    if (continuationBase === 'raw' || continuationBase === 'turbo') {
+      const defaults = getDefaultModelConfig(continuationBase === 'turbo' ? 'krea2:turbo' : 'krea2', archs);
+      const declaredScale = searchParams.get('source_scale');
+      setModelConfig({ ...defaults, model_kwargs: { ...defaults.model_kwargs,
+        ...(continuationBase === 'turbo' ? { schedule_mu: 1.15 } : {}),
+        ...(declaredScale && Number(declaredScale) > 0 ? { continuation_source_scale: Number(declaredScale) } : {}),
+      } });
+      setGenerationBackend('native');
+      setGuidanceScale(continuationBase === 'turbo' ? 1 : 4.5);
+      setSampleSteps(continuationBase === 'turbo' ? 8 : 52);
+      setSampler('flowmatch');
+    }
     setLoraUploadTriggerWords(matching.triggerWords?.join(', ') || '');
     if (matching.triggerWords?.length) setPrompts(matching.triggerWords.join(', ') + ', ');
   }

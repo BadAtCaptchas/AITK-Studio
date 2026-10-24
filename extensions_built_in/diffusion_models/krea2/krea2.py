@@ -114,7 +114,7 @@ QWEN_IMAGE_VAE_PATH = "Qwen/Qwen-Image"
 HF_TOKEN = os.getenv("HF_TOKEN", None)
 
 
-def _load_mmdit_state_dict(name_or_path: str, filename: Optional[str]) -> dict:
+def _load_mmdit_state_dict(name_or_path: str, filename: Optional[str], continuation_context=None) -> dict:
     """Load the MMDiT weights from a local safetensors file/dir or the HF hub.
 
     ``name_or_path`` may be: a ``.safetensors`` file, a directory containing one
@@ -122,15 +122,21 @@ def _load_mmdit_state_dict(name_or_path: str, filename: Optional[str]) -> dict:
     file ``filename`` is downloaded, defaulting to the repo suffix such as
     ``raw.safetensors`` or ``turbo.safetensors``).
     """
+    def load_pinned(path):
+        if continuation_context:
+            from toolkit.continuation_diagnostics import pin_base_checkpoint
+            pin_base_checkpoint(path, continuation_context)
+        return load_file(path)
+
     if name_or_path.endswith(".safetensors") and os.path.isfile(name_or_path):
-        return load_file(name_or_path)
+        return load_pinned(name_or_path)
 
     if os.path.isdir(name_or_path):
         if filename is not None:
-            return load_file(os.path.join(name_or_path, filename))
+            return load_pinned(os.path.join(name_or_path, filename))
         candidates = [f for f in os.listdir(name_or_path) if f.endswith(".safetensors")]
         if len(candidates) == 1:
-            return load_file(os.path.join(name_or_path, candidates[0]))
+            return load_pinned(os.path.join(name_or_path, candidates[0]))
         raise FileNotFoundError(
             f"Could not pick an MMDiT checkpoint in {name_or_path}: found "
             f"{candidates}. Set model.model_kwargs.checkpoint_filename."
@@ -165,7 +171,7 @@ def _load_mmdit_state_dict(name_or_path: str, filename: Optional[str]) -> dict:
             f"Could not find {fname!r} in hub repo {name_or_path!r}. Set "
             "model.model_kwargs.checkpoint_filename to the weight file name."
         ) from e
-    return load_file(path)
+    return load_pinned(path)
 
 
 class Krea2Model(QwenImageVAEHolderMixin, BaseModel):
@@ -242,6 +248,7 @@ class Krea2Model(QwenImageVAEHolderMixin, BaseModel):
         state_dict = _load_mmdit_state_dict(
             self.model_config.name_or_path,
             self.model_config.model_kwargs.get("checkpoint_filename", None),
+            getattr(self.model_config, '_continuation_context', None),
         )
         self.print_and_status_update("  - loading transformer state dict")
         transformer = SingleStreamDiT.load_from_state_dict(
@@ -317,9 +324,19 @@ class Krea2Model(QwenImageVAEHolderMixin, BaseModel):
                 )
         # load the adapter and merge it in. We will inference with a -1.0 multiplier so the adapter effects only work during training.
         lora_state_dict = load_file(lora_path)
+        inspected = None
+        exact_kwargs = {}
+        if getattr(self.model_config, '_continuation_context', None):
+            from toolkit.lora_continuation import inspect_lora, validate_targets
+            inspected = inspect_lora(lora_path)
+            validate_targets(inspected, transformer)
+            exact_kwargs = inspected.network_kwargs()
         # detect the LoRA rank from the first down-projection weight.
-        dim_key = next(k for k in lora_state_dict if k.endswith("lora_A.weight"))
-        dim = int(lora_state_dict[dim_key].shape[0])
+        if inspected is not None:
+            dim = 1  # Per-module dimensions and alpha are authoritative below.
+        else:
+            dim_key = next(k for k in lora_state_dict if k.endswith("lora_A.weight"))
+            dim = int(lora_state_dict[dim_key].shape[0])
 
         new_sd = {}
         for key, value in lora_state_dict.items():
@@ -331,7 +348,7 @@ class Krea2Model(QwenImageVAEHolderMixin, BaseModel):
             "type": "lora",
             "linear": dim,
             "linear_alpha": dim,
-            "transformer_only": True,
+            "transformer_only": inspected is None,
         }
 
         network_config = NetworkConfig(**network_config)
@@ -351,12 +368,19 @@ class Krea2Model(QwenImageVAEHolderMixin, BaseModel):
             target_lin_modules=self.target_lora_modules,
             is_assistant_adapter=True,
             is_ara=True,
+            **exact_kwargs,
         )
         network.apply_to(None, transformer, apply_text_encoder=False, apply_unet=True)
         self.print_and_status_update("Merging in assistant LoRA")
         network.force_to(self.device_torch, dtype=self.torch_dtype)
         network._update_torch_multiplier()
-        network.load_weights(lora_state_dict)
+        if inspected is not None:
+            from toolkit.lora_continuation import load_strict
+            load_strict(network, inspected)
+        else:
+            network.load_weights(lora_state_dict)
+        network.requires_grad_(False)
+        network.eval()
 
         network.merge_in(merge_weight=1.0)
 
@@ -382,6 +406,31 @@ class Krea2Model(QwenImageVAEHolderMixin, BaseModel):
 
         transformer = self._load_transformer()
 
+        continuation = getattr(self.model_config, '_continuation_context', None)
+        reference_probe = None
+        if continuation and continuation['turbo']:
+            from pathlib import Path
+            diagnostic_path = Path(continuation['assets']) / 'turbo-cancellation.json'
+            if diagnostic_path.exists():
+                import json
+                import math
+                previous = json.loads(diagnostic_path.read_text(encoding='utf-8'))
+                if (not isinstance(previous, dict) or previous.get('version') != 1 or
+                    previous.get('source_sha256') != continuation['sha256'] or
+                    previous.get('qtype') != ('float8' if self.model_config.qtype == 'qfloat8' else self.model_config.qtype) or
+                    any(not isinstance(previous.get(key), (int, float)) or not math.isfinite(previous[key])
+                        for key in ('rmse', 'max_abs', 'relative_rmse'))):
+                    raise ValueError('Invalid or mismatched Turbo cancellation diagnostic')
+            else:
+                from toolkit.continuation_diagnostics import source_probe, release_probe_transformer
+                self.print_and_status_update('Measuring source inference before Turbo training-adapter fusion')
+                transformer.aitk_post_load(**self.component_load_kwargs('transformer'))
+                reference_probe = source_probe(self, transformer, continuation)
+                release_probe_transformer(transformer)
+                del transformer
+                flush()
+                transformer = self._load_transformer()
+
         # load assistant lora if specified
         if self.model_config.assistant_lora_path is not None:
             self.load_training_adapter(transformer)
@@ -392,6 +441,17 @@ class Krea2Model(QwenImageVAEHolderMixin, BaseModel):
         # quantize + offload + placement, all driven by model_config
         transformer.aitk_post_load(**self.component_load_kwargs("transformer"))
         flush()
+        if reference_probe is not None:
+            import json
+            from toolkit.continuation_diagnostics import source_probe, drift_report
+            from toolkit.continuation_assets import pin_json
+            report = drift_report(reference_probe, source_probe(self, transformer, continuation, cancel=True))
+            report.update(source_sha256=continuation['sha256'], qtype=self.model_config.qtype)
+            pin_json(Path(continuation['assets']) / 'turbo-cancellation.json', report,
+                     'Turbo cancellation diagnostic changed during publication')
+            self.print_and_status_update(f"Turbo cancellation probe relative RMSE: {report['relative_rmse']:.6g}; image retention remains experimental")
+            transformer.to('cpu')
+            flush()
 
         tokenizer, processor, vl_processor, text_encoder = self._load_text_encoder()
         text_encoder.aitk_post_load(**self.component_load_kwargs("te"))
@@ -409,6 +469,9 @@ class Krea2Model(QwenImageVAEHolderMixin, BaseModel):
         self.vl_processor = vl_processor
         self.model = transformer
         self.pipeline = Krea2Pipeline(self)
+        if self.model_config.lora_path:
+            from toolkit.lora_continuation import attach_inference_source
+            attach_inference_source(self)
         self.print_and_status_update("Model Loaded")
 
     # ------------------------------------------------------------------

@@ -1,4 +1,5 @@
 import { configContractErrors } from '../domain/configContract';
+import { rewriteImportedContinuationAssets } from './loraContinuation';
 import fs from 'fs/promises';
 import path from 'path';
 import { createHash } from 'crypto';
@@ -235,6 +236,7 @@ export async function executeArchiveImport(operation: Operation): Promise<unknow
       sqliteDbPath: getDatabaseConfig().sqlitePath,
       datasetPathByConfigPath: mappings,
     });
+    await rewriteImportedContinuationAssets(rewritten, manifest.continuationAssets, extractRoot, destination);
     const trainingSource = extracted(extractRoot, manifest.training.archivePath);
     const sourceStorage = typeof sourceJob.storage_key === 'string' ? sourceJob.storage_key : sourceName;
     await fs.mkdir(trainingSource, { recursive: true });

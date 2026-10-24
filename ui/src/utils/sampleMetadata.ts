@@ -1,6 +1,10 @@
 import { getDisplayPath } from './media';
 
 export type SampleMetadata = {
+  media_sha256?: string;
+  source_lora_sha256?: string;
+  source_base?: string;
+  source_generation?: { schedule_mu: number | null; quantize: boolean; qtype: string; quantize_te: boolean; qtype_te: string; dtype: string; vae_dtype: string };
   version: 1; prompt: string; negative_prompt: string; seed: number; width: number; height: number;
   guidance_scale: number; guidance_rescale: number; sample_steps: number; network_multiplier: number;
   num_frames: number; fps: number; step: number | null; prompt_index: number; sampler: string | null; iteration_id: string | null;
@@ -19,7 +23,22 @@ export function parseSampleMetadata(value: unknown): SampleMetadata | null {
       !(value.iteration_id === null || typeof value.iteration_id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value.iteration_id))) return null;
   for (const key of ['prompt_2', 'negative_prompt_2']) if (!(value[key] == null || typeof value[key] === 'string' && value[key].length <= 131072)) return null;
   if (!(value.prompt_identity === undefined || typeof value.prompt_identity === 'string' && /^[a-f0-9]{64}$/.test(value.prompt_identity))) return null;
+  if (value.source_lora_sha256 !== undefined && (typeof value.source_lora_sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(value.source_lora_sha256))) return null;
+  if (value.media_sha256 !== undefined && (typeof value.media_sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(value.media_sha256))) return null;
+  if (value.source_base !== undefined && (typeof value.source_base !== 'string' || value.source_base.length > 4096)) return null;
+  const generation = value.source_generation;
+  if (generation !== undefined && (!record(generation) || !(generation.schedule_mu === null || finite(generation.schedule_mu)) ||
+      typeof generation.quantize !== 'boolean' || typeof generation.quantize_te !== 'boolean' ||
+      !['qtype', 'qtype_te', 'dtype', 'vae_dtype'].every(key => typeof generation[key] === 'string' && generation[key].length <= 128))) return null;
   return { version: 1, prompt: value.prompt, negative_prompt: typeof value.negative_prompt === 'string' ? value.negative_prompt : '', seed: value.seed,
+    ...(typeof value.source_lora_sha256 === 'string' ? { source_lora_sha256: value.source_lora_sha256 } : {}),
+    ...(typeof value.media_sha256 === 'string' ? { media_sha256: value.media_sha256 } : {}),
+    ...(typeof value.source_base === 'string' ? { source_base: value.source_base } : {}),
+    ...(record(generation) ? { source_generation: {
+      schedule_mu: generation.schedule_mu as number | null, quantize: generation.quantize as boolean,
+      qtype: generation.qtype as string, quantize_te: generation.quantize_te as boolean,
+      qtype_te: generation.qtype_te as string, dtype: generation.dtype as string, vae_dtype: generation.vae_dtype as string,
+    } } : {}),
     width: value.width, height: value.height, guidance_scale: value.guidance_scale, guidance_rescale: value.guidance_rescale,
     sample_steps: value.sample_steps, network_multiplier: value.network_multiplier, num_frames: value.num_frames, fps: value.fps,
     step: typeof value.step === 'number' ? value.step : null, prompt_index: value.prompt_index,

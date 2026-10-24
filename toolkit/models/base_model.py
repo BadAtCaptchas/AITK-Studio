@@ -478,6 +478,20 @@ class BaseModel:
     ):
         network = self.network
         merge_multiplier = 1.0
+        if getattr(self, '_source_lora_sha256', None):
+            for config in image_configs:
+                config.source_lora_sha256 = self._source_lora_sha256
+                config.source_base = str(self.model_config.name_or_path)
+                config.source_generation = {
+                    'schedule_mu': self.model_config.model_kwargs.get('schedule_mu'),
+                    'quantize': self.model_config.quantize,
+                    'qtype': self.model_config.qtype,
+                    'quantize_te': self.model_config.quantize_te,
+                    'qtype_te': self.model_config.qtype_te,
+                    'dtype': str(self.torch_dtype),
+                    'vae_dtype': str(self.vae_torch_dtype),
+                }
+                config.sample_sampler = config.sample_sampler or sampler
         flush()
         # if using assistant, unfuse it
         if self.model_config.assistant_lora_path is not None:

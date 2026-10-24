@@ -1,4 +1,5 @@
 import { jobStorageKey } from '../utils/jobIdentity';
+import { collectContinuationAssets } from './loraContinuation';
 import archiver from 'archiver';
 import fs from 'fs';
 import fsp from 'fs/promises';
@@ -144,7 +145,9 @@ export async function createRemoteTrainingJobBundle(
   );
   warnings.push(...datasetWarnings);
 
+  const continuation = await collectContinuationAssets(sourceJobConfig, jobFolder, options.targetWorker?.id);
   const manifest: TrainingJobExportManifest = {
+    ...(continuation.assets.length ? { continuationAssets: continuation.assets } : {}),
     format: TRAINING_JOB_EXPORT_FORMAT,
     version: TRAINING_JOB_EXPORT_VERSION,
     exportedAt: new Date().toISOString(),
@@ -217,7 +220,7 @@ export async function createRemoteTrainingJobBundle(
   const zipPath = path.join(bundleRoot, makeExportFileName(job.name));
   await writeZip(
     zipPath,
-    [...trainingFiles, ...datasetFiles],
+    [...trainingFiles.filter(file => !continuation.files.some(asset => asset.archivePath === file.archivePath)), ...datasetFiles, ...continuation.files],
     [
       { archivePath: 'manifest.json', value: manifest },
       { archivePath: 'job.json', value: jobJson },

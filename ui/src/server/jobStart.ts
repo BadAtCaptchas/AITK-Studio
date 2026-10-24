@@ -1,5 +1,6 @@
 import { DATASET_MIGRATION_REQUIRED, DATASET_MIGRATION_MESSAGE } from './datasetDecryption';
 import { configContractErrors } from '../domain/configContract';
+import { continuationProcesses, validateContinuationSources } from './loraContinuation';
 import fsp from 'fs/promises';
 import { assertPythonRuntimeReady } from './pythonPath';
 import { db } from './db';
@@ -126,6 +127,21 @@ export async function prepareJobStart(
 
   const contractErrors = configContractErrors(jobConfig, { deviceBackend: isLocalWorker(job.worker_id) ? process.platform === 'darwin' ? 'mps' : 'cuda' : undefined });
   if (contractErrors.length) failStart({ error: contractErrors[0], code: 'INVALID_CONFIG' }, 400);
+  if (continuationProcesses(jobConfig).length) {
+    try {
+      if (!isLocalWorker(job.worker_id)) {
+        const { fetchWorkerHealth } = await import('./remoteClient');
+        const health = await fetchWorkerHealth(await getRemoteWorker(job.worker_id));
+        if (health.loraContinuationVersion !== 1) throw new Error('Update the selected worker: LoRA continuation is not supported by its current version.');
+      }
+      if (!job.remote_job_id) {
+        const { getJobTrainingRoot } = await import('./trainingPaths');
+        const { jobStorageKey } = await import('../utils/jobIdentity');
+        const { default: path } = await import('path');
+        await validateContinuationSources(jobConfig, path.join(await getJobTrainingRoot(job), jobStorageKey(job)), job.worker_id || 'local');
+      }
+    } catch (error) { failStart({ error: error instanceof Error ? error.message : 'Continuation preflight failed', code: 'INVALID_CONFIG' }, 400); }
+  }
   if (isLocalWorker(job.worker_id)) await assertPythonRuntimeReady(jobConfig.config?.process?.[0]?.model?.arch);
   const requiredEncryptedDatasets = await getEncryptedDatasetsForJobConfig(jobConfig);
   if (requiredEncryptedDatasets.length) failStart({ error: DATASET_MIGRATION_MESSAGE, code: DATASET_MIGRATION_REQUIRED }, 409);

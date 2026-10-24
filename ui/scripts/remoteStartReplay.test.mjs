@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import * as timers from 'node:timers/promises';
 import test from 'node:test';
 import ts from 'typescript';
+import * as loraContinuation from '../dist/src/server/loraContinuation.js';
 
 function load(relative, dependencies = {}) {
   const code = ts.transpileModule(fs.readFileSync(new URL(relative, import.meta.url), 'utf8'), {
@@ -53,6 +54,7 @@ function fixture() {
   });
   const operations = load('../src/server/operations.ts', { crypto, './db': { db }, './processLease': lease, './commandInput': commandInput });
   const jobStart = load('../src/server/jobStart.ts', {
+    './loraContinuation': loraContinuation,
     '../domain/configContract': { configContractErrors: () => { preflights++; return invalidConfig ? ['Invalid synthetic config'] : []; } },
     'fs/promises': {}, './pythonPath': {}, './db': { db }, './operations': operations,
     './trainingJobBundle': {}, './remoteClient': { isLocalWorker: () => false }, './remoteCaptionDispatch': {},

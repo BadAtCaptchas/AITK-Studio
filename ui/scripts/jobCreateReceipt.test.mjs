@@ -20,6 +20,7 @@ function load(relative, dependencies = {}) {
 const obsoleteWorkspaceGuard = load('../src/utils/obsoleteWorkspaceGuard.ts');
 const commandInput = load('../src/server/commandInput.ts', { '../utils/obsoleteWorkspaceGuard': obsoleteWorkspaceGuard });
 const configContract = load('../src/domain/configContract.ts', {
+  './loraContinuation': load('../src/domain/loraContinuation.ts'),
   '../utils/trainingPhases': load('../src/utils/trainingPhases.ts'),
   './modelCapabilities.json': JSON.parse(fs.readFileSync(new URL('../src/domain/modelCapabilities.json', import.meta.url), 'utf8')),
 });

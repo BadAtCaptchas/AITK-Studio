@@ -513,7 +513,11 @@ test('command search supports Ctrl+K, Escape focus restoration, and link-based n
   await expect(dialog.getByRole('link', { name: /^Datasets/ })).toHaveAttribute('href', '/datasets');
   await page.setViewportSize({ width: 390, height: 600 });
   await search.fill('');
-  for (let index = 0; index < 9; index++) await search.press('ArrowDown');
+  await expect(dialog.getByRole('link', { name: /^Watermark/ })).toHaveCount(1);
+  const destinations = await dialog.getByRole('link').evaluateAll(links => links.map(link => link.getAttribute('href')));
+  const watermarkIndex = destinations.indexOf('/watermark');
+  expect(watermarkIndex).toBeGreaterThan(0);
+  for (let index = 0; index < watermarkIndex; index++) await search.press('ArrowDown');
   await expect(search).toHaveAccessibleDescription('Selected: Watermark. Press Enter to open.');
   await expect(dialog.getByRole('link', { name: /^Watermark/ })).toBeInViewport();
   await page.keyboard.press('Escape');

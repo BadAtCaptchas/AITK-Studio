@@ -485,7 +485,7 @@ test('continuous sections, parameter navigation and responsive Create control', 
   await expect(page.locator('#training-step-navigation, #job-review')).toHaveCount(0);
   await page.setViewportSize({ width: 1487, height: 1058 });
   await expectReadableComputeValues(page);
-  const baseLoraSummary = page.locator('summary').filter({ hasText: 'Continue from an existing LoRA' });
+  const baseLoraSummary = page.locator('summary').filter({ hasText: 'Use a LoRA as the training base' });
   await expect(page.getByLabel('Base LoRA path (optional)', { exact: true })).toBeHidden();
   await baseLoraSummary.click();
   await expect(page.getByLabel('Base LoRA path (optional)', { exact: true })).toBeVisible();

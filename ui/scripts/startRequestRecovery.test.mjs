@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
+import * as loraContinuation from '../dist/src/server/loraContinuation.js';
 
 function load(relative, dependencies = {}) {
   const code = ts.transpileModule(fs.readFileSync(new URL(relative, import.meta.url), 'utf8'), {
@@ -57,6 +58,7 @@ function startFixture() {
   class LeaseBusyError extends Error {}
   const lease = { withProcessLease: async (_key, work) => work(), LeaseBusyError };
   const jobStart = load('../src/server/jobStart.ts', {
+    './loraContinuation': loraContinuation,
     '../domain/configContract': { configContractErrors: () => [] }, 'fs/promises': {},
     './pythonPath': { assertPythonRuntimeReady: async () => {} }, './db': { db }, './operations': {},
     './trainingJobBundle': {}, './remoteClient': { isLocalWorker: id => id === 'local' }, './remoteCaptionDispatch': {},

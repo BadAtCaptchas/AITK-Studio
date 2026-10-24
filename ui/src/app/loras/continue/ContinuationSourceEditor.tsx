@@ -24,28 +24,33 @@ export default function ContinuationSourceEditor({ config, setConfig, datasets, 
   const [report, setReport] = useState<LoraInspection | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
-  const [library, setLibrary] = useState<{ path: string; label: string }[]>([]);
+  const [libraryResult, setLibraryResult] = useState<{ workerID: string; items: { path: string; label: string }[] } | null>(null);
+  const library = libraryResult?.workerID === workerID ? libraryResult.items : [];
+  if (libraryResult && libraryResult.workerID !== workerID) setLibraryResult(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const requestId = useRef(0);
   const sourceKey = continuationSourceKey(process, workerID);
+  const [previousSourceKey, setPreviousSourceKey] = useState(sourceKey);
+  // Reset before committing a different source, without remounting the input
+  // (which would lose focus while typing) or rendering stale inspection state.
+  if (previousSourceKey !== sourceKey) {
+    setPreviousSourceKey(sourceKey);
+    setReport(null);
+    setBusy(false);
+    setMessage('');
+  }
   const currentSourceKey = useRef(sourceKey);
   useLayoutEffect(() => {
     currentSourceKey.current = sourceKey;
     requestId.current++;
-    setReport(null);
-    setBusy(false);
-    setMessage('');
   }, [sourceKey]);
   useEffect(() => () => { requestId.current++; }, []);
   useEffect(() => {
     requestId.current++;
     let current = true;
-    setLibrary([]);
-    setReport(null);
-    setBusy(false);
     void apiClient.get<unknown>('/api/generate/loras', { params: { worker_id: workerID } }).then(({ data }) => {
       if (!current || !record(data) || !Array.isArray(data.loras)) return;
-      setLibrary(data.loras.filter(record).flatMap(item => typeof item.path === 'string' && typeof item.label === 'string' ? [{ path: item.path, label: item.label }] : []));
+      setLibraryResult({ workerID, items: data.loras.filter(record).flatMap(item => typeof item.path === 'string' && typeof item.label === 'string' ? [{ path: item.path, label: item.label }] : []) });
     }).catch(() => undefined);
     return () => { current = false; };
   }, [workerID]);

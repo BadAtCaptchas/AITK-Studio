@@ -24,6 +24,7 @@ function adapter() {
 
 test('trainer uploads and inspects a local LoRA, saves independent initialization, and targets remote uploads', async ({ page }) => {
   await installLocalMonaco(page);
+  await page.route('**/api/generate/loras?worker_id=local', route => route.fulfill({ json: { loras: [{ path: '/local-only.safetensors', label: 'Local-only adapter' }] } }));
   await page.route('**/api/monitor', route => route.abort());
   await page.route('**/api/workers', route => route.fulfill({ json: { workers: [{ id: 'worker-A', name: 'Test remote worker', enabled: true }] } }));
   await page.route('**/api/gpu?*', route => route.fulfill({ json: { hasNvidiaSmi: true, isMac: false, gpus: [
@@ -90,9 +91,20 @@ test('trainer uploads and inspects a local LoRA, saves independent initializatio
   const again = page.waitForEvent('filechooser');
   await page.getByRole('button', { name: 'Import config', exact: true }).click();
   await (await again).setFiles({ name: 'training.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(config)) });
-  await page.route('**/api/generate/loras?worker_id=worker-A', route => route.fulfill({ json: { loras: [] } }));
+  await expect(page.getByRole('option', { name: 'Local-only adapter', exact: true })).toHaveCount(1);
+  let finishLibrary!: () => void;
+  const delayedLibrary = new Promise<void>(resolve => { finishLibrary = resolve; });
+  await page.route('**/api/generate/loras?worker_id=worker-A', async route => {
+    await delayedLibrary;
+    await route.fulfill({ json: { loras: [{ path: 'aitk-lora://remote/worker-A/remote.safetensors', label: 'Remote-only adapter' }] } });
+  });
+  const libraryRequest = page.waitForRequest('**/api/generate/loras?worker_id=worker-A');
   await page.getByRole('combobox', { name: 'Compute', exact: true }).first().fill('Test remote worker');
   await page.getByRole('option', { name: 'Test remote worker', exact: true }).click();
+  await libraryRequest;
+  await expect(page.getByRole('option', { name: 'Local-only adapter', exact: true })).toHaveCount(0);
+  finishLibrary();
+  await expect(page.getByRole('option', { name: 'Remote-only adapter', exact: true })).toHaveCount(1);
   let receivedWorker: string | undefined;
   await page.route('**/api/generate/loras/upload', async route => {
     receivedWorker = route.request().headers()['x-aitk-worker-id'];
@@ -152,6 +164,11 @@ test('trainer uploads and inspects a local LoRA, saves independent initializatio
   await staleUploadResponse;
   await expect(page.getByRole('button', { name: 'Inspect LoRA', exact: true })).toBeEnabled();
   await expect(page.getByLabel('Continuation source path')).toHaveValue('/latest-source.safetensors');
+  const sourceInput = page.getByLabel('Continuation source path');
+  await sourceInput.fill('');
+  await sourceInput.pressSequentially('/typed-source.safetensors');
+  await expect(sourceInput).toHaveValue('/typed-source.safetensors');
+  await expect(sourceInput).toBeFocused();
 });
 
 test('continuation keeps separate recoverable drafts and imports into its dedicated workspace', async ({ page }) => {

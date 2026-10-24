@@ -58,7 +58,10 @@ test('trainer uploads and inspects a local LoRA, saves independent initializatio
   await page.getByRole('button', { name: 'Upload LoRA locally', exact: true }).click();
   await (await uploadChooser).setFiles({ name: 'fixture.safetensors', mimeType: 'application/octet-stream', buffer: adapter() });
   await expect(page.getByLabel('Continuation source path')).toHaveValue(/fixture.*\.safetensors/, { timeout: 30_000 });
+  const inspectionResponse = page.waitForResponse('**/api/training/lora/inspect', { timeout: 120_000 });
   await page.getByRole('button', { name: 'Inspect LoRA', exact: true }).click();
+  const inspected = await inspectionResponse;
+  expect(inspected.ok(), await inspected.text()).toBe(true);
   await expect(page.getByText(/1 targets verified/)).toBeVisible({ timeout: 120_000 });
   await page.screenshot({ path: '.review-build/continuation-upload-local.png', fullPage: true });
   const saved = page.waitForResponse(r => r.url().endsWith('/api/jobs') && r.request().method() === 'POST');

@@ -28,6 +28,8 @@ jobs:
       HF_HUB_OFFLINE: '1'
       TRANSFORMERS_OFFLINE: '1'
       NO_ALBUMENTATIONS_UPDATE: '1'
+      CUDA_VISIBLE_DEVICES: '-1'
+      OMP_NUM_THREADS: '2'
     defaults:
       run:
         working-directory: ui
@@ -46,6 +48,14 @@ jobs:
       - run: npm ci
       - run: npm run update_db
       - run: npm run ci
+      # Browser continuation coverage inspects actual safetensors against the
+      # Krea topology on the meta device. Keep the real runtime, without weights
+      # or GPU execution, rather than mocking away the inspection contract.
+      - name: Install runtime for continuation browser inspection
+        working-directory: .
+        run: |
+          python -m venv .venv
+          python -c "import os, subprocess; executable = '.venv/Scripts/python.exe' if os.name == 'nt' else '.venv/bin/python'; subprocess.run([executable, 'scripts/install_runtime.py'], check=True)"
       - run: npx playwright install --with-deps chromium
       - run: npm run test:browser
       - name: Verify compiled stack without development dependencies

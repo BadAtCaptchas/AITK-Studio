@@ -181,7 +181,7 @@ test('an existing failed continuation passes start validation using its pinned s
   process.network.pretrained_lora_path = path.join(root, 'no-longer-present.safetensors');
   const saved = JSON.stringify(config);
   await assets.validateContinuationSources(config, job, 'local');
-  assert.equal(inspectedPath, pinned);
+  assert.equal(inspectedPath, await fsp.realpath(pinned));
   assert.equal(JSON.stringify(config), saved);
 });
 

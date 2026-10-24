@@ -8,7 +8,7 @@ import {
   type TrainingFieldTarget,
 } from '@/utils/trainingValidation';
 import { useEffect, useRef, useState } from 'react';
-import { readTrainingDraft, restoreTrainingDraft, useTrainingDraft } from '@/hooks/useTrainingDraft';
+import { readTrainingDraft, readTrainingDraftState, restoreTrainingDraft, useTrainingDraft } from '@/hooks/useTrainingDraft';
 import { readStoredTrainingDraft, removeStoredTrainingDraft, type StoredTrainingDraft, type TrainingDraft } from '@/utils/trainingDraftStorage';
 import { parseTrainingSource } from '@/utils/trainingSource';
 import { parseTrainingConfigImport } from '@/utils/trainingConfigImport';
@@ -30,6 +30,10 @@ import { TopBar } from '@/components/layout';
 import { Button } from '@headlessui/react';
 import { Activity, AlertCircle, CheckCircle2, ChevronLeft, Save, X } from 'lucide-react';
 import SimpleJob from './SimpleJob';
+import ContinuationSourceEditor from '@/app/loras/continue/ContinuationSourceEditor';
+import { defaultContinuationConfig, initializeContinuationConfig, changeContinuationBase } from '@/app/loras/continue/continuationConfig';
+import { trainingWorkspaceDraftKey, trainingWorkspaceForConfig, type TrainingWorkspace } from '@/domain/trainingWorkspaces';
+import TrainingWorkspaceHandoff from './TrainingWorkspaceHandoff';
 import AdvancedConfigEditor from '@/components/AdvancedConfigEditor';
 import { TrainingAdvisorPanel } from '@/components/TrainingAdvisorPanel';
 import { clearConfigEditorSession, readConfigEditorSession } from '@/utils/configEditorSession';
@@ -63,20 +67,17 @@ type MigrationState =
   | { phase: 'ready'; draft: TrainingMigrationDraft }
   | { phase: 'error'; message: string };
 const isDev = process.env.NODE_ENV === 'development';
-export function TrainingFormContent() {
+export function TrainingFormContent({ workspace = 'training' }: { workspace?: TrainingWorkspace }) {
   const hydrated = useHydrated();
   const searchParams = useSearchParams();
-  const migrationId = searchParams.get('migrateId');
-  const runId = migrationId ? null : searchParams.get('id');
-  const cloneId = migrationId ? null : searchParams.get('cloneId');
-  const key = migrationId ? `migrate:${migrationId}` : runId ? `edit:${runId}` : cloneId ? `clone:${cloneId}` : 'new';
+  const key = trainingWorkspaceDraftKey(workspace, searchParams);
   // A query-only navigation is still a new editor visit. Remount its guards and
   // async request lifetime, while preserving the draft under its stable key.
   const visitKey = `${key}?${searchParams.toString()}`;
-  return hydrated ? <TrainingDraftRecovery key={visitKey} draftKey={key} /> : <div className="p-6 text-gray-400">Loading training setup…</div>;
+  return hydrated ? <TrainingDraftRecovery key={visitKey} draftKey={key} workspace={workspace} /> : <div className="p-6 text-gray-400">Loading training setup…</div>;
 }
 
-function TrainingDraftRecovery({ draftKey }: { draftKey: string }) {
+function TrainingDraftRecovery({ draftKey, workspace }: { draftKey: string; workspace: TrainingWorkspace }) {
   const [recovery, setRecovery] = useState<{ phase: 'ready' } | { phase: 'recover'; stored: StoredTrainingDraft }>(() => {
     const stored = readTrainingDraft(draftKey) ? undefined : readStoredTrainingDraft(draftKey);
     return stored ? { phase: 'recover', stored } : { phase: 'ready' };
@@ -91,12 +92,13 @@ function TrainingDraftRecovery({ draftKey }: { draftKey: string }) {
       </div>
     </section>
   );
-  return <TrainingSourceLoader draftKey={draftKey} />;
+  return <TrainingSourceLoader draftKey={draftKey} workspace={workspace} />;
 }
 
-function TrainingSourceLoader({ draftKey }: { draftKey: string }) {
+function TrainingSourceLoader({ draftKey, workspace }: { draftKey: string; workspace: TrainingWorkspace }) {
   const searchParams = useSearchParams();
-  const [rememberedDraft] = useState(() => readTrainingDraft(draftKey));
+  const [rememberedState] = useState(() => readTrainingDraftState(draftKey));
+  const rememberedDraft = rememberedState?.draft;
   const mode = searchParams.get('id') ? 'edit' : 'clone';
   const sourceID = searchParams.get('migrateId') ? null : searchParams.get('id') || searchParams.get('cloneId');
   const [attempt, setAttempt] = useState(0);
@@ -115,8 +117,11 @@ function TrainingSourceLoader({ draftKey }: { draftKey: string }) {
       });
     return () => controller.abort();
   }, [sourceID, rememberedDraft, mode, attempt]);
-  if (!sourceID || rememberedDraft) return <TrainingFormEditor draftKey={draftKey} />;
-  if (source.phase === 'ready') return <TrainingFormEditor draftKey={draftKey} initialDraft={source.draft} />;
+  const loaded = rememberedDraft ?? (sourceID && source.phase === 'ready' ? source.draft : undefined);
+  if (loaded && !searchParams.get('migrateId') && trainingWorkspaceForConfig(loaded.config) !== workspace)
+    return <TrainingWorkspaceHandoff draft={loaded} baseline={rememberedState?.baseline} sourceDraftKey={rememberedState ? draftKey : undefined} workspace={trainingWorkspaceForConfig(loaded.config)} query={searchParams.toString()} />;
+  if (!sourceID || rememberedDraft) return <TrainingFormEditor draftKey={draftKey} workspace={workspace} />;
+  if (source.phase === 'ready') return <TrainingFormEditor draftKey={draftKey} initialDraft={source.draft} workspace={workspace} />;
   return (
     <div className="m-6 max-w-xl" role="status">
       <PageNotice tone={source.phase === 'error' ? 'danger' : 'info'} title={source.phase === 'error' ? 'Source training job unavailable' : 'Loading source training job'}>
@@ -126,7 +131,7 @@ function TrainingSourceLoader({ draftKey }: { draftKey: string }) {
   );
 }
 
-function TrainingFormEditor({ draftKey, initialDraft }: { draftKey: string; initialDraft?: TrainingDraft }) {
+function TrainingFormEditor({ draftKey, initialDraft, workspace }: { draftKey: string; initialDraft?: TrainingDraft; workspace: TrainingWorkspace }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const migrationId = searchParams.get('migrateId');
@@ -144,16 +149,25 @@ function TrainingFormEditor({ draftKey, initialDraft }: { draftKey: string; init
   const { gpuData, gpuList, isGPUInfoLoaded, status: gpuStatus, refreshGpuInfo } = useGPUInfo(null, null, workerID);
   const { datasets, status: datasetFetchStatus, refreshDatasets } = useDatasetList({ includeRemote: true });
   const [showAdvancedView, setShowAdvancedView] = useState(false);
+  const [handoff, setHandoff] = useState<{ draft: TrainingDraft; baseline: string } | null>(null);
+  const continuationWorkspace = workspace === 'continuation';
   const [rawEditorValid, setRawEditorValid] = useState(() => readConfigEditorSession(draftKey)?.valid ?? true);
   const [rawEditorDirty, setRawEditorDirty] = useState(() => readConfigEditorSession(draftKey)?.dirty ?? false);
   const [problemsOpen, setProblemsOpen] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [jobConfig, setJobConfig] = useNestedState<JobConfig>(
-    restoredDraft?.config || objectCopy(migrateJobConfig(defaultJobConfig)),
+    restoredDraft?.config || (continuationWorkspace ? defaultContinuationConfig() : objectCopy(migrateJobConfig(defaultJobConfig))),
   );
   const [formRevision, setFormRevision] = useState(0);
   const applyExternalConfig = (config: JobConfig) => {
-    setJobConfig(config);
+    const next = continuationWorkspace ? initializeContinuationConfig(config) : config;
+    if (trainingWorkspaceForConfig(next) !== workspace && !migrationId) {
+      if (runId) throw new Error('Create a new continuation run instead of changing an existing training job into one.');
+      draft.markSaved();
+      setHandoff({ draft: { config: next, workerID, gpuIDs }, baseline: JSON.stringify({ config: jobConfig, workerID, gpuIDs }) });
+      return;
+    }
+    setJobConfig(next);
     // A complete imported/Config document is already configured. Reset only the
     // Form's derived controls and error boundary; keep raw text and editor state.
     setFormRevision(value => value + 1);
@@ -495,6 +509,7 @@ function TrainingFormEditor({ draftKey, initialDraft }: { draftKey: string; init
     }
   };
   const saveJob = async () => {
+    if (handoff) return;
     if (!isSettingsLoaded || settingsStatus === 'error') {
       reportWorkflowError('Load settings before saving this training run.');
       return;
@@ -654,7 +669,8 @@ function TrainingFormEditor({ draftKey, initialDraft }: { draftKey: string; init
     } catch (e) {
       console.warn(e);
     }
-    return migrationId ? parsed : migrateJobConfig(parsed);
+    const prepared = migrationId ? parsed : migrateJobConfig(parsed);
+    return continuationWorkspace ? initializeContinuationConfig(prepared) : prepared;
   };
   const validationSummary =
     currentFindings.length > 0 ? (
@@ -746,6 +762,7 @@ function TrainingFormEditor({ draftKey, initialDraft }: { draftKey: string; init
         onChange={value => setGpuIDs(value)} options={gpuList.map(gpu => ({ value: `${gpu.index}`, label: `GPU #${gpu.index}` }))} />
     </>
   );
+  if (handoff) return <TrainingWorkspaceHandoff draft={handoff.draft} baseline={handoff.baseline} sourceDraftKey={draftKey} replaceDraft workspace={trainingWorkspaceForConfig(handoff.draft.config)} query={searchParams.toString()} />;
   return (
     <div className="contents" {...draft.formTracking}>
       <TopBar className={`training-topbar h-12 px-3 ${styles.toolbar}`}>
@@ -753,7 +770,7 @@ function TrainingFormEditor({ draftKey, initialDraft }: { draftKey: string; init
           <ChevronLeft className="h-4 w-4" />
         </Button>
         <h1 className={`${styles.toolbarTitle} truncate text-base font-semibold text-gray-100`}>
-          {migrationId ? 'Migrate Training Job' : runId ? 'Edit Training Job' : 'New Training Job'}
+          {continuationWorkspace ? (runId ? 'Edit LoRA Continuation' : 'Continue LoRA') : migrationId ? 'Migrate Training Job' : runId ? 'Edit Training Job' : 'New Training Job'}
         </h1>
         <div className={styles.viewTabs} role="tablist" aria-label="Configuration view"
           onKeyDown={event => {
@@ -798,13 +815,16 @@ function TrainingFormEditor({ draftKey, initialDraft }: { draftKey: string; init
         )}
         <ErrorBoundary key={formRevision} fallback={<div className="p-6 text-sm text-amber-800 dark:text-amber-300">This configuration requires the Config editor. <button type="button" className="underline" onClick={() => setShowAdvancedView(true)}>Open Config</button></div>}>
           <SimpleJob jobConfig={jobConfig} setJobConfig={setJobConfig} readOnly={!rawEditorValid || editorLocked}
+            continuation={continuationWorkspace}
+            sourcePanel={continuationWorkspace ? <ContinuationSourceEditor config={jobConfig} setConfig={setJobConfig} datasets={datasetOptions} workerID={workerID} disabled={!rawEditorValid || editorLocked || !!runId} /> : undefined}
             workerID={workerID}
             handleSubmit={handleSubmit} runId={runId} datasetOptions={datasetOptions}
             validationMessages={currentFindings} focusTarget={focusTarget} onOpenConfig={() => setShowAdvancedView(true)}
             isLoading={settingsStatus === 'loading' || !isGPUInfoLoaded || workerStatus === 'loading' || ['idle', 'loading'].includes(datasetFetchStatus)}
             comfyAutoInstall={settings.COMFY_AUTO_INSTALL === 'true'}
-            migrationModelOptions={migrationId ? migrationOptions : undefined}
-            onMigrationModelChange={migrationId ? changeMigrationModel : undefined} />
+            migrationModelOptions={continuationWorkspace ? groupModelOptions(modelArchs.filter(model => ['krea2', 'krea2:turbo'].includes(model.name))) : migrationId ? migrationOptions : undefined}
+            onMigrationModelChange={continuationWorkspace ? (arch, modelPath) => modelPath === undefined
+              ? setJobConfig(changeContinuationBase(jobConfig, arch)) : setJobConfig(modelPath, 'config.process[0].model.name_or_path') : migrationId ? changeMigrationModel : undefined} />
         </ErrorBoundary>
       </div>
       <div id="training-config-view" role="tabpanel" aria-labelledby="training-config-tab" hidden={!showAdvancedView} className={`${styles.view} ${styles.configView}`}>

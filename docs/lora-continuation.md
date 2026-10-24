@@ -1,6 +1,8 @@
 # Further train a Krea 2 LoRA
 
-In a new Krea 2 Raw or Turbo training job, enable **Further train this LoRA**. Choose a library entry or upload a `.safetensors` file, then choose **Inspect LoRA**. Uploads go to the selected compute destination: local storage for **Local worker**, or the selected remote worker. Remote uploads stream through the controller, verify SHA-256 at the destination, and require a worker advertising continuation version 1. The maximum source size is 2 GiB.
+Open **Continue LoRA** in the main navigation (`/loras/continue`). This dedicated workspace has its own drafts and source/preservation controls, separate from New training. Choose a library entry or upload a `.safetensors` file, then choose **Inspect LoRA**. Uploads go to the selected compute destination: local storage for **Local worker**, or the selected remote worker. Remote uploads stream through the controller, verify SHA-256 at the destination, and require a worker advertising continuation version 1. The maximum source size is 2 GiB.
+
+Editing or cloning an existing continuation job opens this workspace automatically, including older New training links. Importing a continuation configuration into New training transfers it to Continue LoRA. Choose Raw or Turbo as the continuation base, then configure new training examples and the usual training, sampling and validation controls below the source panel.
 
 Inspection must succeed before saving a continuation configuration. It checks every learned tensor and every target against Krea's denoiser topology. Missing pairs, unknown tensors, incompatible shapes, duplicates and nonfinite values fail explicitly. Per-layer ranks, sparse targets and effective scaling come from the file. This workflow does not slice or pad ranks. An export without recoverable scaling requires an explicit alpha/rank declaration; rank alone cannot determine scaling.
 

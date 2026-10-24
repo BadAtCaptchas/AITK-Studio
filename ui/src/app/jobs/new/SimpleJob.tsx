@@ -76,7 +76,6 @@ import {
   supportsKrea2TextFusionExclusion,
 } from '@/utils/krea2TextFusion';
 import TrainingPhasesEditor from './TrainingPhasesEditor';
-import LoraContinuationEditor from './LoraContinuationEditor';
 import { apiClient } from '@/utils/api';
 import { getRememberedEncryptedDatasetKey } from '@/utils/encryptedDatasets';
 import { normalizeDetectedCaptionExt } from '@/utils/jobDatasetDefaults';
@@ -91,6 +90,8 @@ import {
 import { uploadLoraFile, uploadTemporaryMediaFile } from '@/utils/streamedUploads';
 import { openDoc } from '@/components/DocModal';
 type Props = {
+  continuation?: boolean;
+  sourcePanel?: ReactNode;
   jobConfig: JobConfig;
   readOnly?: boolean;
   onOpenConfig?: () => void;
@@ -135,6 +136,8 @@ const comfyOnErrorOptions: SelectOption[] = [
   { value: 'skip', label: 'Skip' },
 ];
 export default function SimpleJob({
+  continuation = false,
+  sourcePanel,
   jobConfig,
   workerID = 'local',
   readOnly = false,
@@ -617,7 +620,7 @@ export default function SimpleJob({
     { value: 'lora', label: 'LoRA' },
     { value: 'dora', label: 'DoRA' },
     { value: 'lokr', label: 'LoKr' },
-  ].filter(option => !modelArch?.allowedNetworkTypes || modelArch.allowedNetworkTypes.includes(option.value));
+  ].filter(option => (continuation ? option.value === 'lora' : true) && (!modelArch?.allowedNetworkTypes || modelArch.allowedNetworkTypes.includes(option.value)));
   const setPrimarySamplePrompt = (prompt: string) => {
     if (!sampleConfig.samples?.length) {
       setJobConfig([{ prompt }], 'config.process[0].sample.samples');
@@ -688,9 +691,10 @@ export default function SimpleJob({
           </div>
         )}
 
-        <TrainingSectionNav formRef={formRef} config={jobConfig} />
+        <TrainingSectionNav formRef={formRef} config={jobConfig} continuation={continuation} />
         <div className={styles.sections}>
           <div className="training-form-area min-w-0">
+            {sourcePanel && <section id="job-source" className={styles.section}>{sourcePanel}</section>}
             <fieldset
               id="job-basics"
               disabled={readOnly} inert={readOnly}
@@ -738,6 +742,7 @@ export default function SimpleJob({
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <SelectInput
                     label="Model architecture"
+                    disabled={continuation && !!runId}
                     value={processConfig.model.arch}
                     onChange={value => {
                       if (onMigrationModelChange) onMigrationModelChange(value);
@@ -899,9 +904,7 @@ export default function SimpleJob({
                 ))}
 
                 <div className="grid grid-cols-1 gap-5">
-                  {(['krea2', 'krea2:turbo'].includes(processConfig.model.arch) || processConfig.network?.continuation) &&
-                    <LoraContinuationEditor config={jobConfig} setConfig={setJobConfig} datasets={datasetOptions} workerID={workerID} disabled={readOnly || !!runId} />}
-                  {!processConfig.model.arch.startsWith('minimax_h3') && (
+                  {!continuation && !processConfig.model.arch.startsWith('minimax_h3') && (
                     <details className={`studio-disclosure ${styles.continuation}`} open={processConfig.model.base_lora_path ? true : undefined}>
                       <summary><ChevronRight className={styles.disclosureChevron} size={14} aria-hidden="true" />Use a LoRA as the training base</summary>
                       <div>
@@ -1171,7 +1174,8 @@ export default function SimpleJob({
                     }}
                     options={targetTypeOptions}
                   />
-                  {(networkType === 'lora' || networkType === 'dora') && (
+                  {continuation && <p className="col-span-full text-sm text-gray-500">The inspected source determines rank, scaling and training targets.</p>}
+                  {!continuation && (networkType === 'lora' || networkType === 'dora') && (
                     <>
                       <NumberInput
                         label="Linear rank"
@@ -1225,7 +1229,7 @@ export default function SimpleJob({
                       max={1}
                     />
                   )}
-                  {supportsKrea2TextFusionExclusion(processConfig.model, networkConfig) && (
+                  {!continuation && supportsKrea2TextFusionExclusion(processConfig.model, networkConfig) && (
                     <div className="col-span-full space-y-2">
                       <Checkbox
                         label="Exclude text-fusion layers"
@@ -1640,7 +1644,7 @@ export default function SimpleJob({
               className={styles.section}
             >
               {renderSectionIntro(
-                'Dataset',
+                continuation ? 'New training examples' : 'Dataset',
                 'Choose your media and resolutions. Expand data options when you need them.',
               )}
               {datasetOptions.length === 0 && (
@@ -1652,7 +1656,7 @@ export default function SimpleJob({
                 </div>
               )}
               <div className="space-y-3">
-                {datasetsConfig.map((dataset, i) => (
+                {datasetsConfig.map((dataset, i) => dataset.role === 'source_preservation' ? null : (
                   <div key={i} className="border border-gray-900 bg-gray-950/35 p-3">
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                       <div className="text-sm font-semibold text-gray-100">Dataset {i + 1}</div>

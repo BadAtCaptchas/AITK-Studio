@@ -13,6 +13,7 @@ const navigation = [
   { name: 'Datasets', href: '/datasets' },
   { name: 'Models', href: '/models' },
   { name: 'Generate', href: '/generate' },
+  { name: 'Continue LoRA', href: '/loras/continue' },
 ] as const;
 
 export default function Sidebar({ onSearch }: { onSearch: () => void }) {

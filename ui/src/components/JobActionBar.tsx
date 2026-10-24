@@ -1,4 +1,5 @@
 import { reportWorkflowError } from '@/components/WorkflowFeedback';
+import { trainingJobEditorPath } from '@/domain/trainingWorkspaces';
 import Link from '@/navigation/Link';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -167,10 +168,10 @@ function jobDetailHref(job: Job) {
   return `/jobs/${encodeURIComponent(job.id)}`;
 }
 function jobEditHref(job: Job) {
-  return `/jobs/new?id=${encodeURIComponent(job.id)}`;
+  return `${trainingJobEditorPath(job.job_config)}?id=${encodeURIComponent(job.id)}`;
 }
 function jobCloneHref(job: Job) {
-  return `/jobs/new?cloneId=${encodeURIComponent(job.id)}`;
+  return `${trainingJobEditorPath(job.job_config)}?cloneId=${encodeURIComponent(job.id)}`;
 }
 type PendingAction = 'start' | 'remove' | 'stop' | 'delete' | 'save' | 'sample' | 'markStopped';
 // If the job never reports a state change (e.g. the request silently failed

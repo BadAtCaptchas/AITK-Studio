@@ -12,6 +12,7 @@ const pages = [
   ['/generate/live', lazy(() => import('@/app/generate/live/page'))],
   ['/jobs', lazy(() => import('@/app/jobs/page'))],
   ['/jobs/new', lazy(() => import('@/app/jobs/new/page'))],
+  ['/loras/continue', lazy(() => import('@/app/loras/continue/page'))],
   ['/jobs/secure-remote-captioning', lazy(() => import('@/app/jobs/secure-remote-captioning/page'))],
   ['/jobs/:jobID', lazy(() => import('@/app/jobs/[jobID]/page'))],
   ['/models', lazy(() => import('@/app/models/page'))],

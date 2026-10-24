@@ -8,6 +8,7 @@ import { ArrowUpRight, Search } from 'lucide-react';
 const commands = [
   { title: 'Monitor', detail: 'Active runs, hardware and recent activity', href: '/dashboard' },
   { title: 'New training', detail: 'Training form and configuration editor', href: '/jobs/new' },
+  { title: 'Continue LoRA', detail: 'Upload, refine and preserve an existing Krea 2 LoRA', href: '/loras/continue' },
   { title: 'Queue', detail: 'Training jobs, ordering and workers', href: '/jobs' },
   { title: 'Datasets', detail: 'Images, captions and dataset tools', href: '/datasets' },
   { title: 'Models', detail: 'Model library and checkpoints', href: '/models' },

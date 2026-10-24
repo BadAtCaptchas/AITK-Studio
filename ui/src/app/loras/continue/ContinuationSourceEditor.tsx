@@ -3,7 +3,8 @@ import Link from '@/navigation/Link';
 import { apiClient } from '@/utils/api';
 import { uploadLoraFile } from '@/utils/streamedUploads';
 import type { JobConfig, SelectOption, NetworkConfig } from '@/types';
-import { defaultDatasetConfig } from './jobConfig';
+import { defaultDatasetConfig } from '@/app/jobs/new/jobConfig';
+import { changeContinuationBase } from './continuationConfig';
 import { continuationSourceKey, parseLoraInspection, preservationModes, type LoraInspection, type PreservationMode } from '@/domain/loraContinuation';
 
 type Props = {
@@ -17,10 +18,9 @@ const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v ===
 const control = 'w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-950';
 const labels: Record<PreservationMode, string> = { none: 'Off', replay: 'Curated replay', teacher: 'Frozen-source teacher (experimental)', replay_teacher: 'Replay + teacher (experimental)' };
 
-export default function LoraContinuationEditor({ config, setConfig, datasets, workerID, disabled = false }: Props) {
+export default function ContinuationSourceEditor({ config, setConfig, datasets, workerID, disabled = false }: Props) {
   const process = config.config.process[0];
   const source = process.network?.continuation;
-  const enabled = source !== undefined;
   const [report, setReport] = useState<LoraInspection | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -114,24 +114,14 @@ export default function LoraContinuationEditor({ config, setConfig, datasets, wo
   const preservation = process.train.source_preservation;
   const selectedDataset = process.datasets.find(dataset => dataset.role === 'source_preservation');
   const remoteSource = process.network?.pretrained_lora_path?.startsWith('aitk-lora://remote/');
-  return <fieldset disabled={disabled || busy} className="studio-disclosure space-y-3 p-4 disabled:opacity-70">
-    <label className="flex items-center gap-2 text-sm font-medium">
-      <input type="checkbox" checked={enabled} onChange={event => update(p => {
-        if (event.target.checked) {
-          p.network.type = 'lora';
-          p.network.continuation = { version: 1, source_sha256: '', training_base: p.model.arch === 'krea2:turbo' ? 'turbo' : 'raw', deployment_base: 'turbo' };
-          delete p.train.start_step;
-          p.train.source_preservation = { mode: 'none' };
-        } else {
-          delete p.network.continuation;
-          delete p.network.pretrained_lora_path;
-          delete p.train.source_preservation;
-          p.datasets = p.datasets.filter(dataset => dataset.role !== 'source_preservation');
-        }
-      })} /> Further train this LoRA
-    </label>
-    <p className="text-xs text-gray-500">Start a new run from downloaded weights and export one complete updated LoRA. Original optimizer state is not restored.</p>
-    {enabled && <>
+  if (!source) return null;
+  return <fieldset disabled={disabled || busy} className="space-y-4 disabled:opacity-70" aria-label="LoRA source and preservation">
+    <div className="rounded-lg border border-blue-500/25 bg-blue-500/5 p-4">
+      <p className="text-xs font-medium uppercase tracking-wider text-blue-600 dark:text-blue-300">Krea 2 · Raw & Turbo</p>
+      <h2 className="mt-1 text-xl font-semibold">Give an existing LoRA its next training run</h2>
+      <p className="mt-2 max-w-3xl text-sm text-gray-500 dark:text-gray-400">Upload your source, choose what to preserve, and add new examples below. The result is one updated LoRA. Your original file stays intact.</p>
+    </div>
+    <h3 className="text-sm font-semibold">Source LoRA</h3>
       <label className="block text-xs">Source from library
         <select className={control} value={process.network?.pretrained_lora_path || ''} onChange={event => setPath(event.target.value)}>
           <option value="">Select a LoRA</option>
@@ -146,7 +136,7 @@ export default function LoraContinuationEditor({ config, setConfig, datasets, wo
         <button type="button" className="operator-button" disabled={!process.network?.pretrained_lora_path} onClick={() => void inspect()}>Inspect LoRA</button>
       </div>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-        <label className="text-xs">Continuation training base<select className={control} value={source.training_base} onChange={event => update(p => { if (p.network.continuation) p.network.continuation.training_base = event.target.value === 'turbo' ? 'turbo' : 'raw'; })}>
+        <label className="text-xs">Continuation training base<select className={control} value={source.training_base} onChange={event => setConfig(changeContinuationBase(config, event.target.value === 'turbo' ? 'krea2:turbo' : 'krea2'))}>
           <option value="raw">Krea 2 Raw</option><option value="turbo">Krea 2 Turbo</option>
         </select></label>
         <label className="text-xs">Deployment base<select className={control} value={source.deployment_base} onChange={event => update(p => { if (p.network.continuation) p.network.continuation.deployment_base = event.target.value === 'raw' ? 'raw' : 'turbo'; })}>
@@ -160,6 +150,7 @@ export default function LoraContinuationEditor({ config, setConfig, datasets, wo
       <p className="text-xs text-gray-500">Match the selected model checkpoint. A Turbo model-card listing does not establish which base originally trained the adapter.</p>
       <p role="status" className="text-xs text-gray-400">{message || (source.source_sha256 ? `Inspected source: ${source.source_sha256.slice(0, 12)}…` : 'Inspection is required.')}</p>
       {report?.declared_training_base && <p className="text-xs">File declares training base: {report.declared_training_base}</p>}
+      <h3 className="border-t border-gray-300 pt-4 text-sm font-semibold dark:border-gray-800">Preservation</h3>
       <label className="block text-xs">Preserve source behavior<select className={control} value={preservation?.mode || 'none'} onChange={event => { const mode = preservationModes.find(value => value === event.target.value); if (mode) setMode(mode); }}>
         {preservationModes.map(mode => <option key={mode} value={mode}>{labels[mode]}</option>)}
       </select></label>
@@ -175,6 +166,5 @@ export default function LoraContinuationEditor({ config, setConfig, datasets, wo
           {preservation.mode !== 'replay' && <label className="text-xs">Teacher loss weight<input className={control} type="number" min="0.000001" step="0.1" value={preservation.teacher_weight} onChange={event => update(p => { if (p.train.source_preservation && p.train.source_preservation.mode !== 'none') p.train.source_preservation.teacher_weight = Number(event.target.value); })} /></label>}
         </div>
       </>}
-    </>}
   </fieldset>;
 }

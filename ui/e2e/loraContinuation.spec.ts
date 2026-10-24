@@ -35,6 +35,16 @@ test('trainer uploads and inspects a local LoRA, saves independent initializatio
   await page.getByRole('button', { name: 'Check Password' }).click();
   await expect(page.getByLabel('Password', { exact: true })).toHaveCount(0);
   await page.goto('/jobs/new');
+  await expect(page.getByRole('button', { name: 'Upload LoRA locally', exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('Further train this LoRA', { exact: true })).toHaveCount(0);
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Continue LoRA', exact: true }).click();
+  await expect(page).toHaveURL(/\/loras\/continue$/);
+  await expect(page.getByRole('heading', { name: 'Continue LoRA', exact: true })).toBeVisible();
+  await expect(page.getByLabel('Model path', { exact: true })).toHaveValue('krea/Krea-2-Raw');
+  await page.getByRole('combobox', { name: 'Continuation training base', exact: true }).selectOption('turbo');
+  await expect(page.getByLabel('Model path', { exact: true })).toHaveValue('krea/Krea-2-Turbo');
+  await page.getByLabel('Model path', { exact: true }).fill('/models/custom-turbo.safetensors');
+  await expect(page.getByLabel('Model path', { exact: true })).toHaveValue('/models/custom-turbo.safetensors');
   const config = structuredClone(defaultJobConfig);
   config.config.name = 'continuation-browser-' + randomUUID().slice(0, 8);
   const p = config.config.process[0];
@@ -43,7 +53,6 @@ test('trainer uploads and inspects a local LoRA, saves independent initializatio
   const chooser = page.waitForEvent('filechooser');
   await page.getByRole('button', { name: 'Import config', exact: true }).click();
   await (await chooser).setFiles({ name: 'training.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(config)) });
-  await page.getByLabel('Further train this LoRA', { exact: true }).check();
   const uploadChooser = page.waitForEvent('filechooser');
   await page.getByRole('button', { name: 'Upload LoRA locally', exact: true }).click();
   await (await uploadChooser).setFiles({ name: 'fixture.safetensors', mimeType: 'application/octet-stream', buffer: adapter() });
@@ -62,11 +71,25 @@ test('trainer uploads and inspects a local LoRA, saves independent initializatio
   expect(job.step).toBe(0);
   expect(stored.train.source_preservation.mode).toBe('none');
 
-  await page.goto('/jobs/new');
+  await page.goto(`/jobs/new?id=${job.id}`);
+  await expect(page).toHaveURL(new RegExp(`/loras/continue\\?id=${job.id}$`));
+  await expect(page.getByRole('heading', { name: 'Edit LoRA Continuation', exact: true })).toBeVisible();
+  await page.getByLabel('Trigger word (optional)', { exact: true }).fill('unsaved_trigger');
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Runs', exact: true }).click();
+  await page.getByRole('button', { name: 'Leave setup', exact: true }).click();
+  await page.goto(`/jobs/new?id=${job.id}`);
+  await expect(page).toHaveURL(new RegExp(`/loras/continue\\?id=${job.id}$`));
+  await page.getByRole('button', { name: 'Restore draft', exact: true }).click();
+  await expect(page.getByLabel('Trigger word (optional)', { exact: true })).toHaveValue('unsaved_trigger');
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Runs', exact: true }).click();
+  await page.getByRole('button', { name: 'Leave setup', exact: true }).click();
+  await page.goto(`/jobs/new?cloneId=${job.id}`);
+  await expect(page).toHaveURL(new RegExp(`/loras/continue\\?cloneId=${job.id}$`));
+  await expect(page.getByRole('button', { name: 'Upload LoRA locally', exact: true })).toBeEnabled();
+  await page.goto('/loras/continue');
   const again = page.waitForEvent('filechooser');
   await page.getByRole('button', { name: 'Import config', exact: true }).click();
   await (await again).setFiles({ name: 'training.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(config)) });
-  await page.getByLabel('Further train this LoRA', { exact: true }).check();
   await page.route('**/api/generate/loras?worker_id=worker-A', route => route.fulfill({ json: { loras: [] } }));
   await page.getByRole('combobox', { name: 'Compute', exact: true }).first().fill('Test remote worker');
   await page.getByRole('option', { name: 'Test remote worker', exact: true }).click();
@@ -129,6 +152,84 @@ test('trainer uploads and inspects a local LoRA, saves independent initializatio
   await staleUploadResponse;
   await expect(page.getByRole('button', { name: 'Inspect LoRA', exact: true })).toBeEnabled();
   await expect(page.getByLabel('Continuation source path')).toHaveValue('/latest-source.safetensors');
+});
+
+test('continuation keeps separate recoverable drafts and imports into its dedicated workspace', async ({ page }) => {
+  await installLocalMonaco(page);
+  await page.route('**/api/monitor', route => route.abort());
+  await page.route('**/api/workers', route => route.fulfill({ json: { workers: [] } }));
+  page.on('dialog', dialog => dialog.accept());
+  await page.goto('/');
+  await page.getByLabel('Password', { exact: true }).fill('browser-fixture-local-only');
+  await page.getByRole('button', { name: 'Check Password' }).click();
+  await expect(page.getByLabel('Password', { exact: true })).toHaveCount(0);
+  await page.goto('/jobs/new');
+  await page.getByLabel('Training name', { exact: true }).fill('ordinary_draft');
+  const continuationLink = page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Continue LoRA', exact: true });
+  await continuationLink.click();
+  await page.getByRole('button', { name: 'Leave setup', exact: true }).click();
+  await expect(page.getByLabel('Training name', { exact: true })).toHaveValue('continued_lora');
+  await page.getByLabel('Training name', { exact: true }).fill('continuation_draft');
+  await page.getByRole('link', { name: 'New training', exact: true }).click();
+  await page.getByRole('button', { name: 'Leave setup', exact: true }).click();
+  await expect(page.getByLabel('Training name', { exact: true })).toHaveValue('ordinary_draft');
+  await continuationLink.click();
+  await page.getByRole('button', { name: 'Leave setup', exact: true }).click();
+  await expect(page.getByLabel('Training name', { exact: true })).toHaveValue('continuation_draft');
+  await page.reload();
+  await page.getByRole('button', { name: 'Restore draft', exact: true }).click();
+  await expect(page.getByLabel('Training name', { exact: true })).toHaveValue('continuation_draft');
+
+  await page.getByRole('link', { name: 'New training', exact: true }).click();
+  await page.getByRole('button', { name: 'Leave setup', exact: true }).click();
+  await page.getByRole('button', { name: 'Restore draft', exact: true }).click();
+  await expect(page.getByLabel('Training name', { exact: true })).toHaveValue('ordinary_draft');
+  const imported = structuredClone(defaultJobConfig);
+  imported.config.name = 'imported_continuation';
+  const process = imported.config.process[0];
+  process.model.arch = 'krea2'; process.model.name_or_path = 'krea/Krea-2-Raw';
+  process.network!.continuation = { version: 1, source_sha256: '', training_base: 'raw', deployment_base: 'turbo' };
+  process.network!.pretrained_lora_path = '/models/imported-source.safetensors';
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: 'Import config', exact: true }).click();
+  await (await chooser).setFiles({ name: 'continuation.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(imported)) });
+  await expect(page).toHaveURL(/\/loras\/continue$/);
+  await expect(page.getByLabel('Training name', { exact: true })).toHaveValue('imported_continuation');
+  await page.reload();
+  await page.getByRole('button', { name: 'Restore draft', exact: true }).click();
+  await expect(page.getByLabel('Continuation source path')).toHaveValue('/models/imported-source.safetensors');
+  await expect(page.getByLabel('Training name', { exact: true })).toHaveValue('imported_continuation');
+  // A draft written before the dedicated workspace existed migrates once,
+  // keeps its recovery baseline, and no longer occupies regular New training.
+  await page.evaluate(() => {
+    const key = 'aitk:training-draft:v1:continuation:new';
+    const stored = sessionStorage.getItem(key);
+    if (!stored) throw new Error('Expected a recoverable continuation draft');
+    sessionStorage.setItem('aitk:training-draft:v1:new', stored);
+    sessionStorage.removeItem(key);
+  });
+  // Leaving the live editor would autosave its old key; clear that copy after
+  // the full-page navigation, before restoring the legacy draft.
+  await page.goto('/jobs/new');
+  await page.evaluate(() => sessionStorage.removeItem('aitk:training-draft:v1:continuation:new'));
+  await page.getByRole('button', { name: 'Restore draft', exact: true }).click();
+  await expect(page).toHaveURL(/\/loras\/continue$/);
+  await page.reload();
+  await page.getByRole('button', { name: 'Restore draft', exact: true }).click();
+  await expect(page.getByLabel('Training name', { exact: true })).toHaveValue('imported_continuation');
+  await page.getByRole('link', { name: 'New training', exact: true }).click();
+  await page.getByRole('button', { name: 'Leave setup', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'New Training Job', exact: true })).toBeVisible();
+  await continuationLink.click();
+  await expect(page.getByLabel('Training name', { exact: true })).toHaveValue('imported_continuation');
+  await page.screenshot({ path: '.review-build/continuation-workspace-dark.png' });
+  await page.getByRole('button', { name: 'More', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Switch to light mode', exact: true }).click();
+  await page.screenshot({ path: '.review-build/continuation-workspace-light.png' });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole('heading', { name: 'Continue LoRA', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: '.review-build/continuation-workspace-mobile.png' });
 });
 
 test('reviewed source samples become a dataset with clean captions and an immutable manifest', async ({ page }) => {

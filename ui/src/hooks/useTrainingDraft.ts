@@ -10,8 +10,10 @@ type StoredDraft = { draft: TrainingDraft; baseline: string };
 const drafts = new Map<string, StoredDraft>();
 let returnPath = '/jobs/new';
 export const getTrainingReturnPath = () => returnPath;
+export const readTrainingDraftState = (key: string): StoredTrainingDraft | undefined => drafts.get(key);
 export const readTrainingDraft = (key: string) => drafts.get(key)?.draft;
 export const restoreTrainingDraft = (key: string, value: StoredTrainingDraft) => drafts.set(key, value);
+export const clearTrainingDraft = (key: string): void => { drafts.delete(key); removeStoredTrainingDraft(key); };
 const serialize = (draft: TrainingDraft) => JSON.stringify(draft);
 type NavigateEvent = Event & {
   canIntercept: boolean;

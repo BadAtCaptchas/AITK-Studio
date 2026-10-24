@@ -1,11 +1,11 @@
 'use client';
 import { useEffect, useRef, useState, type RefObject } from 'react';
-import { Box, Database, FileText, Image, Search, Settings2, Target } from 'lucide-react';
+import { Box, Database, FileText, Image, Search, Settings2, Target, Upload } from 'lucide-react';
 import type { JobConfig } from '@/types';
 import type { TrainingFieldTarget } from '@/utils/trainingValidation';
 import styles from './trainingWorkspace.module.css';
 
-const sections = [
+const trainingSections = [
   { id: 'job-basics', title: 'Basics', Icon: FileText },
   { id: 'job-model', title: 'Model', Icon: Box },
   { id: 'job-training', title: 'Training', Icon: Settings2 },
@@ -13,6 +13,7 @@ const sections = [
   { id: 'job-samples', title: 'Samples', Icon: Image },
   { id: 'job-validation', title: 'Validation', Icon: Target },
 ] as const;
+const continuationSections = [{ id: 'job-source', title: 'Source & preservation', Icon: Upload }, ...trainingSections] as const;
 
 function revealElement(wrapper: HTMLElement): void {
   let ancestor: HTMLElement | null = wrapper;
@@ -35,9 +36,10 @@ export function revealTrainingField(form: HTMLElement, target: TrainingFieldTarg
   if (wrapper) revealElement(wrapper);
 }
 
-export default function TrainingSectionNav({ formRef, config }: { formRef: RefObject<HTMLFormElement | null>; config: JobConfig }) {
+export default function TrainingSectionNav({ formRef, config, continuation = false }: { formRef: RefObject<HTMLFormElement | null>; config: JobConfig; continuation?: boolean }) {
+  const sections = continuation ? continuationSections : trainingSections;
   const [query, setQuery] = useState('');
-  const [active, setActive] = useState<string>('job-basics');
+  const [active, setActive] = useState<string>(sections[0].id);
   const [matches, setMatches] = useState<Array<{ label: string; section: string; element: HTMLElement }>>([]);
   const resultsRef = useRef<HTMLDivElement>(null);
 
@@ -49,7 +51,7 @@ export default function TrainingSectionNav({ formRef, config }: { formRef: RefOb
     sync();
     window.addEventListener('hashchange', sync);
     return () => window.removeEventListener('hashchange', sync);
-  }, []);
+  }, [sections]);
 
   useEffect(() => {
     const root = formRef.current?.closest<HTMLElement>('[role="tabpanel"]');
@@ -71,7 +73,7 @@ export default function TrainingSectionNav({ formRef, config }: { formRef: RefOb
     window.addEventListener('resize', syncScroll);
     syncScroll();
     return () => { cancelAnimationFrame(frame); root.removeEventListener('scroll', syncScroll); window.removeEventListener('resize', syncScroll); };
-  }, [formRef]);
+  }, [formRef, sections]);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
@@ -90,7 +92,7 @@ export default function TrainingSectionNav({ formRef, config }: { formRef: RefOb
     setMatches(found.slice(0, 30));
     });
     return () => cancelAnimationFrame(frame);
-  }, [query, config, formRef]);
+  }, [query, config, formRef, sections]);
 
   return (
     <nav className={styles.navigator} aria-label="Training sections">

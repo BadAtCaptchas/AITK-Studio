@@ -14,6 +14,7 @@ import { loadTrainingSource, trainingFixture, migration } from './trainingMigrat
 
 const domain = loadTrainingSource('domain/loraContinuation.ts');
 const health = loadTrainingSource('utils/workerHealth.ts');
+const workspaces = loadTrainingSource('domain/trainingWorkspaces.ts');
 const commandInput = { isRecord: value => !!value && typeof value === 'object' && !Array.isArray(value) };
 function load(relative, dependencies) {
   const code = ts.transpileModule(fs.readFileSync(new URL('../src/' + relative, import.meta.url), 'utf8'), {
@@ -36,6 +37,39 @@ function fixture(mode = 'none') {
   return config;
 }
 
+const continuationSetup = load('app/loras/continue/continuationConfig.ts', {
+  '@/app/jobs/new/jobConfig': loadTrainingSource('app/jobs/new/jobConfig.ts'),
+  '@/app/jobs/new/utils': loadTrainingSource('app/jobs/new/utils.ts'),
+  '@/utils/hooks': loadTrainingSource('utils/hooks.tsx'),
+});
+
+test('dedicated continuation defaults and base changes retain source topology and preservation settings', () => {
+  const defaults = continuationSetup.defaultContinuationConfig().config.process[0];
+  assert.equal(defaults.model.arch, 'krea2');
+  assert.equal(defaults.model.name_or_path, 'krea/Krea-2-Raw');
+  assert.equal(defaults.network.continuation.training_base, 'raw');
+  assert.deepEqual(defaults.train.source_preservation, { mode: 'none' });
+  assert.throws(() => continuationSetup.initializeContinuationConfig(trainingFixture()), /Krea 2/);
+  const config = fixture('replay_teacher');
+  const before = structuredClone(config);
+  const turbo = continuationSetup.changeContinuationBase(config, 'krea2:turbo');
+  const process = turbo.config.process[0];
+  assert.equal(process.model.name_or_path, 'krea/Krea-2-Turbo');
+  assert.match(process.model.assistant_lora_path, /krea2_turbo_training_adapter/);
+  assert.equal(process.network.continuation.training_base, 'turbo');
+  assert.equal(process.network.pretrained_lora_path, before.config.process[0].network.pretrained_lora_path);
+  assert.equal(process.network.linear, before.config.process[0].network.linear);
+  assert.deepEqual(process.train.source_preservation, before.config.process[0].train.source_preservation);
+  assert.equal(process.datasets[1].caption_dropout_rate, 0);
+  assert.equal(process.datasets[1].role, 'source_preservation');
+  assert.deepEqual(config, before);
+  const raw = continuationSetup.changeContinuationBase(turbo, 'krea2').config.process[0];
+  assert.equal(raw.model.name_or_path, 'krea/Krea-2-Raw');
+  assert.equal(raw.model.assistant_lora_path, undefined);
+  assert.equal(raw.network.continuation.training_base, 'raw');
+  assert.deepEqual(domain.continuationConfigErrors(raw), []);
+});
+
 test('all four preservation modes have explicit data contracts', () => {
   for (const mode of domain.preservationModes) {
     const p = fixture(mode).config.process[0];
@@ -49,6 +83,18 @@ test('all four preservation modes have explicit data contracts', () => {
   assert.equal(domain.continuationConfigErrors(p).length, 2);
   delete p.network.continuation;
   assert.match(domain.continuationConfigErrors(p).join(' '), /requires an inspected/);
+});
+
+test('continuation has a separate editor route and draft namespace for creation, editing and cloning', () => {
+  const source = fixture();
+  assert.equal(workspaces.trainingWorkspaceForConfig(source), 'continuation');
+  assert.equal(workspaces.trainingJobEditorPath(JSON.stringify(source)), '/loras/continue');
+  assert.equal(workspaces.trainingJobEditorPath(JSON.stringify(trainingFixture())), '/jobs/new');
+  assert.equal(workspaces.trainingJobEditorPath('invalid'), '/jobs/new');
+  for (const query of ['', 'id=existing', 'cloneId=original']) {
+    const params = new URLSearchParams(query);
+    assert.notEqual(workspaces.trainingWorkspaceDraftKey('training', params), workspaces.trainingWorkspaceDraftKey('continuation', params));
+  }
 });
 
 test('preservation cannot silently replace curated captions with empty conditioning', () => {

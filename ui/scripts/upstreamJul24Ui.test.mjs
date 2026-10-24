@@ -54,9 +54,12 @@ test('Studio supported-model documentation contains the July 24 additions', () =
   assert.match(modelCatalog, /krea\/Krea-2-Turbo.*Krea 2 Turbo Edit Training/);
 });
 
-test('production builds retain strict type checks and streamed command limits', () => {
+test('CI retains strict type checks and streamed command limits without checking consumer builds', () => {
   const packageJson = JSON.parse(readUi('package.json'));
-  assert.match(packageJson.scripts.build, /npm run typecheck/);
+  assert.match(packageJson.scripts.ci, /npm run typecheck/);
+  assert.doesNotMatch(packageJson.scripts.build, /typecheck/);
+  assert.doesNotMatch(packageJson.scripts['build:fast'], /typecheck/);
+  assert.doesNotMatch(packageJson.scripts.typecheck, /--noCheck/);
   assert.equal(JSON.parse(readUi('tsconfig.json')).compilerOptions.strict, true);
   assert.equal(packageJson.dependencies.next, undefined);
   assert.match(readUi('src/server/commandInput.ts'), /maxBytes/);

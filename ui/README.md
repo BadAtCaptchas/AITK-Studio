@@ -32,7 +32,7 @@ Report reproducible UI bugs in the main repository: [github.com/BadAtCaptchas/AI
 ## Useful Scripts
 
 - `npm run update_db` prepares the database and Prisma client.
-- `npm run build` checks types and builds the worker, API server, and interface.
+- `npm run build` builds the worker, API server, and interface.
 - `npm run start` starts the built worker and UI on port `8675`.
 - `npm run test:metrics`, `npm run test:advisor`, `npm run test:tensorboard`, `npm run test:telemetry`, `npm run test:remote`, and `npm run test:scripts` run focused Node tests.
 

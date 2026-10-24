@@ -576,7 +576,7 @@ test('queue remains usable in both themes across desktop, tablet, mobile and ref
   await page.goto('/jobs');
   for (const theme of ['dark', 'light'] as const) {
     if (theme === 'light') {
-      await page.getByRole('button', { name: 'More tools', exact: true }).click();
+      await page.getByRole('button', { name: 'More', exact: true }).click();
       await page.getByRole('menuitem', { name: 'Switch to light mode', exact: true }).click();
       await page.keyboard.press('Escape');
     }

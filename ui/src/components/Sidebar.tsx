@@ -9,7 +9,7 @@ import { authRequiredState, logout } from '@/utils/api';
 
 const navigation = [
   { name: 'Monitor', href: '/dashboard' },
-  { name: 'Train', href: '/jobs' },
+  { name: 'Runs', href: '/jobs' },
   { name: 'Datasets', href: '/datasets' },
   { name: 'Models', href: '/models' },
   { name: 'Generate', href: '/generate' },
@@ -49,12 +49,11 @@ export default function Sidebar({ onSearch }: { onSearch: () => void }) {
           <Settings size={18} />
         </Link>
         <Menu>
-          <MenuButton className="operator-icon-button" aria-label="More tools">
+          <MenuButton className="operator-icon-button" aria-label="More">
             <MoreHorizontal size={18} />
           </MenuButton>
           <MenuItems anchor="bottom end" className="studio-app-menu z-40">
             {[
-              ['Queue', '/jobs'],
               ['Tools', '/tools'],
               ['Workflows', '/workflows'],
               ['Watermark', '/watermark'],

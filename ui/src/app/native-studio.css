@@ -450,6 +450,17 @@ textarea {
 .studio-compact-chart .monitor-events {
   display: none;
 }
+@media (pointer: coarse) {
+  .operator-button,
+  .operator-button-primary,
+  .studio-filter-tabs button {
+    min-height: 44px;
+  }
+  .operator-icon-button {
+    width: 44px;
+    height: 44px;
+  }
+}
 @media (max-width: 1000px) {
   .studio-app-header {
     gap: 12px;

@@ -178,73 +178,120 @@ export default function ModelsPage() {
             No models match this filter.
           </p>
         ) : (
-          <div className="overflow-x-auto border-y border-gray-800">
-            <table className="w-full min-w-[760px] border-collapse text-sm">
-              <thead className="border-b border-gray-800 bg-gray-900 text-xs text-gray-400">
-                <tr>
-                  {sortHeader('name', 'Name')}
-                  {sortHeader('size', 'Size')}
-                  {sortHeader('updated', 'Updated')}
-                  <th scope="col" className="px-4 py-2 text-left font-medium">
-                    Trigger words
-                  </th>
-                  <th scope="col" className="px-4 py-2 text-right font-medium">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(model => (
-                  <tr key={model.id} className="border-b border-gray-800 last:border-b-0 hover:bg-gray-900/60">
-                    <th scope="row" className="max-w-[320px] px-4 py-2.5 text-left font-medium">
-                      <Link
-                        className="block truncate hover:text-brand-300"
-                        title={model.filename}
-                        href={`/generate?model_ref=${encodeURIComponent(model.id)}`}
-                      >
-                        {model.label}
-                      </Link>
+          <>
+            <div className="hidden overflow-x-auto border-y border-gray-800 sm:block">
+              <table className="w-full min-w-[760px] border-collapse text-sm">
+                <thead className="border-b border-gray-800 bg-gray-900 text-xs text-gray-400">
+                  <tr>
+                    {sortHeader('name', 'Name')}
+                    {sortHeader('size', 'Size')}
+                    {sortHeader('updated', 'Updated')}
+                    <th scope="col" className="px-4 py-2 text-left font-medium">
+                      Trigger words
                     </th>
-                    <td className="whitespace-nowrap px-4 py-2.5 tabular-nums text-gray-400">
-                      {modelSize(model.sizeBytes)}
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-2.5 tabular-nums text-gray-400">
-                      {modelTimestamp(model.updatedAt) ? (
-                        <time dateTime={model.updatedAt} title={new Date(model.updatedAt).toLocaleString()}>
-                          {new Date(model.updatedAt).toLocaleDateString()}
-                        </time>
-                      ) : (
-                        '—'
-                      )}
-                    </td>
-                    <td className="max-w-[240px] px-4 py-2.5 text-gray-400">
-                      <span className="block truncate" title={model.triggerWords.join(', ')}>
-                        {model.triggerWords.join(', ') || '—'}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <div className="flex justify-end gap-3 whitespace-nowrap">
-                        {model.jobId && (
-                          <Link
-                            className="text-gray-400 hover:text-gray-100"
-                            href={`/jobs/${encodeURIComponent(model.jobId)}`}
-                          >
-                            Training run
-                          </Link>
-                        )}
+                    <th scope="col" className="px-4 py-2 text-right font-medium">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(model => (
+                    <tr key={model.id} className="border-b border-gray-800 last:border-b-0 hover:bg-gray-900/60">
+                      <th scope="row" className="max-w-[320px] px-4 py-2.5 text-left font-medium">
                         <Link
-                          className="text-brand-300 hover:text-brand-200"
+                          className="block truncate hover:text-brand-300"
+                          title={model.filename}
                           href={`/generate?model_ref=${encodeURIComponent(model.id)}`}
                         >
-                          Generate
+                          {model.label}
                         </Link>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                      </th>
+                      <td className="whitespace-nowrap px-4 py-2.5 tabular-nums text-gray-400">
+                        {modelSize(model.sizeBytes)}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-2.5 tabular-nums text-gray-400">
+                        {modelTimestamp(model.updatedAt) ? (
+                          <time dateTime={model.updatedAt} title={new Date(model.updatedAt).toLocaleString()}>
+                            {new Date(model.updatedAt).toLocaleDateString()}
+                          </time>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      <td className="max-w-[240px] px-4 py-2.5 text-gray-400">
+                        <span className="block truncate" title={model.triggerWords.join(', ')}>
+                          {model.triggerWords.join(', ') || '—'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <div className="flex justify-end gap-3 whitespace-nowrap">
+                          {model.jobId && (
+                            <Link
+                              className="text-gray-400 hover:text-gray-100"
+                              href={`/jobs/${encodeURIComponent(model.jobId)}`}
+                            >
+                              Training run
+                            </Link>
+                          )}
+                          <Link
+                            className="text-brand-300 hover:text-brand-200"
+                            href={`/generate?model_ref=${encodeURIComponent(model.id)}`}
+                          >
+                            Generate
+                          </Link>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="divide-y divide-gray-800 border-y border-gray-800 sm:hidden">
+              {filtered.map(model => (
+                <article key={model.id} aria-label={model.label} className="px-3 py-4">
+                  <Link
+                    className="block break-words font-medium text-gray-100 hover:text-brand-300"
+                    title={model.filename}
+                    href={`/generate?model_ref=${encodeURIComponent(model.id)}`}
+                  >
+                    {model.label}
+                  </Link>
+                  <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                    <div>
+                      <dt className="text-gray-500">Size</dt>
+                      <dd className="mt-0.5 tabular-nums text-gray-300">{modelSize(model.sizeBytes)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-gray-500">Updated</dt>
+                      <dd className="mt-0.5 tabular-nums text-gray-300">
+                        {modelTimestamp(model.updatedAt) ? (
+                          <time dateTime={model.updatedAt} title={new Date(model.updatedAt).toLocaleString()}>
+                            {new Date(model.updatedAt).toLocaleDateString()}
+                          </time>
+                        ) : (
+                          '—'
+                        )}
+                      </dd>
+                    </div>
+                    <div className="col-span-2">
+                      <dt className="text-gray-500">Trigger words</dt>
+                      <dd className="mt-0.5 break-words text-gray-300">{model.triggerWords.join(', ') || '—'}</dd>
+                    </div>
+                  </dl>
+                  <div className="mt-3 flex flex-wrap justify-end gap-3 text-sm">
+                    {model.jobId && (
+                      <Link className="studio-text-link" href={`/jobs/${encodeURIComponent(model.jobId)}`}>
+                        Training run
+                      </Link>
+                    )}
+                    <Link className="studio-text-link" href={`/generate?model_ref=${encodeURIComponent(model.id)}`}>
+                      Generate
+                    </Link>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </>
         )}
       </MainContent>
     </>

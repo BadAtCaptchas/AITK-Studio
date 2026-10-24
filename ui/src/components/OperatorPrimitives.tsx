@@ -69,10 +69,12 @@ export function ProgressBar({
   value,
   tone = 'info',
   className,
+  label = 'Progress',
 }: {
   value: number;
   tone?: Extract<Tone, 'info' | 'success' | 'warning' | 'danger'>;
   className?: string;
+  label?: string;
 }) {
   const safeValue = Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
   const fillClass = {
@@ -83,8 +85,20 @@ export function ProgressBar({
   }[tone];
 
   return (
-    <div className={classNames('h-1.5 overflow-hidden rounded-sm bg-gray-800', className)}>
-      <div className={classNames('h-full rounded-sm transition-all', fillClass)} style={{ width: `${safeValue}%` }} />
+    <div
+      className={classNames('h-1.5 overflow-hidden rounded-sm bg-gray-800', className)}
+      role="progressbar"
+      aria-label={label}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(safeValue)}
+      aria-valuetext={`${Math.round(safeValue)}%`}
+    >
+      <div
+        className={classNames('h-full rounded-sm transition-all', fillClass)}
+        style={{ width: `${safeValue}%` }}
+        aria-hidden="true"
+      />
     </div>
   );
 }
@@ -106,7 +120,11 @@ export function PageNotice({
     tone === 'danger' || tone === 'warning' ? AlertTriangle : tone === 'success' ? CheckCircle2 : CircleDashed;
 
   return (
-    <div className={classNames('border px-3 py-2 text-sm', toneClasses[tone], className)} role="status">
+    <div
+      className={classNames('border px-3 py-2 text-sm', toneClasses[tone], className)}
+      role={tone === 'danger' ? 'alert' : 'status'}
+      aria-atomic="true"
+    >
       <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start">
         <Icon className="mt-0.5 h-4 w-4 flex-none" />
         <div className="min-w-0 flex-1">

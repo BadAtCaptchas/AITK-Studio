@@ -785,7 +785,7 @@ function TrainingFormEditor({ draftKey, initialDraft }: { draftKey: string; init
             <button type="button" className="underline" onClick={() => setShowAdvancedView(true)}>Fix Config</button>
           </div>
         )}
-        {saveError && <div role="alert" className="px-4 py-3"><PageNotice tone="danger" title="Could not save job">{saveError} <button type="button" className="underline" onClick={() => void saveJob()}>Retry</button></PageNotice></div>}
+        {saveError && <div className="px-4 py-3"><PageNotice tone="danger" title="Could not save job">{saveError} <button type="button" className="underline" onClick={() => void saveJob()}>Retry</button></PageNotice></div>}
         {(settingsError || gpuStatus === 'error' || datasetFetchStatus === 'error' || workerStatus === 'error') && (
           <div className="px-4 py-3">
             <PageNotice tone="danger" title="Some setup information is unavailable">
@@ -809,7 +809,7 @@ function TrainingFormEditor({ draftKey, initialDraft }: { draftKey: string; init
       <div id="training-config-view" role="tabpanel" aria-labelledby="training-config-tab" hidden={!showAdvancedView} className={`${styles.view} ${styles.configView}`}>
         <div className={styles.mobileCompute}>{computeControls}</div>
         {migrationNotice}
-        {saveError && <div role="alert" className="px-4 py-3"><PageNotice tone="danger" title="Could not save job">{saveError} <button type="button" className="underline" onClick={() => void saveJob()}>Retry</button></PageNotice></div>}
+        {saveError && <div className="px-4 py-3"><PageNotice tone="danger" title="Could not save job">{saveError} <button type="button" className="underline" onClick={() => void saveJob()}>Retry</button></PageNotice></div>}
         <div className="min-h-0 flex-1">
           <AdvancedConfigEditor config={jobConfig} setConfig={applyExternalConfig} transformOnParse={transformAdvancedConfig}
             onValidityChange={setRawEditorValid} onDirtyChange={setRawEditorDirty} sessionKey={draftKey} active={showAdvancedView} readOnly={editorLocked} ariaLabel="Training configuration YAML" />

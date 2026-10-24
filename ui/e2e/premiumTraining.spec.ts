@@ -304,7 +304,7 @@ test('query-only training navigation renews the dirty guard while retaining the 
   await expect(page).toHaveURL(/\/jobs\/new$/);
   await expect(page.getByLabel('Training name', { exact: true })).toHaveValue('query_draft_before');
   await page.getByLabel('Training name', { exact: true }).fill('query_draft_after');
-  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Train', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Runs', exact: true }).click();
   await expect(page.getByText('Leave training setup?', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(page).toHaveURL(/\/jobs\/new$/);
@@ -314,12 +314,12 @@ test('query-only training navigation renews the dirty guard while retaining the 
 test('reverting a draft clears stale recovery and does not resurrect canceled edits on return', async ({ page }) => {
   const originalName = await page.getByLabel('Training name', { exact: true }).inputValue();
   await page.getByLabel('Training name', { exact: true }).fill('reverted_draft_fixture');
-  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Train', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Runs', exact: true }).click();
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   expect(await page.evaluate(() => sessionStorage.getItem('aitk:training-draft:v1:new') !== null)).toBe(true);
   await page.getByLabel('Training name', { exact: true }).fill(originalName);
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem('aitk:training-draft:v1:new') !== null)).toBe(false);
-  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Train', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Runs', exact: true }).click();
   await expect(page).toHaveURL(/\/jobs$/);
   await page.goBack();
   await expect(page.getByLabel('Training name', { exact: true })).toHaveValue(originalName);
@@ -464,7 +464,7 @@ test('a save response cannot navigate away from a workspace entered while the sa
     const posted = page.waitForRequest(request => request.url().endsWith('/api/jobs') && request.method() === 'POST');
     await page.getByRole('button', { name: 'Create Job', exact: true }).click();
     await posted;
-    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Train', exact: true }).click();
+    await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Runs', exact: true }).click();
     await page.getByRole('button', { name: 'Leave setup', exact: true }).click();
     await expect(page).toHaveURL(/\/jobs$/);
     const completed = page.waitForResponse(response => response.url().endsWith('/api/jobs') && response.request().method() === 'POST');
@@ -503,11 +503,11 @@ test('continuous sections, parameter navigation and responsive Create control', 
   await page.getByLabel('Training name', { exact: true }).fill('portrait_flux_v4');
   await page.locator('#training-form-view').evaluate(element => { element.scrollTop = 0; });
   await page.screenshot({ path: '.review-build/premium-training-desktop-dark.png' });
-  await page.getByRole('button', { name: 'More tools', exact: true }).click();
+  await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByTitle('Switch to light mode', { exact: true }).click();
   await page.keyboard.press('Escape');
   await page.screenshot({ path: '.review-build/premium-training-desktop-light.png' });
-  await page.getByRole('button', { name: 'More tools', exact: true }).click();
+  await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByTitle('Switch to dark mode', { exact: true }).click();
   await page.keyboard.press('Escape');
   for (const width of [1440, 1024, 390]) {
@@ -519,7 +519,7 @@ test('continuous sections, parameter navigation and responsive Create control', 
     await page.screenshot({ path: `.review-build/premium-training-${width}.png` });
   }
   await page.screenshot({ path: '.review-build/premium-training-mobile.png' });
-  await page.getByRole('button', { name: 'More tools', exact: true }).click();
+  await page.getByRole('button', { name: 'More', exact: true }).click();
   await page.getByTitle('Switch to light mode', { exact: true }).click();
   await page.keyboard.press('Escape');
   for (const width of [1024, 390]) {
@@ -546,7 +546,7 @@ test('continuous sections, parameter navigation and responsive Create control', 
     await expect(zoomPage.getByRole('combobox', { name: 'Compute', exact: true })).toBeVisible();
     for (const theme of ['dark', 'light']) {
       if (theme === 'light') {
-        await zoomPage.getByRole('button', { name: 'More tools', exact: true }).click();
+        await zoomPage.getByRole('button', { name: 'More', exact: true }).click();
         await zoomPage.getByTitle('Switch to light mode', { exact: true }).click();
         await zoomPage.keyboard.press('Escape');
       }
@@ -637,11 +637,11 @@ test('invalid YAML, cursor and selection survive switching views and guarded nav
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   await page.keyboard.press('Escape');
   await page.getByRole('tab', { name: 'Config', exact: true }).click();
-  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Train', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Runs', exact: true }).click();
   await expect(page.getByText('Leave training setup?', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   expect((await editorSnapshot(page)).text).toEqual(before.text);
-  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Train', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Runs', exact: true }).click();
   await page.getByRole('button', { name: 'Leave setup', exact: true }).click();
   await expect(page).toHaveURL(/\/jobs$/);
   await page.goBack();
@@ -652,7 +652,7 @@ test('invalid YAML, cursor and selection survive switching views and guarded nav
   await page.screenshot({ path: '.review-build/premium-training-invalid-config.png' });
   for (const theme of ['dark', 'light']) {
     if (theme === 'light') {
-      await page.getByRole('button', { name: 'More tools', exact: true }).click();
+      await page.getByRole('button', { name: 'More', exact: true }).click();
       await page.getByTitle('Switch to light mode', { exact: true }).click();
       await page.keyboard.press('Escape');
     }

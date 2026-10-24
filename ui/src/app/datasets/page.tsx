@@ -1036,58 +1036,107 @@ export default function Datasets() {
     const stateContent = renderBrowserState();
     if (stateContent) return stateContent;
     return (
-      <div className="overflow-hidden border-y border-gray-800">
-        <div className="overflow-x-auto">
-          <div className="min-w-[1120px]">
-            <div className="grid grid-cols-[2.75rem_minmax(16rem,1.5fr)_8rem_minmax(11rem,0.8fr)_9rem_7rem_16rem] border-b border-gray-800 bg-gray-900 text-xs text-gray-400">
-              <div className="px-3 py-2" />
-              <div className="px-3 py-2 font-medium">Name</div>
-              <div className="px-3 py-2 font-medium">Items</div>
-              <div className="px-3 py-2 font-medium">Captions</div>
-              <div className="px-3 py-2 font-medium">Source</div>
-              <div className="px-3 py-2 font-medium">Type</div>
-              <div className="px-3 py-2 text-right font-medium">Actions</div>
-            </div>
-            {filteredTableRows.map(row => {
-              const selected = isRowSelected(row);
-              const rowClass = selected ? 'bg-brand-950/35 ring-1 ring-inset ring-brand-700/45' : '';
-              return (
-                <div
-                  key={row.ref}
-                  className={`grid grid-cols-[2.75rem_minmax(16rem,1.5fr)_8rem_minmax(11rem,0.8fr)_9rem_7rem_16rem] items-center border-b border-gray-800 text-sm text-gray-300 last:border-b-0 hover:bg-gray-800/70 ${rowClass}`}
-                >
-                  <div className="flex items-center justify-center px-3 py-2">{renderSelectionCheckbox(row)}</div>
-                  <div className="min-w-0 px-3 py-2">
-                    <Link
-                      href={datasetHref(row)}
-                      className="flex min-w-0 items-center gap-3 text-gray-100 hover:text-brand-100"
-                    >
-                      <DatasetFolderIcon
-                        size="sm"
-                        encrypted={row.encrypted}
-                        unlocked={row.unlocked}
-                        remote={row.source === 'remote'}
-                        previewSrc={datasetPreviewUrls[row.ref]}
-                      />
-                      <span className="min-w-0 truncate font-medium">{row.name}</span>
-                    </Link>
-                  </div>
-                  <div className="px-3 py-2 text-xs text-gray-400">{datasetMediaLabel(row.dataset, row.unlocked)}</div>
-                  <div className="px-3 py-2">
-                    <div className="flex min-w-0 flex-col gap-1.5">
-                      <CaptionStatusBadge dataset={row.dataset} unlocked={row.unlocked} />
-                      <DatasetWatcherProgressBadge progress={autoCaptionProgressByDataset[row.name]} />
+      <>
+        <div className="hidden overflow-hidden border-y border-gray-800 sm:block">
+          <div className="overflow-x-auto">
+            <div className="min-w-[1120px]">
+              <div className="grid grid-cols-[2.75rem_minmax(16rem,1.5fr)_8rem_minmax(11rem,0.8fr)_9rem_7rem_16rem] border-b border-gray-800 bg-gray-900 text-xs text-gray-400">
+                <div className="px-3 py-2" />
+                <div className="px-3 py-2 font-medium">Name</div>
+                <div className="px-3 py-2 font-medium">Items</div>
+                <div className="px-3 py-2 font-medium">Captions</div>
+                <div className="px-3 py-2 font-medium">Source</div>
+                <div className="px-3 py-2 font-medium">Type</div>
+                <div className="px-3 py-2 text-right font-medium">Actions</div>
+              </div>
+              {filteredTableRows.map(row => {
+                const selected = isRowSelected(row);
+                const rowClass = selected ? 'bg-brand-950/35 ring-1 ring-inset ring-brand-700/45' : '';
+                return (
+                  <div
+                    key={row.ref}
+                    className={`grid grid-cols-[2.75rem_minmax(16rem,1.5fr)_8rem_minmax(11rem,0.8fr)_9rem_7rem_16rem] items-center border-b border-gray-800 text-sm text-gray-300 last:border-b-0 hover:bg-gray-800/70 ${rowClass}`}
+                  >
+                    <div className="flex items-center justify-center px-3 py-2">{renderSelectionCheckbox(row)}</div>
+                    <div className="min-w-0 px-3 py-2">
+                      <Link
+                        href={datasetHref(row)}
+                        className="flex min-w-0 items-center gap-3 text-gray-100 hover:text-brand-100"
+                      >
+                        <DatasetFolderIcon
+                          size="sm"
+                          encrypted={row.encrypted}
+                          unlocked={row.unlocked}
+                          remote={row.source === 'remote'}
+                          previewSrc={datasetPreviewUrls[row.ref]}
+                        />
+                        <span className="min-w-0 truncate font-medium">{row.name}</span>
+                      </Link>
                     </div>
+                    <div className="px-3 py-2 text-xs text-gray-400">
+                      {datasetMediaLabel(row.dataset, row.unlocked)}
+                    </div>
+                    <div className="px-3 py-2">
+                      <div className="flex min-w-0 flex-col gap-1.5">
+                        <CaptionStatusBadge dataset={row.dataset} unlocked={row.unlocked} />
+                        <DatasetWatcherProgressBadge progress={autoCaptionProgressByDataset[row.name]} />
+                      </div>
+                    </div>
+                    <div className="min-w-0 px-3 py-2">{renderSourceBadge(row)}</div>
+                    <div className="px-3 py-2">{renderTypeBadge(row)}</div>
+                    <div className="px-3 py-2">{renderDatasetActions(row)}</div>
                   </div>
-                  <div className="min-w-0 px-3 py-2">{renderSourceBadge(row)}</div>
-                  <div className="px-3 py-2">{renderTypeBadge(row)}</div>
-                  <div className="px-3 py-2">{renderDatasetActions(row)}</div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         </div>
-      </div>
+        <div className="divide-y divide-gray-800 border-y border-gray-800 sm:hidden">
+          {filteredTableRows.map(row => (
+            <article
+              key={row.ref}
+              aria-label={row.name}
+              className={`px-3 py-4 ${isRowSelected(row) ? 'bg-brand-950/35' : ''}`}
+            >
+              <div className="flex items-start gap-3">
+                <div className="pt-1">{renderSelectionCheckbox(row)}</div>
+                <Link href={datasetHref(row)} className="flex min-w-0 flex-1 items-center gap-3 text-gray-100">
+                  <DatasetFolderIcon
+                    size="sm"
+                    encrypted={row.encrypted}
+                    unlocked={row.unlocked}
+                    remote={row.source === 'remote'}
+                    previewSrc={datasetPreviewUrls[row.ref]}
+                  />
+                  <span className="min-w-0 break-words font-medium">{row.name}</span>
+                </Link>
+              </div>
+              <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
+                <div>
+                  <dt className="text-gray-500">Items</dt>
+                  <dd className="mt-1 text-gray-300">{datasetMediaLabel(row.dataset, row.unlocked)}</dd>
+                </div>
+                <div>
+                  <dt className="text-gray-500">Source</dt>
+                  <dd className="mt-1">{renderSourceBadge(row)}</dd>
+                </div>
+                <div>
+                  <dt className="text-gray-500">Type</dt>
+                  <dd className="mt-1">{renderTypeBadge(row)}</dd>
+                </div>
+                <div>
+                  <dt className="text-gray-500">Captions</dt>
+                  <dd className="mt-1 flex min-w-0 flex-col items-start gap-1.5">
+                    <CaptionStatusBadge dataset={row.dataset} unlocked={row.unlocked} />
+                    <DatasetWatcherProgressBadge progress={autoCaptionProgressByDataset[row.name]} />
+                  </dd>
+                </div>
+              </dl>
+              <div className="mt-3 border-t border-gray-800 pt-3">{renderDatasetActions(row, true)}</div>
+            </article>
+          ))}
+        </div>
+      </>
     );
   };
   const renderIconView = () => {

@@ -188,7 +188,7 @@ test('continuous training, queue and detail retain navigation and responsive con
   await expect(page.getByRole('tabpanel', { name: 'Config', exact: true })).toBeVisible();
   await page.getByRole('tab', { name: 'Form', exact: true }).click();
   await expect(page.getByLabel('Training name', { exact: true })).toHaveValue('unsaved continuous form');
-  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Train', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Runs', exact: true }).click();
   await expect(page.getByText('Leave training setup?', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(page.getByLabel('Training name', { exact: true })).toHaveValue('unsaved continuous form');

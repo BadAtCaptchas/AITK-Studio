@@ -33,12 +33,12 @@ for (const storageFailure of ['write', 'read-and-write'] as const) {
         return originalGet.call(this, key);
       };
     }, storageFailure);
-    await page.getByRole('button', { name: 'More tools', exact: true }).click();
+    await page.getByRole('button', { name: 'More', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Switch to light mode', exact: true }).click();
     await expect(page.locator('html')).not.toHaveClass(/dark/);
     await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Datasets', exact: true }).click();
     await expect(page).toHaveURL(/\/datasets$/);
-    await page.getByRole('button', { name: 'More tools', exact: true }).click();
+    await page.getByRole('button', { name: 'More', exact: true }).click();
     await page.getByRole('menuitem', { name: 'Switch to dark mode', exact: true }).click();
     await expect(page.locator('html')).toHaveClass(/dark/);
     expect(errors).toEqual([]);
@@ -52,7 +52,7 @@ test('header utility menu exposes theme, updates and logout to keyboard users', 
   );
   await login(page);
   await page.goto('/models');
-  const trigger = page.getByRole('button', { name: 'More tools', exact: true });
+  const trigger = page.getByRole('button', { name: 'More', exact: true });
   await trigger.focus();
   await trigger.press('Enter');
   const menu = page.getByRole('menu');
@@ -178,12 +178,12 @@ test('Overview keeps starting jobs active and exposes independent history freshn
   await login(page);
   await page.goto('/dashboard');
   await expect(page.getByText(/Some worker updates failed/)).toBeVisible();
-  await page.getByRole('button', { name: 'Active', exact: true }).click();
+  await page.getByRole('button', { name: /^Active/ }).click();
   const rows = page.locator('tbody');
   await expect(rows.getByRole('button', { name: 'Fixture starting', exact: true })).toBeVisible();
   await expect(rows.getByRole('button', { name: 'Fixture remote-starting', exact: true })).toBeVisible();
   await expect(rows.getByRole('button', { name: 'Fixture completed', exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Recent', exact: true }).click();
+  await page.getByRole('button', { name: /^Recent/ }).click();
   await expect(rows.getByRole('button', { name: 'Fixture completed', exact: true })).toBeVisible();
   await expect(rows.getByRole('button', { name: /^Fixture .*starting$/ })).toHaveCount(0);
 });

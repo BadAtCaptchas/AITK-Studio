@@ -90,7 +90,7 @@ test('migrate a training job, review requirements, and create an independent run
   await page.screenshot({ path: '.review-build/model-migration.png' });
 
   // Leaving/restoring a migration draft must preserve its source and its independent save mode.
-  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Train', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Runs', exact: true }).click();
   await page.getByRole('button', { name: 'Leave setup', exact: true }).click();
   await expect(page).toHaveURL(/\/jobs$/);
   await page.goBack();

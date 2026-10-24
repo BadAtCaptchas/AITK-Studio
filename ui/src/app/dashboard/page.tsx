@@ -67,7 +67,11 @@ function HardwareStrip() {
         </span>
       )}
       {gpu.status === 'error' && (
-        <button type="button" className="text-amber-800 dark:text-amber-400 underline" onClick={() => void gpu.refreshGpuInfo()}>
+        <button
+          type="button"
+          className="text-amber-800 dark:text-amber-400 underline"
+          onClick={() => void gpu.refreshGpuInfo()}
+        >
           Retry GPU telemetry
         </button>
       )}
@@ -80,7 +84,11 @@ function HardwareStrip() {
         )}
       </span>
       {cpu.status === 'error' && (
-        <button type="button" className="text-amber-800 dark:text-amber-400 underline" onClick={() => void cpu.refreshCpuInfo()}>
+        <button
+          type="button"
+          className="text-amber-800 dark:text-amber-400 underline"
+          onClick={() => void cpu.refreshCpuInfo()}
+        >
           Retry CPU telemetry
         </button>
       )}
@@ -96,7 +104,11 @@ function HardwareStrip() {
 }
 
 function RunOutput({ job, expanded = true }: { job: Job; expanded?: boolean }) {
-  const { log, status, refresh } = useJobLog(job.id, isActiveJobStatus(job.status) ? 3000 : null, job.attempt_id ?? null);
+  const { log, status, refresh } = useJobLog(
+    job.id,
+    isActiveJobStatus(job.status) ? 3000 : null,
+    job.attempt_id ?? null,
+  );
   return (
     <details className="studio-output" open={expanded}>
       <summary>
@@ -276,6 +288,20 @@ export default function Dashboard() {
   );
   const selected = filtered.find(job => job.id === selectedID) || filtered[0];
   const counts = active.statusCounts || history.statusCounts;
+  const runCounts = counts
+    ? {
+        all: Object.values(counts).reduce((total, count) => total + count, 0),
+        active: Object.entries(counts).reduce(
+          (total, [status, count]) => total + (isActiveJobStatus(status) ? count : 0),
+          0,
+        ),
+        history: Object.entries(counts).reduce(
+          (total, [status, count]) => total + (isActiveJobStatus(status) ? 0 : count),
+          0,
+        ),
+        failed: (counts.error || 0) + (counts.failed || 0),
+      }
+    : null;
   const failedWorkerUpdates = Math.max(active.freshness?.failed ?? 0, history.freshness?.failed ?? 0);
   const workerName = (id: string) =>
     !id || id === 'local' ? 'Local' : workers.workers.find(worker => worker.id === id)?.name || id;
@@ -301,8 +327,23 @@ export default function Dashboard() {
               ['failed', 'Failed'],
             ] as const
           ).map(([value, label]) => (
-            <button key={value} type="button" aria-pressed={view === value} onClick={() => setView(value)}>
+            <button
+              key={value}
+              type="button"
+              aria-label={runCounts ? `${label}: ${runCounts[value]}` : label}
+              aria-pressed={view === value}
+              onClick={() => setView(value)}
+            >
               {label}
+              {runCounts && (
+                <span
+                  className={`ml-1.5 tabular-nums ${
+                    value === 'failed' && runCounts.failed > 0 ? 'text-amber-800 dark:text-amber-400' : 'text-gray-500'
+                  }`}
+                >
+                  {runCounts[value]}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -400,7 +441,7 @@ export default function Dashboard() {
                   </td>
                   <td>
                     <div className="flex items-center gap-3">
-                      <ProgressBar className="w-24" value={progress} />
+                      <ProgressBar className="w-24" value={progress} label={`${job.name} progress`} />
                       <span className="w-8 text-right text-gray-400">{Math.round(progress)}%</span>
                     </div>
                   </td>
@@ -495,14 +536,6 @@ export default function Dashboard() {
         </div>
       )}
       <footer className="studio-workbench-status">
-        <span>{counts ? `${counts.running || 0} running` : 'Run counts unavailable'}</span>
-        {counts && (
-          <>
-            <span>{counts.queued || 0} queued</span>
-            <span>{counts.completed || 0} completed</span>
-            <span>{(counts.error || 0) + (counts.failed || 0)} failed</span>
-          </>
-        )}
         <span className="ml-auto">
           {allJobs.length} loaded
           {active.freshness?.updatedAt ? ` · synced ${dateLabel(active.freshness.updatedAt)}` : ''}

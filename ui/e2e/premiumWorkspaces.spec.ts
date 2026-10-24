@@ -266,6 +266,10 @@ test('model library sorts numeric size and update dates, filters triggers, and k
   await page.setViewportSize({ width: 390, height: 844 });
   await noPageOverflow(page);
   await expect(page.getByLabel('Search models')).toBeVisible();
+  const mobileModel = page.getByRole('article', { name: 'Birch', exact: true });
+  await expect(mobileModel).toBeVisible();
+  await expect(mobileModel.getByRole('link', { name: 'Generate', exact: true })).toBeInViewport({ ratio: 1 });
+  await expect(page.locator('table')).toBeHidden();
   await capture(page, 'models-dark-mobile');
 });
 
@@ -655,11 +659,19 @@ test('monitor renders the selected workbench in both themes across desktop, tabl
   await monitorFixtures(page);
   await page.goto('/dashboard');
   await expect(page.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'All runs: 5', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Active: 4', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Recent: 1', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Failed: 0', exact: true })).toBeVisible();
+  await expect(page.getByRole('progressbar', { name: 'portrait_flux_v3 progress', exact: true })).toHaveAttribute(
+    'aria-valuenow',
+    '52',
+  );
   await expect(page.getByText('portrait_flux_v3', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('NVIDIA RTX 5090', { exact: true }).first()).toBeVisible();
   for (const theme of ['dark', 'light'] as const) {
     if (theme === 'light') {
-      await page.getByRole('button', { name: 'More tools', exact: true }).click();
+      await page.getByRole('button', { name: 'More', exact: true }).click();
       await page.getByTitle('Switch to light mode', { exact: true }).click();
       await page.keyboard.press('Escape');
       await expect(page.locator('html')).not.toHaveClass(/dark/);
@@ -814,6 +826,13 @@ test('library and utility workspaces retain usable controls in both themes and r
                 ratio: 1,
               });
               await expect(page.getByRole('link', { name: 'Portrait studies', exact: true })).toBeVisible();
+              if (size.width === 390) {
+                const mobileDataset = page.getByRole('article', { name: 'Portrait studies', exact: true });
+                await expect(mobileDataset).toBeVisible();
+                await expect(mobileDataset.getByRole('link', { name: 'Train', exact: true })).toBeInViewport({
+                  ratio: 1,
+                });
+              }
               if (theme === 'dark' && size.width === 1440) {
                 await page.getByRole('button', { name: 'Icons', exact: true }).click();
                 await page.reload();
@@ -857,7 +876,8 @@ test('library and utility workspaces retain usable controls in both themes and r
           }
           await capture(page, `${surface.name}-${theme}-${size.label}`);
           if (surface.name === 'models' && size.width < 800) {
-            const generate = page.locator('tbody').getByRole('link', { name: 'Generate', exact: true }).first();
+            const modelList = size.width < 640 ? page.getByRole('article') : page.locator('tbody');
+            const generate = modelList.getByRole('link', { name: 'Generate', exact: true }).first();
             await generate.focus();
             await expect(generate).toBeInViewport({ ratio: 1 });
             await capture(page, `models-${theme}-${size.label}-actions`);

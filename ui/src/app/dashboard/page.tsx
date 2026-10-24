@@ -191,8 +191,15 @@ function RunMonitor({ id, workerName }: { id: string; workerName: (id: string) =
       )}
       {job.remote_error && (
         <div className="studio-inline-notice text-amber-800 dark:text-amber-400" role="status">
-          Worker update failed: {job.remote_error}. Last sync:{' '}
-          {job.remote_sync_at ? dateLabel(job.remote_sync_at) : 'never'}.
+          <strong className="font-medium">Worker sync unavailable.</strong> Showing the last received run state. Last
+          sync: {job.remote_sync_at ? dateLabel(job.remote_sync_at) : 'never'}.
+          <button type="button" onClick={() => void refreshJob()}>
+            Retry
+          </button>
+          <details className="mt-1 text-gray-500">
+            <summary className="inline-flex cursor-pointer">Technical details</summary>
+            <p className="mt-1 break-words">{job.remote_error}</p>
+          </details>
         </div>
       )}
       <div className="studio-monitor-workspace">

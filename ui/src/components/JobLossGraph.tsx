@@ -8,7 +8,17 @@ import useGPUInfo from '@/hooks/useGPUInfo';
 import { getTotalSteps } from '@/utils/jobs';
 import { isActiveJobStatus } from '@/utils/jobStatus';
 import { assignSeriesColors } from '@/utils/seriesColors';
-import { Activity, Clock, Gauge, Image as ImageIcon, RotateCcw, Save, TrendingDown, Zap } from 'lucide-react';
+import {
+  Activity,
+  AlertTriangle,
+  Clock,
+  Gauge,
+  Image as ImageIcon,
+  RotateCcw,
+  Save,
+  TrendingDown,
+  Zap,
+} from 'lucide-react';
 import {
   useCallback,
   useDeferredValue,
@@ -397,6 +407,7 @@ function drawEventMarkers(u: uPlot, markers: EventMarker[], transitions: PhaseTr
 
   const visibleMarkers = markers.filter(marker => marker.step >= min && marker.step <= max);
   const showLabels = visibleMarkers.length <= 35;
+  const markersByStep = new Map<number, EventMarker[]>();
   for (const marker of visibleMarkers) {
     const x = bbox.left + u.valToPos(marker.step, 'x');
     const style = EVENT_STYLE[marker.kind];
@@ -409,7 +420,24 @@ function drawEventMarkers(u: uPlot, markers: EventMarker[], transitions: PhaseTr
     ctx.stroke();
     ctx.globalAlpha = 1;
     ctx.fillRect(x - 2, bbox.top + bbox.height - 8, 4, 8);
-    if (showLabels) ctx.fillText(marker.label, x + 5, bbox.top + bbox.height - 20);
+    markersByStep.set(marker.step, [...(markersByStep.get(marker.step) ?? []), marker]);
+  }
+
+  if (showLabels) {
+    const labelRightByLane = [-Infinity, -Infinity, -Infinity];
+    for (const [step, stepMarkers] of markersByStep) {
+      const x = bbox.left + u.valToPos(step, 'x');
+      const text = stepMarkers.map(marker => marker.label).join(' + ');
+      const textWidth = ctx.measureText(text).width;
+      const labelX = Math.max(bbox.left + 4, Math.min(x + 5, bbox.left + bbox.width - textWidth - 4));
+      const lane = labelRightByLane.findIndex(right => labelX >= right + 6);
+      // Dense event clusters remain readable as lines; omit labels that have no clear lane.
+      if (lane < 0) continue;
+      const labelY = bbox.top + bbox.height - 20 - lane * 14;
+      ctx.fillStyle = EVENT_STYLE[stepMarkers[0].kind].color;
+      ctx.fillText(text, labelX, labelY);
+      labelRightByLane[lane] = labelX + textWidth;
+    }
   }
 
   ctx.restore();
@@ -1071,6 +1099,7 @@ function JobLossGraphContent({ job, compact = false }: Props) {
     return [...phaseItems, ...eventItems].sort((a, b) => b.step - a.step).slice(0, 12);
   }, [eventMarkers, phaseTransitions]);
 
+  const metricsUnavailable = status === 'error' && !built.hasData;
   const noDataMessage =
     status === 'error'
       ? 'Failed to load training metrics.'
@@ -1092,11 +1121,13 @@ function JobLossGraphContent({ job, compact = false }: Props) {
     >
       <div className="bg-gray-800 px-4 py-3 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2 min-w-0">
-          <div className="h-2 w-2 rounded-full bg-blue-400" />
+          <div className="h-2 w-2 rounded-full bg-blue-400" aria-hidden="true" />
           <h2 className="text-gray-100 text-sm font-medium">{compact ? 'Metrics' : 'Training Monitor'}</h2>
-          <span className="text-xs text-gray-400 truncate" hidden={compact && built.hasData}>
+          <span className="text-xs text-gray-400 truncate">
             {built.hasData
-              ? `${built.totalPoints.toLocaleString()} rendered points`
+              ? compact
+                ? `${primaryLossKey ? `${cleanLabel(primaryLossKey)} ${formatNum(lossSummary.current)} · ` : ''}Step ${formatCompact(job.step)}`
+                : `${built.totalPoints.toLocaleString()} rendered points`
               : status === 'error'
                 ? 'Metrics unavailable'
                 : status === 'loading' || status === 'refreshing'
@@ -1107,10 +1138,13 @@ function JobLossGraphContent({ job, compact = false }: Props) {
 
         <button
           type="button"
-          onClick={refreshMetrics}
-          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs bg-gray-700/60 hover:bg-gray-700 text-gray-200 border border-gray-700"
+          onClick={() => void refreshMetrics()}
+          disabled={status === 'loading' || status === 'refreshing'}
+          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs bg-gray-700/60 hover:bg-gray-700 text-gray-200 border border-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          <RotateCcw className="h-3.5 w-3.5" />
+          <RotateCcw
+            className={`h-3.5 w-3.5 ${status === 'loading' || status === 'refreshing' ? 'animate-spin' : ''}`}
+          />
           Refresh
         </button>
       </div>
@@ -1121,7 +1155,25 @@ function JobLossGraphContent({ job, compact = false }: Props) {
         </p>
       )}
       <div className="monitor-body p-4 space-y-3 flex-1 min-h-0 overflow-auto">
-        <div className="monitor-metrics grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+        {metricsUnavailable && (
+          <div className="metrics-empty-state flex min-h-[190px] items-center justify-center p-6" role="alert">
+            <div className="max-w-md text-center">
+              <AlertTriangle className="mx-auto h-6 w-6 text-amber-500" aria-hidden="true" />
+              <h3 className="mt-3 text-sm font-semibold text-gray-100">Metrics unavailable</h3>
+              <p className="mt-2 text-sm text-gray-400">
+                The metrics request failed. Retry the request, or check the run logs and worker connection if the
+                problem continues.
+              </p>
+              <button type="button" className="operator-button mt-4" onClick={() => void refreshMetrics()}>
+                <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                Retry metrics
+              </button>
+            </div>
+          </div>
+        )}
+        <div
+          className={`monitor-metrics ${metricsUnavailable ? 'hidden' : 'grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8'}`}
+        >
           <KpiCard
             icon={<Activity className="h-4 w-4 text-emerald-400" />}
             label="Progress"
@@ -1206,7 +1258,9 @@ function JobLossGraphContent({ job, compact = false }: Props) {
           />
         </div>
 
-        <div className="monitor-chart-layout grid min-h-[420px] grid-cols-1 gap-3 xl:h-[clamp(300px,36dvh,360px)] xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_300px]">
+        <div
+          className={`monitor-chart-layout ${metricsUnavailable ? 'hidden' : 'grid min-h-[420px] grid-cols-1 gap-3 xl:h-[clamp(300px,36dvh,360px)] xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_300px]'}`}
+        >
           <div className="monitor-chart-area flex min-h-[320px] flex-col overflow-hidden border border-gray-800 bg-gray-950 sm:min-h-[360px] xl:min-h-0">
             <div className="px-3 py-2 border-b border-gray-800 flex flex-wrap items-center gap-2 justify-between">
               {compact ? (
@@ -1253,7 +1307,8 @@ function JobLossGraphContent({ job, compact = false }: Props) {
               )}
 
               <div className="flex items-center gap-2 text-xs text-gray-400">
-                {!compact && <span>server cap {CHART_MAX_POINTS.toLocaleString()}</span>}
+                {built.hasData && !isZoomed && <span className="hidden sm:inline">Drag to zoom</span>}
+                {!compact && <span>{built.totalPoints.toLocaleString()} points</span>}
                 {isZoomed && (
                   <button
                     type="button"
@@ -1269,8 +1324,16 @@ function JobLossGraphContent({ job, compact = false }: Props) {
 
             <div className="relative flex-1 min-h-0">
               {!built.hasData ? (
-                <div className="absolute inset-0 flex items-center justify-center text-sm text-gray-400">
-                  {noDataMessage}
+                <div className="absolute inset-0 flex items-center justify-center p-6" role="status">
+                  <div className="max-w-sm text-center">
+                    <Activity className="mx-auto h-5 w-5 text-gray-500" aria-hidden="true" />
+                    <h3 className="mt-3 text-sm font-medium text-gray-200">{noDataMessage}</h3>
+                    <p className="mt-2 text-xs text-gray-500">
+                      {status === 'loading' || status === 'refreshing'
+                        ? 'The chart will appear when the first training metrics arrive.'
+                        : 'Choose another metric, or check back as training progresses.'}
+                    </p>
+                  </div>
                 </div>
               ) : (
                 <>
@@ -1389,7 +1452,7 @@ function JobLossGraphContent({ job, compact = false }: Props) {
           </div>
         </div>
 
-        <div className="monitor-events border border-gray-800 bg-gray-950 p-3">
+        <div className={`monitor-events border border-gray-800 bg-gray-950 p-3 ${metricsUnavailable ? 'hidden' : ''}`}>
           <div className="flex items-center justify-between gap-3 mb-3">
             <div className="text-xs text-gray-400">Events & phase timeline</div>
             <div className="flex items-center gap-3 text-[11px] text-gray-500">

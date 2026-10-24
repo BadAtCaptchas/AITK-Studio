@@ -434,17 +434,26 @@ textarea {
   display: none;
 }
 .studio-compact-chart .monitor-body {
+  display: flex;
+  flex-direction: column;
   padding: 12px;
 }
 .studio-compact-chart .monitor-chart-layout {
   display: block;
-  height: 300px;
+  flex: 1;
+  height: auto;
   min-height: 300px;
 }
+.studio-compact-chart .monitor-chart-layout.hidden {
+  display: none;
+}
 .studio-compact-chart .monitor-chart-area {
-  height: 300px;
+  height: auto;
   min-height: 300px;
   border: 0;
+}
+.studio-compact-chart .metrics-empty-state {
+  flex: 1;
 }
 .studio-compact-chart .monitor-chart-settings,
 .studio-compact-chart .monitor-events {

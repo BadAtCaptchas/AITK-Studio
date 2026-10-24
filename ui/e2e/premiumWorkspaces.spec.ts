@@ -624,7 +624,7 @@ async function monitorFixtures(page: Page) {
   await page.route('**/api/jobs/*/metrics*', route =>
     route.fulfill({
       json: {
-        keys: ['loss/loss'],
+        keys: ['loss/loss', 'event/sample', 'event/checkpoint'],
         keyInfo: [{ key: 'loss/loss', first_seen_step: 0, last_seen_step: 1560 }],
         series: {
           'loss/loss': {
@@ -635,6 +635,30 @@ async function monitorFixtures(page: Page) {
             latest: points.at(-1),
             downsampled: false,
             points,
+          },
+          'event/sample': {
+            key: 'event/sample',
+            totalCount: 2,
+            firstStep: 320,
+            lastStep: 960,
+            latest: null,
+            downsampled: false,
+            points: [
+              { step: 320, value: 1 },
+              { step: 960, value: 1 },
+            ],
+          },
+          'event/checkpoint': {
+            key: 'event/checkpoint',
+            totalCount: 2,
+            firstStep: 320,
+            lastStep: 960,
+            latest: null,
+            downsampled: false,
+            points: [
+              { step: 320, value: 1 },
+              { step: 960, value: 1 },
+            ],
           },
         },
       },
@@ -667,6 +691,8 @@ test('monitor renders the selected workbench in both themes across desktop, tabl
     'aria-valuenow',
     '52',
   );
+  await expect(page.locator('.studio-compact-chart')).toContainText('Step 1,560');
+  await expect(page.locator('.studio-compact-chart')).toContainText('Drag to zoom');
   await expect(page.getByText('portrait_flux_v3', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('NVIDIA RTX 5090', { exact: true }).first()).toBeVisible();
   for (const theme of ['dark', 'light'] as const) {

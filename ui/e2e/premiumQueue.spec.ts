@@ -361,10 +361,49 @@ test('notes load can retry without leaving the retained monitor panel', async ({
 
 for (const surface of ['compact inspector', 'full monitor']) {
   for (const failure of ['HTTP error', 'malformed payload']) {
-  test(`metrics ${failure} stays visible with cached points in ${surface}`, async ({ page }) => {
-    const errors: string[] = [];
-    page.on('pageerror', error => errors.push(error.message));
+    test(`metrics ${failure} stays visible with cached points in ${surface}`, async ({ page }) => {
+      const errors: string[] = [];
+      page.on('pageerror', error => errors.push(error.message));
+      await mockQueue(page);
+      if (surface === 'compact inspector') {
+        await page.goto('/jobs');
+        await page.getByRole('button', { name: 'Inspect portrait_flux_v3', exact: true }).click();
+      } else {
+        await page.goto('/jobs/portrait_flux_v3?tab=metrics');
+      }
+      const scope =
+        surface === 'compact inspector'
+          ? page.locator('#queue-job-inspector')
+          : page.getByRole('tabpanel', { name: 'Metrics', exact: true });
+      await expect(scope.locator('.uplot')).toBeVisible();
+      const pattern = '**/api/jobs/portrait_flux_v3/metrics?*';
+      await page.route(pattern, route =>
+        route.fulfill(
+          failure === 'HTTP error'
+            ? { status: 503, json: { error: 'Fixture metrics unavailable' } }
+            : { json: { keys: { malformed: true }, series: {} } },
+        ),
+      );
+      await scope.getByRole('button', { name: 'Refresh', exact: true }).click();
+      await expect(
+        scope.getByText('Metrics could not be refreshed. Showing the last loaded data.', { exact: true }),
+      ).toBeVisible();
+      await expect(scope.locator('.uplot')).toBeVisible();
+      await page.unroute(pattern);
+      await scope.getByRole('button', { name: 'Refresh', exact: true }).click();
+      await expect(
+        scope.getByText('Metrics could not be refreshed. Showing the last loaded data.', { exact: true }),
+      ).toHaveCount(0);
+      expect(errors).toEqual([]);
+    });
+  }
+}
+
+for (const surface of ['compact inspector', 'full monitor']) {
+  test(`initial metrics failure uses a compact retry state in ${surface}`, async ({ page }) => {
     await mockQueue(page);
+    const pattern = '**/api/jobs/*/metrics*';
+    await page.route(pattern, route => route.fulfill({ status: 503, json: { error: 'Fixture offline' } }));
     if (surface === 'compact inspector') {
       await page.goto('/jobs');
       await page.getByRole('button', { name: 'Inspect portrait_flux_v3', exact: true }).click();
@@ -375,24 +414,16 @@ for (const surface of ['compact inspector', 'full monitor']) {
       surface === 'compact inspector'
         ? page.locator('#queue-job-inspector')
         : page.getByRole('tabpanel', { name: 'Metrics', exact: true });
-    await expect(scope.locator('.uplot')).toBeVisible();
-    const pattern = '**/api/jobs/portrait_flux_v3/metrics?*';
-    await page.route(pattern, route => route.fulfill(failure === 'HTTP error'
-      ? { status: 503, json: { error: 'Fixture metrics unavailable' } }
-      : { json: { keys: { malformed: true }, series: {} } }));
-    await scope.getByRole('button', { name: 'Refresh', exact: true }).click();
-    await expect(
-      scope.getByText('Metrics could not be refreshed. Showing the last loaded data.', { exact: true }),
-    ).toBeVisible();
-    await expect(scope.locator('.uplot')).toBeVisible();
+    await expect(scope.getByRole('heading', { name: 'Metrics unavailable', exact: true })).toBeVisible();
+    await expect(scope.getByText(/The metrics request failed/)).toBeVisible();
+    await expect(scope.locator('.uplot')).toHaveCount(0);
+    await expect(scope.getByLabel('Chart metric', { exact: true })).toBeHidden();
+    await scope.screenshot({ path: `.review-build/metrics-unavailable-${surface.replace(' ', '-')}.png` });
     await page.unroute(pattern);
-    await scope.getByRole('button', { name: 'Refresh', exact: true }).click();
-    await expect(
-      scope.getByText('Metrics could not be refreshed. Showing the last loaded data.', { exact: true }),
-    ).toHaveCount(0);
-    expect(errors).toEqual([]);
+    await scope.getByRole('button', { name: 'Retry metrics', exact: true }).click();
+    await expect(scope.locator('.uplot')).toBeVisible();
+    await expect(scope.getByRole('heading', { name: 'Metrics unavailable', exact: true })).toHaveCount(0);
   });
-  }
 }
 
 test('queue commands cannot reorder an incomplete snapshot with no remaining cursor', async ({ page }) => {

@@ -1226,7 +1226,7 @@ class DiffusionFeatureExtractor9(nn.Module):
         perceptual_loss = torch.nn.functional.mse_loss(
             pred.float(), target.float(), reduction="none"
         )
-        velocity_equiv_weight = (1.0 / torch.clamp(tv, min=0.1) ** 2)
+        velocity_equiv_weight = (1.0 / torch.clamp(tv, min=0.01) ** 2)
         loss_perceptual = (perceptual_loss * velocity_equiv_weight).mean()
         
         if self.do_partial_step:
@@ -1388,7 +1388,7 @@ class DiffusionFeatureExtractor10(nn.Module):
 
         pred_feats = self.get_lpips_features(pred_images.float())
 
-        velocity_equiv_weight = (1.0 / torch.clamp(tv, min=0.1) ** 2)
+        velocity_equiv_weight = (1.0 / torch.clamp(tv, min=0.01) ** 2)
 
         loss_perceptual = 0
         for idx, pred_feat in enumerate(pred_feats):

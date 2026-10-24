@@ -1,5 +1,6 @@
 """Behavioral replacement for old assertions that folded video before VAE decode."""
 import unittest
+from unittest.mock import patch
 from types import SimpleNamespace
 
 import torch
@@ -35,6 +36,12 @@ class TinyDino(nn.Module):
         return SimpleNamespace(last_hidden_state=torch.cat([cls, register, patches], dim=1))
 
 
+class ImageModel(VideoModel):
+    def decode_latents(self, latents):
+        self.decoded_inputs.append(latents.detach().clone())
+        return latents
+
+
 def make_dfe(version, model, partial=False):
     cls = getattr(features, f'DiffusionFeatureExtractor{version}')
     dfe = cls.__new__(cls)
@@ -63,6 +70,41 @@ def make_dfe(version, model, partial=False):
 
 
 class DFEVideoContractTests(unittest.TestCase):
+    def test_v9_v10_low_sigma_weighting_losses_and_gradients(self):
+        # Include zero, both sides of the new floor, and the old floor.
+        sigma = torch.tensor([0., .0005, .001, .005, .009, .01, .011, .05, .1, .5, 1.])
+        weights = 1 / sigma.clamp_min(.01).square()
+        for version in (9, 10):
+            for video in (False, True):
+                for x0 in (False, True):
+                    for partial in (False, True):
+                        with self.subTest(version=version, video=video, x0=x0, partial=partial):
+                            model = (VideoModel if video else ImageModel)(x0)
+                            dfe = make_dfe(version, model, partial)
+                            shape = (len(sigma), 3, 2, 2, 2) if video else (len(sigma), 3, 2, 2)
+                            pred = torch.ones(shape, requires_grad=True)
+                            target_shape = (len(sigma), 5, 3, 2, 2) if video else shape
+                            with patch.object(torch, 'rand_like', side_effect=torch.zeros_like):
+                                loss = dfe(
+                                    noise=torch.zeros_like(pred), noise_pred=pred,
+                                    noisy_latents=torch.zeros_like(pred), timesteps=sigma * 1000,
+                                    batch=SimpleNamespace(tensor=torch.zeros(target_shape), latents=torch.zeros_like(pred)),
+                                    scheduler=None,
+                                )
+                            distance = sigma.clamp_max(.1) if partial else sigma
+                            coefficient = distance / sigma.clamp_min(1e-6) if x0 and partial else (
+                                torch.ones_like(sigma) if x0 else -distance)
+                            feature_factor = 5 if version == 10 else 1
+                            multiplier = feature_factor * (10 if partial else 1)
+                            per_sample_loss = coefficient.square() * weights * multiplier / 4
+                            torch.testing.assert_close(loss, per_sample_loss.mean())
+                            loss.backward()
+                            self.assertTrue(torch.isfinite(pred.grad).all())
+                            # Sum each sample's latent gradients: video frame expansion
+                            # must not mix the timestep weights of different clips.
+                            actual_grad = pred.grad.flatten(1).sum(1)
+                            torch.testing.assert_close(actual_grad, 2 * per_sample_loss / len(sigma))
+
     def test_video_decode_keeps_clips_and_backpropagates_to_every_latent_frame(self):
         for version in (4, 6, 7, 9, 10):
             for x0 in (False, True):

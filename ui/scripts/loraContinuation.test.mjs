@@ -146,7 +146,7 @@ test('worker capabilities reject old, malformed and incomplete implementations',
   } }).loraContinuationVersion, 1);
 });
 
-async function environment(t) {
+async function environment(t, overrides = {}) {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'aitk-continuation-'));
   t.after(() => fsp.rm(root, { recursive: true, force: true }));
   const assets = load('server/loraContinuation.ts', {
@@ -155,9 +155,35 @@ async function environment(t) {
     './settings': { getDataRoot: async () => root, getTrainingFolder: async () => root, getModelsRoot: async () => root },
     './commandInput': commandInput, '../domain/loraContinuation': domain,
     '../utils/remoteLoraRefs': loadTrainingSource('utils/remoteLoraRefs.ts'),
+    ...overrides,
   });
   return { root, assets };
 }
+
+test('an existing failed continuation passes start validation using its pinned source and unchanged saved config', async t => {
+  let inspectedPath;
+  const config = fixture('replay');
+  const process = config.config.process[0];
+  const execFile = Object.assign(() => assert.fail('Expected promisified inspection'), {
+    [util.promisify.custom]: async (_python, args) => {
+      inspectedPath = args[args.indexOf('--path') + 1];
+      assert.equal(args[args.indexOf('--sha256') + 1], process.network.continuation.source_sha256);
+      return { stdout: JSON.stringify({ version: 1, status: 'compatible', sha256: process.network.continuation.source_sha256,
+        format: 'aitk_comfy_native', tensor_count: 2, ranks: [1], architecture: 'krea2', topology_verified: true, size_bytes: 100,
+        modules: [{ name: 'blocks.0.attn.wq', rank: 1, input: 6144, output: 6144, source_scale: 1 }], declared_training_base: null }), stderr: '' };
+    },
+  });
+  const { root, assets } = await environment(t, { child_process: { execFile } });
+  const job = path.join(root, 'already-created-job');
+  const pinned = path.join(job, '.continuation', process.network.continuation.source_sha256 + '.safetensors');
+  await fsp.mkdir(path.dirname(pinned), { recursive: true });
+  await fsp.writeFile(pinned, 'pinned source fixture');
+  process.network.pretrained_lora_path = path.join(root, 'no-longer-present.safetensors');
+  const saved = JSON.stringify(config);
+  await assets.validateContinuationSources(config, job, 'local');
+  assert.equal(inspectedPath, pinned);
+  assert.equal(JSON.stringify(config), saved);
+});
 
 test('remote source references stay bound to their worker and snapshot verified worker files', async t => {
   const { root, assets } = await environment(t);

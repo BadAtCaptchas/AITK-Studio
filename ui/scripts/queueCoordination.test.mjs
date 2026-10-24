@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
 import crypto from 'node:crypto';
 import * as timers from 'node:timers/promises';
 import test from 'node:test';
@@ -26,7 +27,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-function fixture({ running = true, missingQueue = false, gpuIds = '0' } = {}) {
+function fixture({ running = true, missingQueue = false, gpuIds = '0', continuation = false } = {}) {
   const records = new Map();
   let revision = Date.now();
   let job = {
@@ -35,6 +36,7 @@ function fixture({ running = true, missingQueue = false, gpuIds = '0' } = {}) {
   };
   let queue = missingQueue ? null : { id: 1, worker_id: 'local', gpu_ids: gpuIds, is_running: running };
   const launches = [];
+  const continuationChecks = [];
   const contended = deferred();
   const retry = deferred();
   let pauseRetries = false;
@@ -84,6 +86,12 @@ function fixture({ running = true, missingQueue = false, gpuIds = '0' } = {}) {
   });
   const caption = { isAnyRemoteOllamaCaptionJob: () => false };
   const start = loadSource('../src/server/jobStart.ts', {
+    './loraContinuation': {
+      continuationProcesses: () => continuation ? [{}] : [],
+      validateContinuationSources: async (...args) => continuationChecks.push(args),
+    },
+    './trainingPaths': { getJobTrainingRoot: async () => 'fixture-training' },
+    '../utils/jobIdentity': { jobStorageKey: job => job.storage_key || job.id }, path,
     '../domain/configContract': { configContractErrors: () => [] }, 'fs/promises': {},
     './pythonPath': { assertPythonRuntimeReady: async () => {} }, './db': { db }, './operations': {},
     './trainingJobBundle': {}, './remoteClient': { isLocalWorker: id => id === 'local' }, './remoteCaptionDispatch': {},
@@ -102,7 +110,7 @@ function fixture({ running = true, missingQueue = false, gpuIds = '0' } = {}) {
     requiredEncryptedDatasets: [], encryptedKeysForLaunch: [], useDurableEncryptedKeys: false,
   });
   return {
-    db, scheduler, launches, coordination, prepared,
+    db, scheduler, launches, continuationChecks, coordination, prepared,
     enqueue: options => start.startPreparedJob(prepared(), options),
     start: () => start.startJobFromRequest(job.id),
     get job() { return job; }, get queue() { return queue; },
@@ -201,6 +209,20 @@ test('training start and resume activate new, stopped, and running queues', asyn
       assert.deepEqual(f.launches, ['job']);
     }
   }
+});
+
+test('retrying a failed continuation reuses the saved job identity, config and asset folder', async () => {
+  const f = fixture({ running: false, continuation: true });
+  const savedConfig = JSON.stringify({ config: { process: [{ network: { continuation: { version: 1 } } }] } });
+  f.setJob({ status: 'error', step: 0, storage_key: 'original-storage', job_config: savedConfig });
+  const retried = await f.start();
+  assert.equal(retried.id, 'job');
+  assert.equal(retried.status, 'queued');
+  assert.equal(retried.job_config, savedConfig);
+  assert.equal(retried.step, 0);
+  assert.deepEqual(f.continuationChecks, [[JSON.parse(savedConfig), path.join('fixture-training', 'original-storage'), 'local']]);
+  await f.scheduler();
+  assert.deepEqual(f.launches, ['job']);
 });
 
 test('training start preserves the order of work already queued', async () => {

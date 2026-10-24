@@ -267,6 +267,121 @@ class ContinuationTests(unittest.TestCase):
         replay.cache_text_embeddings = True
         validate_continuation_config(network, model, train, datasets)
 
+    def test_continuation_start_snapshots_ordinary_preservation_data_for_all_modes(self):
+        from toolkit.lora_continuation import prepare_continuation
+        self.source(SingleStreamDiT(tiny_config()))
+        root = Path(self.tmp.name)
+        data = root / 'preserve'
+        data.mkdir()
+        (data / 'photo.png').write_bytes(b'image fixture')
+        (data / 'photo.txt').write_text('source behavior', encoding='utf-8')
+        for mode in ('replay', 'teacher', 'replay_teacher'):
+            with self.subTest(mode=mode):
+                process = SimpleNamespace(save_root=str(root / mode),
+                    network_config=NetworkConfig(type='lora', pretrained_lora_path=str(self.path), continuation={
+                        'version': 1, 'source_sha256': sha256_file(self.path), 'training_base': 'raw'}),
+                    model_config=ModelConfig(arch='krea2', name_or_path='krea/Krea-2-Raw'),
+                    train_config=TrainConfig(source_preservation=dict(mode=mode, new_batches=3, teacher_weight=1)),
+                    dataset_configs=[DatasetConfig(folder_path='new-examples'), DatasetConfig(folder_path=str(data),
+                        role='source_preservation', caption_dropout_rate=0, cache_text_embeddings=True)])
+                prepare_continuation(process)
+                assets = Path(process.save_root) / '.continuation'
+                manifest_hash = process._continuation_provenance['preservation_manifests'][0]
+                pinned = assets / (manifest_hash + '.json')
+                self.assertEqual(sha256_file(pinned), manifest_hash)
+                self.assertFalse((data / '.aitk-preservation.json').exists())
+                prepare_continuation(process)
+                self.assertEqual(process._continuation_provenance['preservation_manifests'], [manifest_hash])
+                # Losing both job-owned copies must not turn a resume into a
+                # new selection with a different baseline.
+                pinned.unlink()
+                (assets / 'preservation-0000.json').unlink()
+                with self.assertRaisesRegex(ValueError, 'manifest is missing'):
+                    prepare_continuation(process)
+                self.assertFalse(pinned.exists())
+
+    def test_existing_saved_job_recovers_after_old_missing_manifest_failure(self):
+        from toolkit.lora_continuation import prepare_continuation
+        self.source(SingleStreamDiT(tiny_config()))
+        root = Path(self.tmp.name)
+        data = root / 'preserve-existing-job'
+        data.mkdir()
+        (data / 'photo.png').write_bytes(b'image fixture')
+        (data / 'photo.txt').write_text('source behavior', encoding='utf-8')
+        original_source = self.path.read_bytes()
+        # This is the unchanged config saved by the old UI. There is no new
+        # flag, manifest reference, config edit, or replacement job involved.
+        saved_config = json.dumps(dict(
+            save_root=str(root / 'already-created-job'),
+            network=dict(type='lora', pretrained_lora_path=str(self.path), continuation=dict(
+                version=1, source_sha256=sha256_file(self.path), training_base='raw')),
+            model=dict(arch='krea2', name_or_path='krea/Krea-2-Raw'),
+            train=dict(source_preservation=dict(mode='replay', new_batches=3, teacher_weight=1)),
+            datasets=[dict(folder_path='new-examples'), dict(folder_path=str(data),
+                role='source_preservation', caption_dropout_rate=0, cache_text_embeddings=True)]))
+
+        def load_saved_job():
+            config = json.loads(saved_config)
+            return SimpleNamespace(save_root=config['save_root'], step_num=0,
+                network_config=NetworkConfig(**config['network']), model_config=ModelConfig(**config['model']),
+                train_config=TrainConfig(**config['train']), dataset_configs=[DatasetConfig(**item) for item in config['datasets']])
+
+        failed = load_saved_job()
+        with patch('toolkit.preservation_manifest.prepare_preservation_manifest',
+                   side_effect=FileNotFoundError(str(data / '.aitk-preservation.json'))):
+            with self.assertRaises(FileNotFoundError):
+                prepare_continuation(failed)
+        assets = Path(failed.save_root) / '.continuation'
+        runtime_profile = (assets / 'runtime-profile.json').read_bytes()
+        pinned_source = Path(failed.network_config.pretrained_lora_path)
+        self.assertEqual(pinned_source.read_bytes(), original_source)
+        self.assertFalse((assets / 'provenance.json').exists())
+        self.path.unlink()  # The failed attempt's pinned source is sufficient.
+
+        restarted = load_saved_job()
+        prepare_continuation(restarted)
+        self.assertEqual(restarted.save_root, failed.save_root)
+        self.assertEqual(restarted.step_num, 0)
+        self.assertEqual(Path(restarted.network_config.pretrained_lora_path), pinned_source)
+        self.assertEqual(pinned_source.read_bytes(), original_source)
+        self.assertEqual((assets / 'runtime-profile.json').read_bytes(), runtime_profile)
+        self.assertFalse((data / '.aitk-preservation.json').exists())
+        self.assertTrue((assets / 'preservation-0000.json').is_file())
+        expected = restarted._continuation_provenance
+        # A later process also loads the original saved config, without needing
+        # the in-memory manifest fields added by the preceding attempt.
+        later = load_saved_job()
+        prepare_continuation(later)
+        self.assertEqual(later._continuation_provenance, expected)
+
+    def test_curated_resume_can_use_job_snapshot_when_dataset_sidecar_is_absent(self):
+        from toolkit.lora_continuation import prepare_continuation
+        self.source(SingleStreamDiT(tiny_config()))
+        root = Path(self.tmp.name)
+        data = root / 'curated'
+        data.mkdir()
+        image, caption = data / 'photo.png', data / 'photo.txt'
+        image.write_bytes(b'image fixture')
+        caption.write_text('source behavior', encoding='utf-8')
+        manifest = data / '.aitk-preservation.json'
+        manifest.write_text(json.dumps(dict(version=1, source_sha256=sha256_file(self.path), examples=[dict(
+            image=image.name, caption=caption.name, image_sha256=sha256_file(image), caption_sha256=sha256_file(caption))])), encoding='utf-8')
+        process = SimpleNamespace(save_root=str(root / 'job'),
+            network_config=NetworkConfig(type='lora', pretrained_lora_path=str(self.path), continuation={
+                'version': 1, 'source_sha256': sha256_file(self.path), 'training_base': 'raw'}),
+            model_config=ModelConfig(arch='krea2', name_or_path='krea/Krea-2-Raw'),
+            train_config=TrainConfig(source_preservation=dict(mode='replay', new_batches=3, teacher_weight=1)),
+            dataset_configs=[DatasetConfig(folder_path='new-examples'), DatasetConfig(folder_path=str(data),
+                role='source_preservation', caption_dropout_rate=0, cache_text_embeddings=True)])
+        prepare_continuation(process)
+        expected = process._continuation_provenance['preservation_manifests']
+        manifest.unlink()
+        prepare_continuation(process)
+        self.assertEqual(process._continuation_provenance['preservation_manifests'], expected)
+        caption.write_text('changed', encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'changed after curation'):
+            prepare_continuation(process)
+
     def test_relocated_base_is_accepted_only_with_the_same_pinned_bytes(self):
         from toolkit.lora_continuation import prepare_continuation
         from toolkit.continuation_diagnostics import pin_base_checkpoint

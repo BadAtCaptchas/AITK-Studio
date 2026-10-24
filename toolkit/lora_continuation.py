@@ -369,13 +369,23 @@ def prepare_continuation(process):
         path, assistant_hash = snapshot_file(resolve_lora_path(assistant, 'Turbo training adapter'), assets, config.get('assistant_sha256'))
         process.model_config.assistant_lora_path = path
         config['assistant_sha256'] = assistant_hash
+    provenance_path = assets / 'provenance.json'
+    has_provenance = provenance_path.exists()
+    previous = json.loads(provenance_path.read_text(encoding='utf-8')) if has_provenance else None
+    if has_provenance and (not isinstance(previous, dict) or not isinstance(previous.get('base'), str)):
+        raise ValueError('Invalid continuation provenance')
+    preserve = [dataset for dataset in process.dataset_configs if getattr(dataset, 'role', 'training') == 'source_preservation']
+    expected_manifests = previous.get('preservation_manifests') if previous is not None else None
+    if previous is not None and (not isinstance(expected_manifests, list) or len(expected_manifests) != len(preserve)
+            or any(not isinstance(value, str) or not re.fullmatch('[a-f0-9]{64}', value) for value in expected_manifests)):
+        raise ValueError('Continuation preservation selection changed; create a new job instead of changing its data')
     manifests = []
-    for dataset in process.dataset_configs:
-        if getattr(dataset, 'role', 'training') != 'source_preservation':
-            continue
-        from toolkit.preservation_manifest import validate_preservation_manifest
-        manifest_path = validate_preservation_manifest(dataset.folder_path, digest)
-        _, manifest_hash = snapshot_file(manifest_path, assets)
+    for index, dataset in enumerate(preserve):
+        from toolkit.preservation_manifest import prepare_preservation_manifest
+        expected = expected_manifests[index] if expected_manifests is not None else None
+        manifest_path = prepare_preservation_manifest(dataset.folder_path, digest,
+            assets / f'preservation-{index:04d}.json', previous_snapshot=assets / f'{expected}.json' if expected else None)
+        _, manifest_hash = snapshot_file(manifest_path, assets, expected)
         manifests.append(manifest_hash)
     provenance = dict(version=1, source_sha256=digest, training_base=config['training_base'],
                       source_scale=config.get('source_scale'),
@@ -383,13 +393,9 @@ def prepare_continuation(process):
                       assistant_sha256=config.get('assistant_sha256'), preservation_manifests=manifests,
                       base=str(process.model_config.name_or_path), qtype=getattr(process.model_config, 'qtype', None),
                       quantize=process.model_config.quantize, preservation=process.train_config.source_preservation)
-    provenance_path = assets / 'provenance.json'
     if declared_source_base is not None:
         provenance['source_declared_training_base'] = declared_source_base
-    if provenance_path.exists():
-        previous = json.loads(provenance_path.read_text(encoding='utf-8'))
-        if not isinstance(previous, dict) or not isinstance(previous.get('base'), str):
-            raise ValueError('Invalid continuation provenance')
+    if previous is not None:
         if previous['base'] != provenance['base']:
             # Imported jobs may resolve the same base at a different path/repo.
             # Keep the original reference as provenance; the loader must still

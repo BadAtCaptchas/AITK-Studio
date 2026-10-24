@@ -99,10 +99,10 @@ const DIAGNOSTIC_PALETTE = [
   'rgba(244,114,182,1)',
   'rgba(34,211,238,1)',
 ];
-const EVENT_STYLE: Record<EventKind, { color: string; label: string }> = {
-  sample: { color: 'rgba(251,191,36,0.9)', label: 'Sample' },
-  checkpoint: { color: 'rgba(52,211,153,0.9)', label: 'Checkpoint' },
-  phase_change: { color: 'rgba(244,114,182,0.9)', label: 'Phase' },
+const EVENT_STYLE: Record<EventKind, { color: string; lightColor: string; label: string }> = {
+  sample: { color: 'rgba(251,191,36,0.9)', lightColor: '#a16207', label: 'Sample' },
+  checkpoint: { color: 'rgba(52,211,153,0.9)', lightColor: '#047857', label: 'Checkpoint' },
+  phase_change: { color: 'rgba(244,114,182,0.9)', lightColor: '#be185d', label: 'Phase' },
 };
 
 const LOSS_PALETTE = [
@@ -380,7 +380,7 @@ function drawPhaseBands(u: uPlot, transitions: PhaseTransition[]) {
   ctx.restore();
 }
 
-function drawEventMarkers(u: uPlot, markers: EventMarker[], transitions: PhaseTransition[]) {
+function drawEventMarkers(u: uPlot, markers: EventMarker[], transitions: PhaseTransition[], dark: boolean) {
   const { ctx, bbox } = u;
   const min = u.scales.x.min ?? -Infinity;
   const max = u.scales.x.max ?? Infinity;
@@ -434,7 +434,8 @@ function drawEventMarkers(u: uPlot, markers: EventMarker[], transitions: PhaseTr
       // Dense event clusters remain readable as lines; omit labels that have no clear lane.
       if (lane < 0) continue;
       const labelY = bbox.top + bbox.height - 20 - lane * 14;
-      ctx.fillStyle = EVENT_STYLE[stepMarkers[0].kind].color;
+      const labelStyle = EVENT_STYLE[stepMarkers[0].kind];
+      ctx.fillStyle = dark ? labelStyle.color : labelStyle.lightColor;
       ctx.fillText(text, labelX, labelY);
       labelRightByLane[lane] = labelX + textWidth;
     }
@@ -953,7 +954,7 @@ function JobLossGraphContent({ job, compact = false }: Props) {
     const opts: uPlot.Options = {
       width: rect.width || 900,
       height: initialHeight,
-      padding: [12, 16, 0, 4],
+      padding: compact ? [8, 12, 0, 0] : [12, 16, 0, 4],
       series: built.seriesConfigs,
       scales: {
         x: { time: false },
@@ -968,7 +969,7 @@ function JobLossGraphContent({ job, compact = false }: Props) {
       },
       axes: [
         {
-          label: 'Step',
+          label: compact ? undefined : 'Step',
           stroke: theme === 'dark' ? '#b2bac4' : '#56616f',
           grid: { stroke: theme === 'dark' ? '#ffffff0d' : '#20252b14' },
           ticks: { stroke: theme === 'dark' ? '#7f8a9733' : '#56616f40' },
@@ -977,11 +978,11 @@ function JobLossGraphContent({ job, compact = false }: Props) {
           values: (_u, ticks) => ticks.map(tick => formatCompact(tick)),
         },
         {
-          label: chartYAxisLabel(chartTab),
+          label: compact ? undefined : chartYAxisLabel(chartTab),
           stroke: theme === 'dark' ? '#b2bac4' : '#56616f',
           grid: { stroke: theme === 'dark' ? '#ffffff0d' : '#20252b14' },
           ticks: { stroke: theme === 'dark' ? '#7f8a9733' : '#56616f40' },
-          size: 66,
+          size: compact ? 58 : 66,
           labelFont: '12px sans-serif',
           font: '11px sans-serif',
           values: (_u, ticks) => ticks.map(tick => formatNum(tick)),
@@ -994,7 +995,7 @@ function JobLossGraphContent({ job, compact = false }: Props) {
       legend: { show: false },
       hooks: {
         drawClear: [u => drawPhaseBands(u, phaseTransitionsRef.current)],
-        draw: [u => drawEventMarkers(u, eventMarkersRef.current, phaseTransitionsRef.current)],
+        draw: [u => drawEventMarkers(u, eventMarkersRef.current, phaseTransitionsRef.current, theme === 'dark')],
         setCursor: [
           u => {
             const idx = u.cursor.idx;
@@ -1100,6 +1101,11 @@ function JobLossGraphContent({ job, compact = false }: Props) {
   }, [eventMarkers, phaseTransitions]);
 
   const metricsUnavailable = status === 'error' && !built.hasData;
+  const visibleSeriesLegend = built.seriesConfigs.slice(1, 4).map((series, index) => ({
+    id: `${String(series.label)}-${index}`,
+    label: typeof series.label === 'string' ? series.label : `Series ${index + 1}`,
+    color: typeof series.stroke === 'string' ? series.stroke : LOSS_COLOR,
+  }));
   const noDataMessage =
     status === 'error'
       ? 'Failed to load training metrics.'
@@ -1123,7 +1129,7 @@ function JobLossGraphContent({ job, compact = false }: Props) {
         <div className="flex items-center gap-2 min-w-0">
           <div className="h-2 w-2 rounded-full bg-blue-400" aria-hidden="true" />
           <h2 className="text-gray-100 text-sm font-medium">{compact ? 'Metrics' : 'Training Monitor'}</h2>
-          <span className="text-xs text-gray-400 truncate">
+          <span className={compact ? 'studio-chart-summary' : 'text-xs text-gray-400 truncate'}>
             {built.hasData
               ? compact
                 ? `${primaryLossKey ? `${cleanLabel(primaryLossKey)} ${formatNum(lossSummary.current)} · ` : ''}Step ${formatCompact(job.step)}`
@@ -1306,7 +1312,17 @@ function JobLossGraphContent({ job, compact = false }: Props) {
                 </div>
               )}
 
-              <div className="flex items-center gap-2 text-xs text-gray-400">
+              <div className="flex items-center gap-3 text-xs text-gray-400">
+                {compact && built.hasData && (
+                  <div className="studio-chart-legend" role="list" aria-label="Visible metric series">
+                    {visibleSeriesLegend.map(series => (
+                      <span role="listitem" key={series.id} title={series.label}>
+                        <i aria-hidden="true" style={{ backgroundColor: series.color }} />
+                        {series.label}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 {built.hasData && !isZoomed && <span className="hidden sm:inline">Drag to zoom</span>}
                 {!compact && <span>{built.totalPoints.toLocaleString()} points</span>}
                 {isZoomed && (

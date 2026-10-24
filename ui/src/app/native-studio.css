@@ -436,11 +436,12 @@ textarea {
 .studio-compact-chart .monitor-body {
   display: flex;
   flex-direction: column;
-  padding: 12px;
+  padding: 0;
 }
 .studio-compact-chart .monitor-chart-layout {
-  display: block;
+  display: flex;
   flex: 1;
+  flex-direction: column;
   height: auto;
   min-height: 300px;
 }
@@ -448,12 +449,57 @@ textarea {
   display: none;
 }
 .studio-compact-chart .monitor-chart-area {
-  height: 100%;
+  flex: 1;
+  height: auto;
   min-height: 300px;
   border: 0;
 }
 .studio-compact-chart .metrics-empty-state {
   flex: 1;
+}
+.studio-chart-summary {
+  min-width: 0;
+  margin-left: 4px;
+  padding-left: 12px;
+  border-left: 1px solid var(--studio-line);
+  color: var(--studio-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.studio-compact-chart .monitor-chart-area > div:first-child {
+  min-height: 42px;
+  padding: 5px 12px;
+  background: var(--studio-surface);
+}
+.studio-chart-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px 14px;
+  color: var(--studio-muted);
+  font-size: 11px;
+}
+.studio-chart-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.studio-chart-legend i {
+  width: 12px;
+  height: 2px;
+  border-radius: 2px;
+}
+@media (max-width: 700px) {
+  .studio-chart-legend {
+    display: none;
+  }
+  .studio-chart-summary {
+    padding-left: 8px;
+  }
 }
 .studio-compact-chart .monitor-chart-settings,
 .studio-compact-chart .monitor-events {

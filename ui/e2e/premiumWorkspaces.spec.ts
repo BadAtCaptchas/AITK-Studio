@@ -706,6 +706,7 @@ test('monitor renders the selected workbench in both themes across desktop, tabl
   );
   await expect(page.locator('.studio-compact-chart')).toContainText('Step 1,560');
   await expect(page.locator('.studio-compact-chart')).toContainText('Drag to zoom');
+  await expect(page.getByRole('list', { name: 'Visible metric series', exact: true })).toContainText('loss trend');
   await expect(page.getByText('portrait_flux_v3', { exact: true }).first()).toBeVisible();
   await expect(page.getByText('NVIDIA RTX 5090', { exact: true }).first()).toBeVisible();
   for (const theme of ['dark', 'light'] as const) {

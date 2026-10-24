@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, writeFile, readFile } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import sharp from 'sharp';
@@ -293,7 +293,7 @@ test('reviewed source samples become a dataset with clean captions and an immuta
   const published = await publication;
   expect(published.ok(), await published.text()).toBe(true);
   const dataset = await published.json();
-  expect(path.dirname(dataset.path)).toBe(path.resolve(settings.DATASETS_FOLDER));
+  expect(path.dirname(dataset.path)).toBe(await realpath(settings.DATASETS_FOLDER));
   expect(await readFile(path.join(dataset.path, '0000.txt'), 'utf8')).toBe('candid source photo');
   const manifest = JSON.parse(await readFile(path.join(dataset.path, '.aitk-preservation.json'), 'utf8'));
   expect(manifest.source_sha256).toBe('a'.repeat(64));

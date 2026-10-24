@@ -448,7 +448,7 @@ textarea {
   display: none;
 }
 .studio-compact-chart .monitor-chart-area {
-  height: auto;
+  height: 100%;
   min-height: 300px;
   border: 0;
 }

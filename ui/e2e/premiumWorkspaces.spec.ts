@@ -24,6 +24,19 @@ async function noPageOverflow(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
 }
 
+async function expectCompactChartToFill(page: Page) {
+  await expect
+    .poll(() =>
+      page.locator('.studio-compact-chart').evaluate(element => {
+        const layout = element.querySelector<HTMLElement>('.monitor-chart-layout');
+        const area = element.querySelector<HTMLElement>('.monitor-chart-area');
+        if (!layout || !area) throw new Error('Compact chart layout is unavailable');
+        return Math.abs(layout.getBoundingClientRect().bottom - area.getBoundingClientRect().bottom);
+      }),
+    )
+    .toBeLessThanOrEqual(1);
+}
+
 async function telemetry(page: Page) {
   // Exercise the real editor without depending on a public asset CDN.
   await page.route('https://cdn.jsdelivr.net/npm/monaco-editor@*/min/vs/**', async route => {
@@ -712,6 +725,7 @@ test('monitor renders the selected workbench in both themes across desktop, tabl
       await page.setViewportSize(viewport);
       await noPageOverflow(page);
       await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeVisible();
+      await expectCompactChartToFill(page);
       await capture(page, `monitor-${theme}-${viewport.width}`);
     }
   }
@@ -734,6 +748,7 @@ test('monitor renders the selected workbench in both themes across desktop, tabl
       await noPageOverflow(zoomPage);
       await expect(zoomPage.getByRole('heading', { name: 'Runs', exact: true })).toBeVisible();
       await expect(zoomPage.getByText('portrait_flux_v3', { exact: true }).first()).toBeVisible();
+      await expectCompactChartToFill(zoomPage);
       await capture(zoomPage, `monitor-${theme}-200-percent-reflow`);
       expect(zoomErrors).toEqual([]);
     } finally {

@@ -51,6 +51,23 @@ test('all four preservation modes have explicit data contracts', () => {
   assert.match(domain.continuationConfigErrors(p).join(' '), /requires an inspected/);
 });
 
+test('preservation cannot silently replace curated captions with empty conditioning', () => {
+  const p = fixture('replay').config.process[0];
+  for (const caption_ext of ['', null, 'json']) {
+    p.datasets[1].caption_ext = caption_ext;
+    assert.match(domain.continuationConfigErrors(p).join(' '), /curated .txt captions/);
+  }
+  p.datasets[1].caption_ext = 'txt';
+  p.train.unload_text_encoder = true;
+  p.train.cache_text_embeddings = false;
+  assert.match(domain.continuationConfigErrors(p).join(' '), /Cache preservation text embeddings/);
+  p.train.cache_text_embeddings = true;
+  delete p.datasets[1].cache_text_embeddings;
+  assert.deepEqual(domain.continuationConfigErrors(p), []);
+  p.datasets[1].cache_text_embeddings = false;
+  assert.match(domain.continuationConfigErrors(p).join(' '), /Cache preservation text embeddings/);
+});
+
 test('migration clears source initialization and preservation datasets without changing the source', () => {
   const original = fixture('replay_teacher'), before = structuredClone(original);
   const next = migration.migrateTrainingModel(original, 'zimage').config.config.process[0];
@@ -205,12 +222,24 @@ test('sidecar publication leaves complete JSON on concurrent writes and preserve
   const publishedPath = path.join(root, (await fsp.readdir(root))[0]);
   const original = await fsp.readFile(publishedPath, 'utf8');
   assert.ok(variants.some(value => value.originalFilename === JSON.parse(original).originalFilename));
+  let lockedAttempts = 0;
   const failing = load('server/loraLibrary.ts', { ...deps, fs: { ...fs, promises: { ...fsp,
-    rename: async () => { throw new Error('Injected publication failure'); },
+    rename: async () => { lockedAttempts++; throw Object.assign(new Error('Injected publication failure'), { code: 'EPERM' }); },
   } } });
   await assert.rejects(failing.writeUploadedLoraSidecar(file, {}), /publication failure/);
+  assert.equal(lockedAttempts, 5, 'Permanent locks must fail after bounded retries');
   assert.equal(await fsp.readFile(publishedPath, 'utf8'), original);
   assert.equal((await fsp.readdir(root)).length, 1);
+  let attempts = 0;
+  const transient = load('server/loraLibrary.ts', { ...deps, fs: { ...fs, promises: { ...fsp,
+    rename: async (...args) => {
+      if (++attempts < 3) throw Object.assign(new Error('Temporary destination lock'), { code: 'EPERM' });
+      return fsp.rename(...args);
+    },
+  } } });
+  await transient.writeUploadedLoraSidecar(file, variants[0]);
+  assert.equal(attempts, 3);
+  assert.deepEqual(JSON.parse(await fsp.readFile(publishedPath, 'utf8')), variants[0]);
 });
 
 test('source and pinned auxiliary transfer are checksum verified and rewritten independently of original paths', async t => {
@@ -230,6 +259,9 @@ test('source and pinned auxiliary transfer are checksum verified and rewritten i
   p.model.assistant_lora_path = 'owner/repo/adapter.safetensors';
   const bundle = await assets.collectContinuationAssets(config, job);
   assert.equal(bundle.assets.length, 2);
+  p.network.continuation.assistant_sha256 = 'b'.repeat(64);
+  await assert.rejects(assets.collectContinuationAssets(config, job), /training-adapter checksum changed/);
+  delete p.network.continuation.assistant_sha256;
   const extraction = path.join(root, 'extraction');
   for (const file of bundle.files) {
     const target = path.join(extraction, file.archivePath);

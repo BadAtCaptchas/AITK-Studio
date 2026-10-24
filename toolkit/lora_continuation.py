@@ -322,6 +322,10 @@ def validate_continuation_config(network, model, train, datasets):
         if any(d.network_weight != 1 or d.caption_dropout_rate or d.trigger_word or
                d.token_dropout_rate or d.shuffle_tokens or d.random_triggers or d.use_short_captions for d in preserve):
             raise ValueError('Preservation captions must be unchanged: weight 1, caption dropout 0, no injected trigger')
+        if any(d.caption_ext != '.txt' for d in preserve):
+            raise ValueError('Preservation examples require their curated .txt captions')
+        if train.unload_text_encoder and any(not d.cache_text_embeddings for d in preserve):
+            raise ValueError('Cache preservation text embeddings before unloading the text encoder')
     preservation.update(mode=mode, new_batches=count, teacher_weight=float(weight))
     train.source_preservation = preservation
 
@@ -358,6 +362,8 @@ def prepare_continuation(process):
             previous = json.loads(existing_provenance.read_text(encoding='utf-8'))
             previous_hash = previous.get('assistant_sha256')
             if isinstance(previous_hash, str) and re.fullmatch('[a-f0-9]{64}', previous_hash):
+                if config.get('assistant_sha256') not in (None, previous_hash):
+                    raise ValueError('Continuation training-adapter checksum changed; create a new job')
                 assistant = str(assets / (previous_hash + '.safetensors'))
                 config['assistant_sha256'] = previous_hash
         path, assistant_hash = snapshot_file(resolve_lora_path(assistant, 'Turbo training adapter'), assets, config.get('assistant_sha256'))
@@ -380,6 +386,20 @@ def prepare_continuation(process):
     provenance_path = assets / 'provenance.json'
     if declared_source_base is not None:
         provenance['source_declared_training_base'] = declared_source_base
+    if provenance_path.exists():
+        previous = json.loads(provenance_path.read_text(encoding='utf-8'))
+        if not isinstance(previous, dict) or not isinstance(previous.get('base'), str):
+            raise ValueError('Invalid continuation provenance')
+        if previous['base'] != provenance['base']:
+            # Imported jobs may resolve the same base at a different path/repo.
+            # Keep the original reference as provenance; the loader must still
+            # verify the actual bytes against the already-pinned checkpoint.
+            identity_path = assets / 'base-checkpoint.json'
+            identity = json.loads(identity_path.read_text(encoding='utf-8')) if identity_path.exists() else None
+            if (not isinstance(identity, dict) or identity.get('version') != 1
+                    or not re.fullmatch('[a-f0-9]{64}', str(identity.get('sha256', '')))):
+                raise ValueError('Cannot relocate a continuation base without its pinned checkpoint identity')
+            provenance['base'] = previous['base']
     pin_json(provenance_path, provenance,
              'Continuation inputs changed; create a new job instead of changing its source')
     config['preservation_manifests'] = manifests

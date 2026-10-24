@@ -353,7 +353,18 @@ export async function writeUploadedLoraSidecar(filePath: string, sidecar: Upload
   const temporary = `${destination}.${randomUUID()}.tmp`;
   try {
     await fs.promises.writeFile(temporary, JSON.stringify(sidecar, null, 2), { encoding: 'utf8', flag: 'wx' });
-    await fs.promises.rename(temporary, destination);
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await fs.promises.rename(temporary, destination);
+        break;
+      } catch (error: unknown) {
+        const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+        // Windows can briefly lock the destination during concurrent rename or
+        // reads. Retain atomic replacement; never unlink the previous sidecar.
+        if (attempt >= 4 || !['EPERM', 'EACCES', 'EBUSY'].includes(String(code))) throw error;
+        await new Promise(resolve => setTimeout(resolve, 25 * 2 ** attempt));
+      }
+    }
   } finally {
     await fs.promises.rm(temporary, { force: true });
   }

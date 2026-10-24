@@ -354,6 +354,7 @@ export function shouldIncludeTrainingExportPath(_absolutePath: string, relativeP
   if (basename.endsWith('.tmp')) return false;
   if (basename === 'samples.zip') return false;
   if (basename.startsWith('.aitk-export-')) return false;
+  if (normalized.startsWith('.continuation/') && (basename.startsWith('.copy-') || basename.startsWith('.metadata-'))) return false;
   if (normalized.split('/').some(segment => segment.startsWith('.tmp-') || segment.startsWith('.checkpoint-export-')
     || segment.startsWith('.checkpoint-old-export-') || segment.startsWith('.checkpoint-write-') || segment.startsWith('.checkpoint-names-'))) return false;
   return true;

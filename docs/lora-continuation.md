@@ -25,6 +25,8 @@ Generate candidates using the original adapter, its triggers and preservation pr
 
 New source samples include an image checksum so curation rejects an image/caption pair that changes during publication. Older samples without this checksum can be curated after their generation job completes. Retrying curation verifies the existing published snapshot before acknowledging it.
 
+Preservation datasets must use their curated `.txt` captions. If the text encoder is unloaded, cache preservation text embeddings first; otherwise the trainer could use blank or trigger-only conditioning.
+
 For a source uploaded to a remote worker, create generation candidates through that worker's Generate page. The controller's Generate page currently creates local generation jobs. Remote sample review can publish a preservation dataset on the owning worker; normal dataset transfer handles replay data for training.
 
 The frozen teacher shares one frozen base with the trainable adapter. It runs first with dropout disabled under `no_grad`, using identical noisy latents, conditioning, masks and timesteps. Only the student remains active through its forward, backward and gradient-checkpoint recomputation. Existing base-model preservation settings have different semantics and cannot be combined with source preservation.
@@ -34,6 +36,8 @@ The frozen teacher shares one frozen base with the trainable adapter. It runs fi
 Select the checkpoint used for this continuation separately from the deployment base. A Turbo listing on a model card is not evidence of the source adapter's original training base. Use Raw for Raw continuation, and explicitly choose Turbo with its training adapter for direct Turbo continuation.
 
 Source and auxiliary adapters are copied into job-owned `.continuation` assets outside checkpoint cleanup. Their hashes, selected base identity, preservation manifests and configuration participate in provenance/resume checks. Remote job import verifies bounded assets and rewrites paths; a source uploaded to one worker cannot silently resolve against another worker's filesystem.
+
+A resumed job can reference a relocated base checkpoint once its identity has been pinned. The loader still verifies the checkpoint bytes against the original hash. Changing the declared Turbo training-adapter checksum requires a new job.
 
 Turbo teacher and student share the training-adapter-fused base. The negative cancellation adapter stays inactive through training forward/backward and becomes active for sampling. Before training, a deterministic velocity probe compares ordinary source inference with fusion, quantization and cancellation. The recorded discrepancy is numerical runtime drift, not an image-retention score.
 

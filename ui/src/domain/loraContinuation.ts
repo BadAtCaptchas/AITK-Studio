@@ -98,6 +98,11 @@ export function continuationConfigErrors(process: Record<string, unknown>): stri
     if (preserved.some(item => item.caption_dropout_rate || item.trigger_word || item.token_dropout_rate || item.shuffle_tokens ||
       Array.isArray(item.random_triggers) && item.random_triggers.length > 0 || item.use_short_captions || item.network_weight !== undefined && item.network_weight !== 1))
       errors.push('Preservation examples require unchanged captions and adapter weight 1.');
+    if (preserved.some(item => item.caption_type ? item.caption_type !== '.txt' :
+      item.caption_ext !== undefined && item.caption_ext !== 'txt' && item.caption_ext !== '.txt'))
+      errors.push('Preservation examples require their curated .txt captions.');
+    if (train.unload_text_encoder && preserved.some(item => !(item.cache_text_embeddings ?? train.cache_text_embeddings)))
+      errors.push('Cache preservation text embeddings before unloading the text encoder.');
   }
   return errors;
 }

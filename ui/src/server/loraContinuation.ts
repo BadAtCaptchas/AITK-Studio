@@ -100,7 +100,7 @@ export async function collectContinuationAssets(config: unknown, jobFolder?: str
         sha256: inspection.sha256, size: inspection.size_bytes, workerSource: remote.path });
     }
     const fields: [string, unknown, unknown][] = [['network.pretrained_lora_path', process.network.pretrained_lora_path, process.network.continuation.source_sha256]];
-    let pinnedAssistant: unknown = process.network.continuation.assistant_sha256;
+    let pinnedAssistant: unknown = process.network.continuation.assistant_sha256 ?? undefined;
     if (jobFolder) {
       const provenancePath = path.join(jobFolder, '.continuation', 'provenance.json');
       const provenanceStat = await fsp.stat(provenancePath).catch(() => null);
@@ -108,6 +108,8 @@ export async function collectContinuationAssets(config: unknown, jobFolder?: str
         if (!provenanceStat.isFile() || provenanceStat.size > 1024 * 1024) throw new Error('Invalid continuation provenance.');
         const provenance: unknown = JSON.parse(await fsp.readFile(provenancePath, 'utf8'));
         if (!isRecord(provenance) || provenance.source_sha256 !== process.network.continuation.source_sha256) throw new Error('Continuation provenance does not match its source.');
+        if (pinnedAssistant !== undefined && provenance.assistant_sha256 !== pinnedAssistant)
+          throw new Error('Continuation training-adapter checksum changed; create a new job.');
         pinnedAssistant = provenance.assistant_sha256 ?? pinnedAssistant;
       }
     }

@@ -248,6 +248,66 @@ class ContinuationTests(unittest.TestCase):
             inspect_lora(self.path, expected_sha256='0' * 64)
         self.assertEqual(sha256_file(self.path), digest)
 
+    def test_preservation_rejects_missing_caption_conditioning(self):
+        network = NetworkConfig(type='lora', pretrained_lora_path='source.safetensors', continuation={
+            'version': 1, 'source_sha256': 'a' * 64, 'training_base': 'raw'})
+        model = ModelConfig(arch='krea2', name_or_path='krea/Krea-2-Raw')
+        train = TrainConfig(source_preservation={'mode': 'teacher'})
+        replay = DatasetConfig(folder_path='preserved', role='source_preservation', caption_dropout_rate=0)
+        datasets = [DatasetConfig(folder_path='new'), replay]
+        validate_continuation_config(network, model, train, datasets)
+        for extension in ('', '.json', None):
+            replay.caption_ext = extension
+            with self.assertRaisesRegex(ValueError, 'curated .txt captions'):
+                validate_continuation_config(network, model, train, datasets)
+        replay.caption_ext = '.txt'
+        train.unload_text_encoder = True
+        with self.assertRaisesRegex(ValueError, 'Cache preservation text embeddings'):
+            validate_continuation_config(network, model, train, datasets)
+        replay.cache_text_embeddings = True
+        validate_continuation_config(network, model, train, datasets)
+
+    def test_relocated_base_is_accepted_only_with_the_same_pinned_bytes(self):
+        from toolkit.lora_continuation import prepare_continuation
+        from toolkit.continuation_diagnostics import pin_base_checkpoint
+        self.source(SingleStreamDiT(tiny_config()))
+        root = Path(self.tmp.name)
+        original, relocated = root / 'base-original.safetensors', root / 'base-relocated.safetensors'
+        original.write_bytes(b'base fixture')
+        relocated.write_bytes(original.read_bytes())
+        process = SimpleNamespace(save_root=str(root / 'job'),
+            network_config=NetworkConfig(type='lora', pretrained_lora_path=str(self.path), continuation={
+                'version': 1, 'source_sha256': sha256_file(self.path), 'training_base': 'raw'}),
+            model_config=ModelConfig(arch='krea2', name_or_path=str(original)),
+            train_config=TrainConfig(), dataset_configs=[DatasetConfig(folder_path='new-examples')])
+        prepare_continuation(process)
+        process.model_config.name_or_path = str(relocated)
+        with self.assertRaisesRegex(ValueError, 'pinned checkpoint identity'):
+            prepare_continuation(process)
+        pin_base_checkpoint(original, process.model_config._continuation_context)
+        prepare_continuation(process)
+        pin_base_checkpoint(relocated, process.model_config._continuation_context)
+        self.assertEqual(process._continuation_provenance['base'], str(original))
+        relocated.write_bytes(b'changed base fixture')
+        with self.assertRaisesRegex(ValueError, 'checkpoint changed'):
+            pin_base_checkpoint(relocated, process.model_config._continuation_context)
+
+    def test_resume_rejects_changed_declared_auxiliary_checksum(self):
+        from toolkit.lora_continuation import prepare_continuation
+        self.source(SingleStreamDiT(tiny_config()))
+        root = Path(self.tmp.name)
+        auxiliary = root / 'auxiliary.safetensors'
+        auxiliary.write_bytes(b'auxiliary fixture')
+        process = SimpleNamespace(save_root=str(root / 'job'),
+            network_config=NetworkConfig(type='lora', pretrained_lora_path=str(self.path), continuation={
+                'version': 1, 'source_sha256': sha256_file(self.path), 'training_base': 'turbo'}),
+            model_config=ModelConfig(arch='krea2:turbo', name_or_path='krea/Krea-2-Turbo', assistant_lora_path=str(auxiliary)),
+            train_config=TrainConfig(), dataset_configs=[DatasetConfig(folder_path='new-examples')])
+        prepare_continuation(process)
+        process.network_config.continuation['assistant_sha256'] = 'b' * 64
+        with self.assertRaisesRegex(ValueError, 'training-adapter checksum changed'):
+            prepare_continuation(process)
+
     def test_job_owned_source_survives_original_removal_and_rejects_runtime_changes(self):
         from toolkit.lora_continuation import prepare_continuation
         from jobs.process.BaseSDTrainProcess import BaseSDTrainProcess

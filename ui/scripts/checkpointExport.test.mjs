@@ -18,6 +18,18 @@ async function fixture(t) {
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   return root;
 }
+
+test('continuation export includes pinned assets and omits interrupted private writes', async t => {
+  const root = await fixture(t);
+  const assets = path.join(root, '.continuation');
+  await fs.mkdir(assets);
+  for (const name of ['a.safetensors', 'provenance.json', 'base-checkpoint.json', '.copy-interrupted', '.metadata-interrupted'])
+    await fs.writeFile(path.join(assets, name), 'fixture');
+  const exported = await collectTrainingExportFiles(root, 0, 'all');
+  assert.deepEqual(exported.files.map(file => file.relativePath).sort(), [
+    '.continuation/a.safetensors', '.continuation/base-checkpoint.json', '.continuation/provenance.json',
+  ]);
+});
 async function generation(root, step, members, primary = Object.keys(members)[0], extra = {}) {
   const relative = `.aitk-checkpoints/${String(step).padStart(9, '0')}-test`;
   const directory = path.join(root, relative);

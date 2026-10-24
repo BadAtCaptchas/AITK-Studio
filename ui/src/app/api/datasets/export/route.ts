@@ -4,25 +4,22 @@ import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
 import { Readable } from 'stream';
-import { NextRequest, NextResponse } from 'next/server';
 import { resolveDatasetFolder } from '@/server/encryptedDatasets';
 import { createDatasetExportArchive, datasetExportFileName } from '@/server/datasetTransfer';
 import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
-async function postCommand(request: NextRequest) {
+async function postCommand(request: Request) {
   try {
     const { datasetName } = assertGlobalPayload(await readJsonCommand(request));
     if (typeof datasetName !== 'string') {
-      return NextResponse.json({ error: 'Dataset name is required' }, { status: 400 });
+      return Response.json({ error: 'Dataset name is required' }, { status: 400 });
     }
 
     const { datasetsRoot } = await resolveDatasetScope();
     const datasetFolder = resolveDatasetFolder(datasetsRoot, datasetName);
     if (!fs.existsSync(datasetFolder) || !fs.statSync(datasetFolder).isDirectory()) {
-      return NextResponse.json({ error: 'Dataset not found' }, { status: 404 });
+      return Response.json({ error: 'Dataset not found' }, { status: 404 });
     }
 
     const exportRoot = path.join(datasetsRoot, '.aitk-dataset-exports');
@@ -35,7 +32,7 @@ async function postCommand(request: NextRequest) {
       void fsp.rm(zipPath, { force: true }).catch(() => undefined);
     });
 
-    return new NextResponse(Readable.toWeb(nodeStream) as unknown as ReadableStream, {
+    return new Response(Readable.toWeb(nodeStream) as unknown as ReadableStream, {
       headers: {
         'Content-Type': 'application/zip',
         'Content-Length': String(stat.size),
@@ -45,7 +42,7 @@ async function postCommand(request: NextRequest) {
     });
   } catch (error) {
     const status = error instanceof DatasetScopeError ? error.status : 500;
-    return NextResponse.json(
+    return Response.json(
       { error: error instanceof Error ? error.message : 'Failed to export dataset' },
       { status },
     );

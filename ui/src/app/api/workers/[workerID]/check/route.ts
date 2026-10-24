@@ -1,10 +1,7 @@
-import { NextResponse } from 'next/server';
 import { db, type WorkerNodeRecord } from '@/server/db';
 import { fetchWorkerGpu, fetchWorkerHealth, getRemoteWorker } from '@/server/remoteClient';
 import { workerHealthStatus } from '@/utils/workerHealth';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
 function toPublicWorker(worker: WorkerNodeRecord) {
   const { api_token: _apiToken, ...publicWorker } = worker;
@@ -33,7 +30,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ wo
       }),
       gpus: JSON.stringify(gpus),
     });
-    return NextResponse.json({ worker: toPublicWorker(updated), health, gpu });
+    return Response.json({ worker: toPublicWorker(updated), health, gpu });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Worker health check failed';
     const existing = await db.workerNodes.findById(workerID);
@@ -43,8 +40,8 @@ export async function POST(_request: Request, { params }: { params: Promise<{ wo
         last_error: message,
         last_checked_at: new Date(),
       });
-      return NextResponse.json({ worker: toPublicWorker(updated), error: message }, { status: 502 });
+      return Response.json({ worker: toPublicWorker(updated), error: message }, { status: 502 });
     }
-    return NextResponse.json({ error: message }, { status: 404 });
+    return Response.json({ error: message }, { status: 404 });
   }
 }

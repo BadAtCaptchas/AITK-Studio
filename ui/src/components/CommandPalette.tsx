@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import Link from '@/navigation/Link';
+import { usePathname } from '@/navigation';
 import { Dialog, DialogBackdrop, DialogPanel, DialogTitle } from '@headlessui/react';
 import { ArrowUpRight, Search } from 'lucide-react';
 

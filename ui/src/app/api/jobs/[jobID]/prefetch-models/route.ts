@@ -1,11 +1,8 @@
-import { NextResponse } from 'next/server';
 import { db } from '@/server/db';
 import { collectModelReferences, setConfigPathValue } from '@/server/trainingJobTransfer';
 import { normalizeModelReferenceValue, prefetchModelReferences } from '@/server/hfModelPrefetch';
 import { getRemoteWorker, isLocalWorker, remoteJson, syncRemoteJob } from '@/server/remoteClient';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
 type ModelPrefetchResponse = {
   handledValues: string[];
@@ -31,20 +28,20 @@ export async function POST(_request: Request, { params }: { params: Promise<{ jo
   const { jobID } = await params;
 
   if (!isValidJobId(jobID)) {
-    return NextResponse.json({ error: 'Invalid job ID' }, { status: 400 });
+    return Response.json({ error: 'Invalid job ID' }, { status: 400 });
   }
 
   const job = await db.jobs.findById(jobID);
   if (!job) {
-    return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+    return Response.json({ error: 'Job not found' }, { status: 404 });
   }
   if (job.job_type !== 'train') {
-    return NextResponse.json({ error: 'Only training jobs can download model references' }, { status: 400 });
+    return Response.json({ error: 'Only training jobs can download model references' }, { status: 400 });
   }
 
   if (!isLocalWorker(job.worker_id)) {
     if (!job.remote_job_id) {
-      return NextResponse.json({ error: 'Remote job has not been uploaded yet' }, { status: 409 });
+      return Response.json({ error: 'Remote job has not been uploaded yet' }, { status: 409 });
     }
 
     try {
@@ -55,10 +52,10 @@ export async function POST(_request: Request, { params }: { params: Promise<{ jo
         { method: 'POST' },
       );
       const syncedJob = await syncRemoteJob(job);
-      return NextResponse.json({ ...remoteResult, job: syncedJob });
+      return Response.json({ ...remoteResult, job: syncedJob });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to download model references on remote worker';
-      return NextResponse.json({ error: message }, { status: 502 });
+      return Response.json({ error: message }, { status: 502 });
     }
   }
 
@@ -66,7 +63,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ jo
   try {
     jobConfig = JSON.parse(job.job_config);
   } catch {
-    return NextResponse.json({ error: 'Invalid job config' }, { status: 400 });
+    return Response.json({ error: 'Invalid job config' }, { status: 400 });
   }
 
   const modelReferences = collectModelReferences(jobConfig);
@@ -89,7 +86,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ jo
 
   const updatedJob = updatedConfig ? await db.jobs.update(job.id, { job_config: JSON.stringify(jobConfig) }) : job;
 
-  return NextResponse.json({
+  return Response.json({
     handledValues: result.handledValues,
     downloads: result.downloads || [],
     warnings,

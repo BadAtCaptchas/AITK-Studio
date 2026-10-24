@@ -1,5 +1,4 @@
 import { jobStorageKey } from '../../../../../utils/jobIdentity';
-import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import fs from 'fs';
 import { db } from '@/server/db';
@@ -110,34 +109,34 @@ async function resolveReadableJobLogPath(
   return (await pathExists(logPath)) ? logPath : (await pathExists(launchLogPath)) ? launchLogPath : null;
 }
 
-export async function GET(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ jobID: string }> }) {
   const { jobID } = await params;
 
   const job = await db.jobs.findById(jobID);
 
   if (!job) {
-    return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+    return Response.json({ error: 'Job not found' }, { status: 404 });
   }
 
   if (!isLocalWorker(job.worker_id)) {
     if (!job.remote_job_id) {
-      return NextResponse.json({ log: '', offset: 0, reset: true });
+      return Response.json({ log: '', offset: 0, reset: true });
     }
     try {
       const worker = await getRemoteWorker(job.worker_id);
-      const offsetParam = request.nextUrl.searchParams.get('offset');
+      const offsetParam = new URL(request.url).searchParams.get('offset');
       const remotePath =
         offsetParam === null
           ? `/api/jobs/${encodeURIComponent(job.remote_job_id)}/log`
           : `/api/jobs/${encodeURIComponent(job.remote_job_id)}/log?offset=${encodeURIComponent(offsetParam)}`;
-      return NextResponse.json(await remoteJson(worker, remotePath));
+      return Response.json(await remoteJson(worker, remotePath));
     } catch (error) {
       if (isRemoteJobMissingError(error)) {
         await markRemoteJobMissing(job);
-        return NextResponse.json({ log: '', offset: 0, reset: true });
+        return Response.json({ log: '', offset: 0, reset: true });
       }
       console.error('Error reading remote log file:', error);
-      return NextResponse.json({ error: 'Error reading remote log file' }, { status: 502 });
+      return Response.json({ error: 'Error reading remote log file' }, { status: 502 });
     }
   }
 
@@ -145,17 +144,17 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const trainingFolder = await getJobTrainingRoot(job);
     const readableLogPath = await resolveReadableJobLogPath(trainingFolder, jobStorageKey(job), jobID);
     if (!readableLogPath) {
-      return NextResponse.json({ log: '', offset: 0, reset: true });
+      return Response.json({ log: '', offset: 0, reset: true });
     }
 
-    const offsetParam = request.nextUrl.searchParams.get('offset');
+    const offsetParam = new URL(request.url).searchParams.get('offset');
     const offset = offsetParam === null ? null : Number.parseInt(offsetParam, 10);
-    return NextResponse.json(await readLogPayload(readableLogPath, offset));
+    return Response.json(await readLogPayload(readableLogPath, offset));
   } catch (error) {
     if (error instanceof Error && error.message === 'Invalid job path') {
-      return NextResponse.json({ error: 'Invalid job path' }, { status: 400 });
+      return Response.json({ error: 'Invalid job path' }, { status: 400 });
     }
     console.error('Error reading log file:', error);
-    return NextResponse.json({ error: 'Error reading log file' }, { status: 500 });
+    return Response.json({ error: 'Error reading log file' }, { status: 500 });
   }
 }

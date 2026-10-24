@@ -1,21 +1,18 @@
 import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
-import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/server/db';
 import { isLocalWorker, syncRemoteJob } from '@/server/remoteClient';
 import { getJobRemoteCaptionState } from '@/server/remoteCaptionJobs';
 import { syncRemoteCaptionResultForJob } from '@/server/remoteCaptionResults';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
-async function postCommand(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
+async function postCommand(request: Request, { params }: { params: Promise<{ jobID: string }> }) {
   const { jobID } = await params;
   const job = await db.jobs.findById(jobID);
   if (!job) {
-    return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+    return Response.json({ error: 'Job not found' }, { status: 404 });
   }
   if (isLocalWorker(job.worker_id) || !job.remote_job_id) {
-    return NextResponse.json({ error: 'Job is not a remote caption job' }, { status: 400 });
+    return Response.json({ error: 'Job is not a remote caption job' }, { status: 400 });
   }
 
   try {
@@ -28,14 +25,14 @@ async function postCommand(request: NextRequest, { params }: { params: Promise<{
     });
     const state = getJobRemoteCaptionState(result);
     if (state?.downloadStatus === 'failed') {
-      return NextResponse.json(
+      return Response.json(
         { error: state.lastError || result.remote_error || 'Failed to sync remote caption result', job: result },
         { status: 500 },
       );
     }
-    return NextResponse.json(result);
+    return Response.json(result);
   } catch (error) {
-    return NextResponse.json(
+    return Response.json(
       { error: error instanceof Error ? error.message : 'Failed to sync remote caption result' },
       { status: 500 },
     );

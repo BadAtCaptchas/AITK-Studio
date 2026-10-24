@@ -888,7 +888,7 @@ export default function Settings() {
           : status === 'success'
             ? 'success'
             : 'idle';
-  const appVersion = process.env.NEXT_PUBLIC_APP_VERSION || 'local';
+  const appVersion = import.meta.env.VITE_APP_VERSION || 'local';
 
   return (
     <>

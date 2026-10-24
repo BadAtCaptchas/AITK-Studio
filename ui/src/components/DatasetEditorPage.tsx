@@ -3,7 +3,7 @@ import useScopedState from '@/hooks/useScopedState';
 import DatasetDecryption from '@/components/DatasetDecryption';
 import { getTrainingReturnPath } from '@/hooks/useTrainingDraft';
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from '@/navigation';
 import { ArrowLeft, Ban, ChevronRight, ImageOff, Loader2, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import DatasetImageStudio, {
   type BulkCaptionActionRequest,

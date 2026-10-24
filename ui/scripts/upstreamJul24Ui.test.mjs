@@ -54,13 +54,13 @@ test('Studio supported-model documentation contains the July 24 additions', () =
   assert.match(modelCatalog, /krea\/Krea-2-Turbo.*Krea 2 Turbo Edit Training/);
 });
 
-test('Next dev indicators are disabled without weakening Studio build checks', () => {
-  const nextConfig = readUi('next.config.ts');
-
-  assert.match(nextConfig, /devIndicators:\s*false/);
-  assert.doesNotMatch(nextConfig, /ignoreBuildErrors/);
-  assert.match(nextConfig, /bodySizeLimit:\s*'2mb'/);
-  assert.match(nextConfig, /proxyClientMaxBodySize:\s*'5gb'/);
+test('production builds retain strict type checks and streamed command limits', () => {
+  const packageJson = JSON.parse(readUi('package.json'));
+  assert.match(packageJson.scripts.build, /npm run typecheck/);
+  assert.equal(JSON.parse(readUi('tsconfig.json')).compilerOptions.strict, true);
+  assert.equal(packageJson.dependencies.next, undefined);
+  assert.match(readUi('src/server/commandInput.ts'), /maxBytes/);
+  assert.match(readUi('cron/fileServer.ts'), /pipeCommandBody/);
 });
 
 test('the upstream sqlite3 package upgrade remains incorporated without dependency churn', () => {

@@ -316,7 +316,6 @@ test('route passes the precondition and returns the conflict code and status', a
   const route = loadSource('../src/app/api/queue/[queueID]/reorder/route.ts', {
     '@/server/commandInput': { readJsonCommand: request => request.json(), withCommandBoundary: handler => handler },
     '@/utils/obsoleteWorkspaceGuard': { assertGlobalPayload: value => value },
-    'next/server': { NextResponse: Response },
     '@/server/queueReorder': f,
   });
   const request = body =>

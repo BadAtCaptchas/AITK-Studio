@@ -1,5 +1,4 @@
 import { jobStorageKey } from '../../../../../utils/jobIdentity';
-import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import { analyzeTrainingAdvisor } from '@/server/trainingAdvisor';
 import { isAdvisorJobConfig, runTrainingPreflight } from '@/server/trainingPreflight';
@@ -9,16 +8,15 @@ import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClien
 import type { JobConfig } from '@/types';
 import { isRequestAuthenticated } from '@/utils/authSession';
 
-export const runtime = 'nodejs';
 
 const ADVISOR_METRIC_KEYS = ['loss*', 'learning_rate*', 'lr*', 'phase/*', 'event/*', 'train/*'];
 
-async function ensureApiAccess(request: NextRequest): Promise<NextResponse | null> {
+async function ensureApiAccess(request: Request): Promise<Response | null> {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH;
   if (!tokenToUse) return null;
 
   if (!(await isRequestAuthenticated(request, tokenToUse))) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
   return null;
 }
@@ -36,37 +34,37 @@ function parseJobConfig(raw: string): JobConfig | null {
   }
 }
 
-export async function GET(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ jobID: string }> }) {
   const accessResponse = await ensureApiAccess(request);
   if (accessResponse) return accessResponse;
 
   const { jobID } = await params;
   if (!isValidJobId(jobID)) {
-    return NextResponse.json({ error: 'Invalid job ID' }, { status: 400 });
+    return Response.json({ error: 'Invalid job ID' }, { status: 400 });
   }
 
   const job = await db.jobs.findById(jobID);
   if (!job) {
-    return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+    return Response.json({ error: 'Job not found' }, { status: 404 });
   }
 
   if (!isLocalWorker(job.worker_id)) {
     if (!job.remote_job_id) {
       const jobConfig = parseJobConfig(job.job_config);
-      if (!jobConfig) return NextResponse.json({ error: 'Invalid job config' }, { status: 400 });
-      return NextResponse.json(await runTrainingPreflight(jobConfig, job.gpu_ids, job.worker_id));
+      if (!jobConfig) return Response.json({ error: 'Invalid job config' }, { status: 400 });
+      return Response.json(await runTrainingPreflight(jobConfig, job.gpu_ids, job.worker_id));
     }
     try {
       const worker = await getRemoteWorker(job.worker_id);
-      return NextResponse.json(await remoteJson(worker, `/api/jobs/${encodeURIComponent(job.remote_job_id)}/advisor`));
+      return Response.json(await remoteJson(worker, `/api/jobs/${encodeURIComponent(job.remote_job_id)}/advisor`));
     } catch (error) {
       console.error('Error reading remote training advisor:', error);
-      return NextResponse.json({ error: 'Error reading remote training advisor' }, { status: 502 });
+      return Response.json({ error: 'Error reading remote training advisor' }, { status: 502 });
     }
   }
 
   const jobConfig = parseJobConfig(job.job_config);
-  if (!jobConfig) return NextResponse.json({ error: 'Invalid job config' }, { status: 400 });
+  if (!jobConfig) return Response.json({ error: 'Invalid job config' }, { status: 400 });
 
   const trainingFolder = await getJobTrainingRoot(job);
   const logPath = path.join(trainingFolder, jobStorageKey(job), 'loss_log.db');
@@ -76,7 +74,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     sinceStep: null,
   });
 
-  return NextResponse.json(
+  return Response.json(
     analyzeTrainingAdvisor(jobConfig, {
       gpuIds: job.gpu_ids,
       job,

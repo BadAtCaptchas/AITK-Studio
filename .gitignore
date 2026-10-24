@@ -209,3 +209,6 @@ ui/.review-build/
 
 # Local design QA reports.
 design-qa.md
+# Compiled application assets and generated API registry
+ui/.runtime/
+ui/web-dist/

@@ -30,8 +30,7 @@ test('remote sample metadata is validated and rekeyed to the controller mirror r
   const sample = '/api/jobs/worker-job/samples/one.png';
   let response = { samples: [sample], metadata: { [sample]: recorded } };
   const remotePaths = [];
-  const { GET } = load('../src/app/api/jobs/[jobID]/samples/route.ts', {
-    'next/server': { NextResponse: Response }, '@/server/db': { db: { jobs: { findById: async () => ({ id: 'mirror', worker_id: 'worker', remote_job_id: 'worker-job' }) } } },
+  const { GET } = load('../src/app/api/jobs/[jobID]/samples/route.ts', { '@/server/db': { db: { jobs: { findById: async () => ({ id: 'mirror', worker_id: 'worker', remote_job_id: 'worker-job' }) } } },
     '@/server/remoteClient': { isLocalWorker: () => false, getRemoteWorker: async () => ({}), remotePollingJson: async (_worker, remotePath) => { remotePaths.push(remotePath); return response; }, isRemoteJobMissingError: () => false },
     '@/server/remoteAssets': remoteAssets, '@/server/jobSamples': {}, '@/utils/sampleMetadata': sampleMetadata,
   });
@@ -52,8 +51,7 @@ test('dashboard sample polling does not read metadata sidecars', async () => {
   let metadataReads = 0;
   const samples = ['/api/jobs/local-job/samples/one.png'];
   const metadata = { [samples[0]]: recorded };
-  const { GET } = load('../src/app/api/jobs/[jobID]/samples/route.ts', {
-    'next/server': { NextResponse: Response }, '@/server/db': { db: { jobs: { findById: async () => ({ id: 'local-job', worker_id: 'local' }) } } },
+  const { GET } = load('../src/app/api/jobs/[jobID]/samples/route.ts', { '@/server/db': { db: { jobs: { findById: async () => ({ id: 'local-job', worker_id: 'local' }) } } },
     '@/server/remoteClient': { isLocalWorker: () => true }, '@/server/remoteAssets': remoteAssets,
     '@/server/jobSamples': { listJobSampleUrls: async () => samples, listJobSampleMetadata: async () => { metadataReads++; return metadata; } },
     '@/utils/sampleMetadata': sampleMetadata,

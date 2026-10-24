@@ -1,7 +1,6 @@
 import { withPlainDatasetCommand } from '@/server/plainDatasetCommand';
 import { readJsonCommand } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
-import { NextRequest, NextResponse } from 'next/server';
 import {
   decodeRemoteCaptionBulkPaths,
   isDatasetCaptionBulkError,
@@ -13,10 +12,8 @@ import {
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
-async function postCommand(request: NextRequest) {
+async function postCommand(request: Request) {
   try {
     const body = assertGlobalPayload(await readJsonCommand(request)) as DatasetCaptionBulkRequest & {
       worker_id?: string;
@@ -35,20 +32,20 @@ async function postCommand(request: NextRequest) {
           imgPaths: decoded.remotePaths,
         }),
       });
-      return NextResponse.json(mapRemoteCaptionBulkResult(remoteResult, decoded.refByRemotePath));
+      return Response.json(mapRemoteCaptionBulkResult(remoteResult, decoded.refByRemotePath));
     }
 
     const { datasetsRoot } = await resolveDatasetScope();
     const result = await performPlainDatasetCaptionBulkAction(datasetsRoot, body);
-    return NextResponse.json(result);
+    return Response.json(result);
   } catch (error) {
     if (isDatasetCaptionBulkError(error)) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return Response.json({ error: error.message }, { status: error.status });
     }
     if (error instanceof DatasetScopeError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return Response.json({ error: error.message }, { status: error.status });
     }
-    return NextResponse.json(
+    return Response.json(
       { error: error instanceof Error ? error.message : 'Failed to run bulk caption action' },
       { status: 500 },
     );

@@ -1,8 +1,8 @@
 'use client';
-import Link from 'next/link';
+import Link from '@/navigation/Link';
 import { MoreHorizontal, LogOut, Settings, Plus, Search, Moon, Sun } from 'lucide-react';
 import { Menu, MenuButton, MenuItem, MenuItems } from '@headlessui/react';
-import { usePathname } from 'next/navigation';
+import { usePathname } from '@/navigation';
 import { useTheme } from './ThemeProvider';
 import UpdaterStatus from './UpdaterStatus';
 import { authRequiredState, logout } from '@/utils/api';
@@ -91,7 +91,7 @@ export default function Sidebar({ onSearch }: { onSearch: () => void }) {
                   </button>
                 </MenuItem>
               )}
-              <span className="ml-auto text-xs text-gray-500">v{process.env.NEXT_PUBLIC_APP_VERSION}</span>
+              <span className="ml-auto text-xs text-gray-500">v{import.meta.env.VITE_APP_VERSION}</span>
             </div>
           </MenuItems>
         </Menu>

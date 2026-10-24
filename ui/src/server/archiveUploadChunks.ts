@@ -1,20 +1,20 @@
 import { receiveManifestChunk, assembleManifestChunks, cleanupExpiredUploads } from './archiveUploadManifest';
 import { UploadTooLargeError } from './streamedUpload';
 const MAX_ARCHIVE_UPLOAD_CHUNKS = 8192;
-type ArchiveUploadRequest = Request & { nextUrl: URL };
+type ArchiveUploadRequest = Request;
 export type ArchiveUploadMode = 'chunk' | 'complete' | 'status' | null;
 
 export function archiveUploadMode(request: ArchiveUploadRequest): ArchiveUploadMode {
-  const mode = request.nextUrl.searchParams.get('aitk_upload');
+  const mode = new URL(request.url).searchParams.get('aitk_upload');
   return mode === 'chunk' || mode === 'complete' || mode === 'status' ? mode : null;
 }
 
 export function readArchiveUploadID(request: ArchiveUploadRequest) {
-  return validateArchiveUploadID(request.nextUrl.searchParams.get('uploadID') || '');
+  return validateArchiveUploadID(new URL(request.url).searchParams.get('uploadID') || '');
 }
 
 export function readArchiveUploadChunksTotal(request: ArchiveUploadRequest) {
-  const total = readSafeInteger(request.nextUrl.searchParams.get('chunksTotal') || '', 'chunksTotal', 1);
+  const total = readSafeInteger(new URL(request.url).searchParams.get('chunksTotal') || '', 'chunksTotal', 1);
   if (total > MAX_ARCHIVE_UPLOAD_CHUNKS) {
     throw new Error('Invalid archive upload chunksTotal');
   }
@@ -22,7 +22,7 @@ export function readArchiveUploadChunksTotal(request: ArchiveUploadRequest) {
 }
 
 export function readArchiveUploadFileBytes(request: ArchiveUploadRequest, maxBytes: number) {
-  const rawFileBytes = request.nextUrl.searchParams.get('fileBytes');
+  const rawFileBytes = new URL(request.url).searchParams.get('fileBytes');
   if (rawFileBytes === null || rawFileBytes === '') return null;
   const fileBytes = readSafeInteger(rawFileBytes, 'fileBytes', 0);
   if (fileBytes > maxBytes) {
@@ -32,7 +32,7 @@ export function readArchiveUploadFileBytes(request: ArchiveUploadRequest, maxByt
 }
 
 function readArchiveUploadChunkIndex(request: ArchiveUploadRequest) {
-  return readSafeInteger(request.nextUrl.searchParams.get('chunkIndex') || '', 'chunkIndex', 0);
+  return readSafeInteger(new URL(request.url).searchParams.get('chunkIndex') || '', 'chunkIndex', 0);
 }
 
 function validateArchiveUploadID(value: string) {
@@ -74,7 +74,7 @@ export async function saveArchiveUploadChunk(
   }
 
   return receiveManifestChunk(request, uploadRoot, { uploadID, chunkIndex, chunksTotal,
-    expectedBytes: fileBytes, limit: options.maxArchiveBytes ?? 64 * 1024 ** 3, purpose: request.nextUrl.pathname });
+    expectedBytes: fileBytes, limit: options.maxArchiveBytes ?? 64 * 1024 ** 3, purpose: new URL(request.url).pathname });
 }
 
 export async function assembleArchiveUploadChunks(

@@ -1,4 +1,3 @@
-import { NextResponse } from 'next/server';
 import {
   ExternalComfyError,
   getSavedExternalComfyLoraDir,
@@ -7,14 +6,12 @@ import {
   resolveExternalComfyUrl,
 } from '@/server/externalComfy';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
 function errorResponse(error: unknown) {
   if (error instanceof ExternalComfyError) {
-    return NextResponse.json({ error: error.message }, { status: error.status });
+    return Response.json({ error: error.message }, { status: error.status });
   }
-  return NextResponse.json({ error: error instanceof Error ? error.message : 'External ComfyUI LoRA discovery failed.' }, { status: 500 });
+  return Response.json({ error: error instanceof Error ? error.message : 'External ComfyUI LoRA discovery failed.' }, { status: 500 });
 }
 
 export async function GET(request: Request) {
@@ -26,7 +23,7 @@ export async function GET(request: Request) {
       listToolkitLoras(),
       getSavedExternalComfyLoraDir(),
     ]);
-    return NextResponse.json({
+    return Response.json({
       serverUrl,
       externalLoras: external.loras,
       externalSource: external.source,

@@ -2,7 +2,7 @@
 import useStoredString from '@/hooks/useStoredString';
 import useScopedState from '@/hooks/useScopedState';
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
+import Link from '@/navigation/Link';
 import { apiClient } from '@/utils/api';
 import { unlockEncryptedDatasetKey } from '@/utils/encryptedDatasets';
 import type { EncryptedDatasetManifest } from '@/types';

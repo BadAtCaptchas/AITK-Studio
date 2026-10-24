@@ -586,7 +586,7 @@ export function StandaloneJsonWorkspace({
         </footer>
       </div>
 
-      <style jsx global>{`
+      <style>{`
         .monaco-editor .aitk-caption-json-selected-element {
           background: rgba(8, 82, 118, 0.36);
           border-top: 1px solid rgba(34, 211, 238, 0.52);

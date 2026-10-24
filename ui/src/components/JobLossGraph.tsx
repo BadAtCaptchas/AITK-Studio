@@ -1420,7 +1420,7 @@ function JobLossGraphContent({ job, compact = false }: Props) {
         </div>
       </div>
 
-      <style jsx global>{`
+      <style>{`
         .uplot,
         .uplot * {
           font-family: inherit;

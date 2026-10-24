@@ -1,10 +1,7 @@
-import { NextResponse } from 'next/server';
 import { db, type WorkerNodeRecord } from '@/server/db';
 import { fetchWorkerHealth } from '@/server/remoteClient';
 import type { Job } from '@/types';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
 const ACTIVE_JOB_STATUSES = ['queued', 'running', 'stopping'];
 
@@ -74,14 +71,14 @@ async function markActiveJobForDeletedWorker(job: Job, cleanup: RemoteJobCleanup
 export async function DELETE(_request: Request, { params }: { params: Promise<{ workerID: string }> }) {
   const { workerID } = await params;
   if (workerID === 'local') {
-    return NextResponse.json({ error: 'The local worker cannot be deleted' }, { status: 400 });
+    return Response.json({ error: 'The local worker cannot be deleted' }, { status: 400 });
   }
 
   const activeJobs = await db.jobs.list({ worker_id: workerID, status: ACTIVE_JOB_STATUSES });
   const workerRecord = await db.workerNodes.findById(workerID);
   const offlineCheck = activeJobs.length > 0 ? await checkWorkerOffline(workerRecord) : null;
   if (offlineCheck && !offlineCheck.offline) {
-    return NextResponse.json(
+    return Response.json(
       {
         error: 'Cannot delete an online worker with queued, running, or stopping jobs. Stop those jobs first.',
         activeJobCount: activeJobs.length,
@@ -100,7 +97,7 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
 
   const deletedQueues = await db.queues.deleteMany({ worker_id: workerID });
   const worker = await db.workerNodes.delete(workerID);
-  return NextResponse.json({
+  return Response.json({
     worker: worker ? toPublicWorker(worker) : null,
     deletedQueues,
     activeJobCleanup,

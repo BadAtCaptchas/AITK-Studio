@@ -1,6 +1,5 @@
 import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
-import { NextRequest, NextResponse } from 'next/server';
 import {
   getSecureCaptionSystemPrompt,
   normalizeSecureCaptionSystemPrompt,
@@ -8,25 +7,23 @@ import {
   validateSecureCaptionDataset,
 } from '@/server/secureCaptionSettings';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Failed to update dataset system prompt';
 }
 
-export async function GET(request: NextRequest) {
+export async function GET(request: Request) {
   try {
-    const datasetName = request.nextUrl.searchParams.get('datasetName') || '';
+    const datasetName = new URL(request.url).searchParams.get('datasetName') || '';
     const dataset = await validateSecureCaptionDataset(datasetName);
     const systemPrompt = await getSecureCaptionSystemPrompt(dataset.datasetName);
-    return NextResponse.json({ datasetName: dataset.datasetName, systemPrompt });
+    return Response.json({ datasetName: dataset.datasetName, systemPrompt });
   } catch (error) {
-    return NextResponse.json({ error: errorMessage(error) }, { status: 400 });
+    return Response.json({ error: errorMessage(error) }, { status: 400 });
   }
 }
 
-async function postCommand(request: NextRequest) {
+async function postCommand(request: Request) {
   try {
     const body = assertGlobalPayload(await readJsonCommand(request));
     const dataset = await validateSecureCaptionDataset(String(body?.datasetName || ''));
@@ -34,9 +31,9 @@ async function postCommand(request: NextRequest) {
       dataset.datasetName,
       normalizeSecureCaptionSystemPrompt(body?.systemPrompt),
     );
-    return NextResponse.json({ ok: true, datasetName: dataset.datasetName, systemPrompt });
+    return Response.json({ ok: true, datasetName: dataset.datasetName, systemPrompt });
   } catch (error) {
-    return NextResponse.json({ error: errorMessage(error) }, { status: 400 });
+    return Response.json({ error: errorMessage(error) }, { status: 400 });
   }
 }
 

@@ -8,7 +8,7 @@ import test from 'node:test';
 import ts from 'typescript';
 
 const require = createRequire(import.meta.url);
-const { NextRequest, NextResponse } = require('next/server');
+
 
 // Preserve Node 22's destroyed-source behavior even when tests run on newer Node.
 const node22Readable = {
@@ -67,7 +67,6 @@ function fixture(t, kind, { onResolve, onOpen } = {}) {
   const dependencies = {
     fs: files,
     stream: { Readable: node22Readable },
-    'next/server': { NextRequest, NextResponse },
   };
   let serve;
   if (kind === 'samples') {
@@ -95,8 +94,7 @@ function fixture(t, kind, { onResolve, onOpen } = {}) {
     });
     serve = request => GET(request, { params: Promise.resolve({ jobID: 'test-job', samplePath: ['sample.txt'] }) });
   } else {
-    const relative =
-      kind === 'img' ? '../src/app/api/img/[...imagePath]/route.ts' : '../src/app/api/files/[...filePath]/route.ts';
+    const relative = '../src/server/http/fileResponse.ts';
     const source = ts.createSourceFile(
       'route.ts',
       fs.readFileSync(new URL(relative, import.meta.url), 'utf8'),
@@ -104,15 +102,15 @@ function fixture(t, kind, { onResolve, onOpen } = {}) {
       true,
     );
     const handler = source.statements.find(
-      node => ts.isFunctionDeclaration(node) && node.name?.text === 'toNextResponse',
+      node => ts.isFunctionDeclaration(node) && node.name?.text === 'fileResponse',
     );
     assert.ok(handler);
-    const { toNextResponse } = evaluate(
-      `import fs from 'fs'; import { Readable } from 'stream'; import { NextResponse } from 'next/server'; const FILE_STREAM_BUFFER_BYTES = 65536; export ${handler.getText(source)}`,
+    const { fileResponse } = evaluate(
+      `import fs from 'fs'; import { Readable } from 'stream'; const FILE_STREAM_BUFFER_BYTES = 65536; ${handler.getText(source)}`,
       dependencies,
     );
     serve = request =>
-      toNextResponse(request, { kind: 'response', status: 200, body: null, headers: {}, file: { path: filename } });
+      fileResponse(request, { kind: 'response', status: 200, body: null, headers: {}, file: { path: filename } });
   }
   return { streams, serve };
 }
@@ -122,7 +120,7 @@ for (const kind of ['samples', 'img', 'files']) {
     const state = fixture(t, kind);
     const controller = new AbortController();
     controller.abort();
-    const response = await state.serve(new NextRequest('http://localhost/sample', { signal: controller.signal }));
+    const response = await state.serve(new Request('http://localhost/sample', { signal: controller.signal }));
     assert.equal(response.status, 499);
     assert.equal(response.body, null);
     assert.equal(state.streams.length, 0);
@@ -131,7 +129,7 @@ for (const kind of ['samples', 'img', 'files']) {
   test(`${kind}: cancellation during stream setup cannot disturb the Response body`, async t => {
     const controller = new AbortController();
     const state = fixture(t, kind, { onOpen: () => controller.abort() });
-    const response = await state.serve(new NextRequest('http://localhost/sample', { signal: controller.signal }));
+    const response = await state.serve(new Request('http://localhost/sample', { signal: controller.signal }));
     assert.equal(response.status, 200);
     assert.equal(response.bodyUsed, false);
     await assert.rejects(response.text());
@@ -140,10 +138,10 @@ for (const kind of ['samples', 'img', 'files']) {
 
   test(`${kind}: healthy responses stream the file and cancellation closes it`, async t => {
     const state = fixture(t, kind);
-    const response = await state.serve(new NextRequest('http://localhost/sample'));
+    const response = await state.serve(new Request('http://localhost/sample'));
     assert.equal(response.status, 200);
     assert.equal(await response.text(), 'sample bytes');
-    const cancelled = await state.serve(new NextRequest('http://localhost/sample'));
+    const cancelled = await state.serve(new Request('http://localhost/sample'));
     const stream = state.streams.at(-1);
     const closed = new Promise(resolve => stream.once('close', resolve));
     await cancelled.body.cancel();
@@ -155,23 +153,23 @@ for (const kind of ['samples', 'img', 'files']) {
 test('samples: cancellation during asynchronous sample lookup does not open the file', async t => {
   const controller = new AbortController();
   const state = fixture(t, 'samples', { onResolve: () => controller.abort() });
-  const response = await state.serve(new NextRequest('http://localhost/sample', { signal: controller.signal }));
+  const response = await state.serve(new Request('http://localhost/sample', { signal: controller.signal }));
   assert.equal(response.status, 499);
   assert.equal(state.streams.length, 0);
 });
 
 test('samples: byte ranges and conditional responses still work', async t => {
   const state = fixture(t, 'samples');
-  const response = await state.serve(new NextRequest('http://localhost/sample', { headers: { range: 'bytes=0-5' } }));
+  const response = await state.serve(new Request('http://localhost/sample', { headers: { range: 'bytes=0-5' } }));
   assert.equal(response.status, 206);
   assert.equal(response.headers.get('content-range'), 'bytes 0-5/12');
   assert.equal(await response.text(), 'sample');
   const cached = await state.serve(
-    new NextRequest('http://localhost/sample', { headers: { 'if-none-match': response.headers.get('etag') } }),
+    new Request('http://localhost/sample', { headers: { 'if-none-match': response.headers.get('etag') } }),
   );
   assert.equal(cached.status, 304);
   assert.equal(cached.body, null);
-  const invalid = await state.serve(new NextRequest('http://localhost/sample', { headers: { range: 'bytes=50-' } }));
+  const invalid = await state.serve(new Request('http://localhost/sample', { headers: { range: 'bytes=50-' } }));
   assert.equal(invalid.status, 416);
   assert.equal(state.streams.length, 1);
 });

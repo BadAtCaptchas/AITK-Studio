@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import Link from 'next/link';
+import Link from '@/navigation/Link';
 import { ArrowRight, GitBranch, Sparkles } from 'lucide-react';
 import { TopBar, MainContent } from '@/components/layout';
 

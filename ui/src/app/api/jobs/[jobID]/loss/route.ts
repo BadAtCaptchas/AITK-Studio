@@ -1,7 +1,6 @@
 import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { jobStorageKey } from '../../../../../utils/jobIdentity';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
-import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import { db } from '@/server/db';
 import { getJobTrainingRoot } from '@/server/trainingPaths';
@@ -13,30 +12,29 @@ import {
   remoteJson,
 } from '@/server/remoteClient';
 
-export const runtime = 'nodejs';
 
-export async function GET(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ jobID: string }> }) {
   // this must be awaited to avoid TS error
   const { jobID } = await params;
 
   const job = await db.jobs.findById(jobID);
-  if (!job) return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+  if (!job) return Response.json({ error: 'Job not found' }, { status: 404 });
 
   const url = new URL(request.url);
   if (!isLocalWorker(job.worker_id)) {
-    if (!job.remote_job_id) return NextResponse.json({ keys: [], key: 'loss', points: [] });
+    if (!job.remote_job_id) return Response.json({ keys: [], key: 'loss', points: [] });
     try {
       const worker = await getRemoteWorker(job.worker_id);
-      return NextResponse.json(
+      return Response.json(
         await remoteJson(worker, `/api/jobs/${encodeURIComponent(job.remote_job_id)}/loss?${url.searchParams}`),
       );
     } catch (error) {
       if (isRemoteJobMissingError(error)) {
         await markRemoteJobMissing(job);
-        return NextResponse.json({ keys: [], key: 'loss', points: [] });
+        return Response.json({ keys: [], key: 'loss', points: [] });
       }
       console.error('Error reading remote loss log:', error);
-      return NextResponse.json({ error: 'Error reading remote loss log' }, { status: 502 });
+      return Response.json({ error: 'Error reading remote loss log' }, { status: 502 });
     }
   }
 
@@ -50,16 +48,16 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const sinceStep = sinceStepParam != null ? Number(sinceStepParam) : null;
   const stride = Math.max(1, Number(url.searchParams.get('stride') ?? 1));
 
-  return NextResponse.json(await db.metrics.getLossLog(jobID, logPath, { key, limit, sinceStep, stride }));
+  return Response.json(await db.metrics.getLossLog(jobID, logPath, { key, limit, sinceStep, stride }));
 }
 
 // Delete every logged step in [min_step, max_step] (inclusive) across all
 // metric keys. Used by the loss graph's "Delete Selected Range" action.
-async function deleteCommand(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
+async function deleteCommand(request: Request, { params }: { params: Promise<{ jobID: string }> }) {
   const { jobID } = await params;
 
   const job = await db.jobs.findById(jobID);
-  if (!job) return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+  if (!job) return Response.json({ error: 'Job not found' }, { status: 404 });
 
   let body: { min_step?: unknown; max_step?: unknown } = {};
   try {
@@ -70,17 +68,17 @@ async function deleteCommand(request: NextRequest, { params }: { params: Promise
   const minStep = Number(body.min_step);
   const maxStep = Number(body.max_step);
   if (!Number.isFinite(minStep) || !Number.isFinite(maxStep) || minStep > maxStep) {
-    return NextResponse.json(
+    return Response.json(
       { error: 'min_step and max_step must be numbers with min_step <= max_step' },
       { status: 400 },
     );
   }
 
   if (!isLocalWorker(job.worker_id)) {
-    if (!job.remote_job_id) return NextResponse.json({ error: 'Remote job is unavailable' }, { status: 404 });
+    if (!job.remote_job_id) return Response.json({ error: 'Remote job is unavailable' }, { status: 404 });
     try {
       const worker = await getRemoteWorker(job.worker_id);
-      return NextResponse.json(
+      return Response.json(
         await remoteJson(worker, `/api/jobs/${encodeURIComponent(job.remote_job_id)}/loss`, {
           method: 'DELETE',
           body: JSON.stringify({ min_step: minStep, max_step: maxStep }),
@@ -89,10 +87,10 @@ async function deleteCommand(request: NextRequest, { params }: { params: Promise
     } catch (error) {
       if (isRemoteJobMissingError(error)) {
         await markRemoteJobMissing(job);
-        return NextResponse.json({ error: 'Remote job not found' }, { status: 404 });
+        return Response.json({ error: 'Remote job not found' }, { status: 404 });
       }
       console.error('Error deleting remote loss range:', error);
-      return NextResponse.json({ error: 'Error deleting remote loss range' }, { status: 502 });
+      return Response.json({ error: 'Error deleting remote loss range' }, { status: 502 });
     }
   }
 
@@ -102,14 +100,14 @@ async function deleteCommand(request: NextRequest, { params }: { params: Promise
 
   try {
     await db.metrics.deleteLossRange(jobID, logPath, minStep, maxStep);
-    return NextResponse.json({ ok: true, min_step: minStep, max_step: maxStep });
+    return Response.json({ ok: true, min_step: minStep, max_step: maxStep });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Failed to delete range';
     if (message === 'No loss log for this job') {
-      return NextResponse.json({ error: message }, { status: 404 });
+      return Response.json({ error: message }, { status: 404 });
     }
     console.error('Error deleting loss range:', error);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return Response.json({ error: message }, { status: 500 });
   }
 }
 

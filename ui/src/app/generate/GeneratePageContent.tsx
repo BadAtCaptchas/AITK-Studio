@@ -1,5 +1,5 @@
 'use client';
-import Link from 'next/link';
+import Link from '@/navigation/Link';
 import { QwenImageControls, QwenReferenceInputs } from '@/components/generate/QwenImageControls';
 import { isQwenImage2, transparentQwenPrompt } from '@/domain/qwenImage';
 import {
@@ -12,7 +12,7 @@ import {
 import { configContractErrors, CAPABILITY_VERSION } from '@/domain/configContract';
 import { reportWorkflowError } from '@/components/WorkflowFeedback';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from '@/navigation';
 import { Button } from '@headlessui/react';
 import { FileJson, ImagePlus, Layers, Loader2, PanelRightClose, PanelRightOpen, Upload, Wand2, X } from 'lucide-react';
 import workspace from './generate-workspace.module.css';

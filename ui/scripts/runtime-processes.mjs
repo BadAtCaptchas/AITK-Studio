@@ -21,6 +21,7 @@ export const DEFAULT_DEV_PORT = 3000;
 
 const RUNTIME_MARKERS = [
   'scripts/run-app.mjs',
+  'scripts/server.mjs',
   'dist/cron/fileserver.js',
   'cron/fileserver.ts',
   'node_modules/next/dist/bin/next',

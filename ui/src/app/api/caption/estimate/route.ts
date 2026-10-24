@@ -1,6 +1,5 @@
 import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
-import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { getDatasetsRoot } from '@/server/settings';
@@ -53,14 +52,14 @@ async function postCommand(request: Request) {
     const body = assertGlobalPayload(await readJsonCommand(request));
     const datasetPath = typeof body?.datasetPath === 'string' ? body.datasetPath : '';
     if (!datasetPath.trim()) {
-      return NextResponse.json({ error: 'datasetPath is required' }, { status: 400 });
+      return Response.json({ error: 'datasetPath is required' }, { status: 400 });
     }
 
     const datasetsRoot = await getDatasetsRoot();
     const resolvedDatasetPath = await resolveDatasetDirectoryInsideRoot(path.resolve(datasetPath), datasetsRoot);
     const encrypted = isEncryptedDatasetFolder(resolvedDatasetPath);
     if (encrypted) {
-      return NextResponse.json({
+      return Response.json({
         encrypted: true,
         mediaCount: null,
         estimatedCostUsd: null,
@@ -75,7 +74,7 @@ async function postCommand(request: Request) {
 
     const provider = typeof body?.provider === 'string' ? body.provider : '';
     if (provider !== 'openrouter') {
-      return NextResponse.json({
+      return Response.json({
         encrypted: false,
         mediaCount,
         estimatedCostUsd: 0,
@@ -86,7 +85,7 @@ async function postCommand(request: Request) {
     const model = typeof body?.model === 'string' ? body.model.trim() : '';
     const pricing = model ? await getOpenRouterCaptionPricing(model) : null;
     if (!pricing) {
-      return NextResponse.json({
+      return Response.json({
         encrypted: false,
         mediaCount,
         estimatedCostUsd: null,
@@ -107,7 +106,7 @@ async function postCommand(request: Request) {
     const estimatedCostUsd =
       mediaCount * inputTokensPerFile * pricing.prompt + mediaCount * outputTokensPerFile * pricing.completion;
 
-    return NextResponse.json({
+    return Response.json({
       encrypted: false,
       mediaCount,
       estimatedCostUsd,
@@ -121,7 +120,7 @@ async function postCommand(request: Request) {
       },
     });
   } catch (error) {
-    return NextResponse.json(
+    return Response.json(
       { error: error instanceof Error ? error.message : 'Failed to estimate captioning cost' },
       { status: 400 },
     );

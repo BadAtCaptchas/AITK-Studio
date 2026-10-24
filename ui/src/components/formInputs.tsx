@@ -2,13 +2,13 @@
 
 import React, { forwardRef } from 'react';
 import classNames from 'classnames';
-import dynamic from 'next/dynamic';
+import Select from 'react-select';
 import { CircleHelp } from 'lucide-react';
 import { getDoc } from '@/docs';
 import { openDoc } from '@/components/DocModal';
 import { ConfigDoc, GroupedSelectOption, SelectOption } from '@/types';
 
-const Select = dynamic(() => import('react-select'), { ssr: false });
+
 
 const labelClasses = 'flex min-h-7 items-center text-xs font-medium mb-1.5 mt-3 text-gray-300';
 const inputClasses =

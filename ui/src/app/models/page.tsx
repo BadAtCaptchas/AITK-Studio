@@ -1,6 +1,6 @@
 'use client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
+import Link from '@/navigation/Link';
 import { ArrowDown, ArrowUp, ArrowUpDown, Box, Search, Loader2, RefreshCw, Upload } from 'lucide-react';
 import { apiClient } from '@/utils/api';
 import { TopBar, MainContent } from '@/components/layout';

@@ -4,7 +4,6 @@ import { spawn, type ChildProcess } from 'child_process';
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
-import { NextRequest, NextResponse } from 'next/server';
 import { TOOLKIT_ROOT } from '@/paths';
 import { getDatabaseConfig } from '@/server/db';
 import { getHFToken, getTrainingFolder } from '@/server/settings';
@@ -17,8 +16,6 @@ import { isTelemetryEnabled } from '@/server/telemetry';
 import { isRequestAuthenticated } from '@/utils/authSession';
 import { telemetryChildProcessEnv } from '@/utils/telemetry';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
 const isWindows = process.platform === 'win32';
 const imageExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.jxl']);
@@ -34,14 +31,14 @@ function isInlineGenerationCanceledError(error: unknown) {
   return error instanceof InlineGenerationCanceledError;
 }
 
-async function ensureApiAccess(request: NextRequest): Promise<NextResponse | null> {
+async function ensureApiAccess(request: Request): Promise<Response | null> {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH;
   if (!tokenToUse) {
     return null;
   }
 
   if (!(await isRequestAuthenticated(request, tokenToUse))) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   return null;
@@ -267,7 +264,7 @@ function runInlineGenerate(
   });
 }
 
-async function postCommand(request: NextRequest) {
+async function postCommand(request: Request) {
   const accessResponse = await ensureApiAccess(request);
   if (accessResponse) {
     return accessResponse;
@@ -278,13 +275,13 @@ async function postCommand(request: NextRequest) {
     const rawJobConfig: unknown = JSON.parse(JSON.stringify(body.job_config || null));
     const generateContext = getGenerateConfig(rawJobConfig);
     if (!generateContext) {
-      return NextResponse.json({ error: 'Inline generation requires a generate job config.' }, { status: 400 });
+      return Response.json({ error: 'Inline generation requires a generate job config.' }, { status: 400 });
     }
     const jobConfig = generateContext.jobConfig;
 
     const requestedImageCount = getRequestedImageCount(generateContext.generateConfig);
     if (requestedImageCount !== 1) {
-      return NextResponse.json(
+      return Response.json(
         { error: 'Inline generation only supports one image. Create a generate job for multiple images.' },
         { status: 400 },
       );
@@ -322,7 +319,7 @@ async function postCommand(request: NextRequest) {
     const pythonPath = getToolkitPythonPath();
     const runFilePath = path.join(TOOLKIT_ROOT, 'run.py');
     if (!fs.existsSync(runFilePath)) {
-      return NextResponse.json({ error: `run.py not found at ${runFilePath}` }, { status: 500 });
+      return Response.json({ error: `run.py not found at ${runFilePath}` }, { status: 500 });
     }
 
     const additionalEnv: NodeJS.ProcessEnv = {
@@ -361,13 +358,13 @@ async function postCommand(request: NextRequest) {
     }
     const imagePath = await findNewestGeneratedImage(outputFolder);
     if (!imagePath) {
-      return NextResponse.json(
+      return Response.json(
         { error: 'Generation finished, but no image file was found.', log: readLogTail(logPath) },
         { status: 500 },
       );
     }
 
-    return NextResponse.json({
+    return Response.json({
       image_path: imagePath,
       imagePath,
       output_folder: outputFolder,
@@ -375,10 +372,10 @@ async function postCommand(request: NextRequest) {
     });
   } catch (error: any) {
     if (isInlineGenerationCanceledError(error)) {
-      return NextResponse.json({ error: error.message }, { status: 499 });
+      return Response.json({ error: error.message }, { status: 499 });
     }
     console.error('Inline generation failed:', error);
-    return NextResponse.json({ error: error?.message || 'Inline generation failed.' }, { status: 500 });
+    return Response.json({ error: error?.message || 'Inline generation failed.' }, { status: 500 });
   }
 }
 

@@ -1,7 +1,6 @@
 import { withPlainDatasetCommand } from '@/server/plainDatasetCommand';
 import { readJsonCommand } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
-import { NextRequest, NextResponse } from 'next/server';
 import {
   combineDatasets,
   datasetCombineRequestHasKeyMaterial,
@@ -13,8 +12,6 @@ import type { DatasetSummary } from '@/types';
 import { makeRemoteDatasetRef } from '@/utils/remoteDatasetRefs';
 import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
 function decorateRemoteDataset(worker: { id: string; name: string }, dataset: DatasetSummary): DatasetSummary {
   return {
@@ -27,7 +24,7 @@ function decorateRemoteDataset(worker: { id: string; name: string }, dataset: Da
   };
 }
 
-async function postCommand(request: NextRequest) {
+async function postCommand(request: Request) {
   try {
     const body = assertGlobalPayload(await readJsonCommand(request)) as DatasetCombineRequest & { worker_id?: string };
     const workerID = typeof body?.worker_id === 'string' ? body.worker_id : 'local';
@@ -40,7 +37,7 @@ async function postCommand(request: NextRequest) {
         !worker.base_url.toLowerCase().startsWith('https://') &&
         process.env.AITK_ALLOW_INSECURE_REMOTE_ENCRYPTED_DATASETS !== '1'
       ) {
-        return NextResponse.json(
+        return Response.json(
           { error: 'Remote encrypted dataset combine requires an HTTPS worker URL.' },
           { status: 400 },
         );
@@ -56,7 +53,7 @@ async function postCommand(request: NextRequest) {
         '/api/datasets/combine',
         hasKeyMaterial ? withoutRemoteRedirects(remoteInit) : remoteInit,
       );
-      return NextResponse.json({
+      return Response.json({
         ...remoteResult,
         dataset: remoteResult?.dataset ? decorateRemoteDataset(worker, remoteResult.dataset) : remoteResult?.dataset,
       });
@@ -64,16 +61,16 @@ async function postCommand(request: NextRequest) {
 
     const { datasetsRoot } = await resolveDatasetScope();
     const result = await combineDatasets(datasetsRoot, body);
-    return NextResponse.json(result);
+    return Response.json(result);
   } catch (error) {
     console.error('Dataset combine error:', error);
     if (isDatasetCombineError(error)) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return Response.json({ error: error.message }, { status: error.status });
     }
     if (error instanceof DatasetScopeError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return Response.json({ error: error.message }, { status: error.status });
     }
-    return NextResponse.json(
+    return Response.json(
       { error: error instanceof Error ? error.message : 'Failed to combine datasets' },
       { status: 500 },
     );

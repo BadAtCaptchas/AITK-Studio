@@ -12,7 +12,7 @@ import { importRoot, MAX_IMPORT_BYTES, type ArchiveInput } from './archiveImport
 import { enqueueOperation, getOperation, operationID, type Operation } from './operations';
 import { isRecord } from './commandInput';
 
-type ArchiveRequest = Request & { nextUrl: URL };
+type ArchiveRequest = Request;
 export function archiveOperationStatus(operation: Operation) {
   const uploadID = operation.input.kind === 'dataset-import' || operation.input.kind === 'job-import' ? operation.input.uploadID : '';
   return {
@@ -67,7 +67,7 @@ export async function acceptArchiveImport(request: ArchiveRequest, kind: Archive
     }
     const chunked = mode === 'complete';
     const uploadID =
-      chunked || request.nextUrl.searchParams.has('uploadID') ? readArchiveUploadID(request) : randomUUID();
+      chunked || new URL(request.url).searchParams.has('uploadID') ? readArchiveUploadID(request) : randomUUID();
     const prior = await getOperation(operationID(kind, uploadID));
     if (prior) return Response.json(archiveOperationStatus(prior), { status: prior.state === 'completed' ? 200 : 202 });
     const input: ArchiveInput = {
@@ -77,8 +77,8 @@ export async function acceptArchiveImport(request: ArchiveRequest, kind: Archive
       chunked,
       chunksTotal: chunked ? readArchiveUploadChunksTotal(request) : 1,
       expectedBytes: chunked ? readArchiveUploadFileBytes(request, MAX_IMPORT_BYTES) : null,
-      preferredName: request.nextUrl.searchParams.get('preferredName') || request.headers.get('x-aitk-preferred-name'),
-      gpuIds: request.nextUrl.searchParams.get('gpu_ids') || request.headers.get('x-aitk-gpu-ids'),
+      preferredName: new URL(request.url).searchParams.get('preferredName') || request.headers.get('x-aitk-preferred-name'),
+      gpuIds: new URL(request.url).searchParams.get('gpu_ids') || request.headers.get('x-aitk-gpu-ids'),
     };
     if (chunked) {
       const manifest = await getUploadManifest(root, uploadID);
@@ -103,7 +103,7 @@ export async function acceptArchiveImport(request: ArchiveRequest, kind: Archive
         chunksTotal: 1,
         expectedBytes: null,
         limit: MAX_IMPORT_BYTES,
-        purpose: request.nextUrl.pathname,
+        purpose: new URL(request.url).pathname,
       });
       input.chunked = true;
     }

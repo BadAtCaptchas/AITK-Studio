@@ -1,6 +1,5 @@
 import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
-import { NextRequest, NextResponse } from 'next/server';
 import {
   decryptSecureCaptionJson,
   encryptSecureCaptionJson,
@@ -9,18 +8,16 @@ import {
 } from '@/server/secureCaptionCrypto';
 import { startOllamaModelPull } from '@/server/ollama';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
 type SecureOllamaPullRequest = {
   model: string;
 };
 
-async function postCommand(request: NextRequest) {
+async function postCommand(request: Request) {
   try {
     const token = getSecureCaptionBearerToken(request);
     if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const envelope = assertGlobalPayload(await readJsonCommand(request)) as SecureCaptionEnvelope;
@@ -28,9 +25,9 @@ async function postCommand(request: NextRequest) {
     const pullStatus = await startOllamaModelPull(payload.model);
     const responseEnvelope = encryptSecureCaptionJson(token, 'response', envelope.jobId, envelope.itemId, pullStatus);
 
-    return NextResponse.json(responseEnvelope);
+    return Response.json(responseEnvelope);
   } catch (error) {
-    return NextResponse.json(
+    return Response.json(
       { error: error instanceof Error ? error.message : 'Secure Ollama pull failed' },
       { status: 400 },
     );

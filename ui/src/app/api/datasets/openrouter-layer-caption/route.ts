@@ -1,7 +1,6 @@
 import { withPlainDatasetCommand } from '@/server/plainDatasetCommand';
 import { readJsonCommand } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
-import { NextRequest, NextResponse } from 'next/server';
 import {
   encryptedOpenRouterUploadImageDataUrl,
   nonNegativeIntegerFromValue,
@@ -12,7 +11,6 @@ import { generateOpenRouterLayerCaption } from '@/server/openRouterLayerCaption'
 import { getOpenRouterApiKey } from '@/server/settings';
 import { DatasetScopeError } from '@/server/datasetScope';
 
-export const runtime = 'nodejs';
 
 function requiredElementIndex(value: unknown) {
   const elementIndex = nonNegativeIntegerFromValue(value);
@@ -20,7 +18,7 @@ function requiredElementIndex(value: unknown) {
   return elementIndex;
 }
 
-async function postCommand(request: NextRequest) {
+async function postCommand(request: Request) {
   try {
     const apiKey = await getOpenRouterApiKey();
     const contentType = request.headers.get('content-type') || '';
@@ -65,10 +63,10 @@ async function postCommand(request: NextRequest) {
       imageSize: { width: imageWidth, height: imageHeight },
     });
 
-    return NextResponse.json(result);
+    return Response.json(result);
   } catch (error) {
     const status = error instanceof DatasetScopeError ? error.status : 400;
-    return NextResponse.json(
+    return Response.json(
       { error: error instanceof Error ? error.message : 'Failed to caption selected layer with OpenRouter.' },
       { status },
     );

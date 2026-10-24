@@ -1,14 +1,12 @@
 import { withPlainDatasetCommand } from '@/server/plainDatasetCommand';
 import { readJsonCommand } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
-import { NextResponse } from 'next/server';
 import { renameDatasetFolder, DatasetRenameError } from '@/server/datasetRename';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 import { renameSecureCaptionSystemPrompt } from '@/server/secureCaptionSettings';
 import { makeRemoteDatasetRef } from '@/utils/remoteDatasetRefs';
 import { resolveDatasetScope } from '@/server/datasetScope';
 
-export const runtime = 'nodejs';
 
 async function postCommand(request: Request) {
   try {
@@ -24,7 +22,7 @@ async function postCommand(request: Request) {
         body: JSON.stringify({ name: oldName, newName }),
       });
       const { path: _remotePath, dataset, ...safeRemoteResult } = remoteResult || {};
-      return NextResponse.json({
+      return Response.json({
         ...safeRemoteResult,
         worker_id: worker.id,
         worker_name: worker.name,
@@ -47,11 +45,11 @@ async function postCommand(request: Request) {
     {
       await renameSecureCaptionSystemPrompt(result.oldName, result.name);
     }
-    return NextResponse.json(result);
+    return Response.json(result);
   } catch (error: any) {
     const status =
       error instanceof DatasetRenameError ? error.status : typeof error?.status === 'number' ? error.status : 500;
-    return NextResponse.json({ error: error?.message || 'Failed to rename dataset' }, { status });
+    return Response.json({ error: error?.message || 'Failed to rename dataset' }, { status });
   }
 }
 

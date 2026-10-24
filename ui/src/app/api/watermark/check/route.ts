@@ -4,13 +4,10 @@ import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
-import { NextRequest, NextResponse } from 'next/server';
 import { TOOLKIT_ROOT } from '@/paths';
 import { getToolkitPythonPath } from '@/server/tensorboard';
 import { isRequestAuthenticated } from '@/utils/authSession';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 export const maxDuration = 300;
 
 const MAX_IMAGE_BYTES = 50 * 1024 * 1024;
@@ -19,14 +16,14 @@ const allowedExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.jxl']);
 
 type UploadedFile = File;
 
-async function ensureApiAccess(request: NextRequest): Promise<NextResponse | null> {
+async function ensureApiAccess(request: Request): Promise<Response | null> {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH;
   if (!tokenToUse) {
     return null;
   }
 
   if (!(await isRequestAuthenticated(request, tokenToUse))) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   return null;
@@ -119,7 +116,7 @@ function runChecker(args: string[]) {
   });
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   const accessResponse = await ensureApiAccess(request);
   if (accessResponse) return accessResponse;
 
@@ -127,16 +124,16 @@ export async function POST(request: NextRequest) {
   try {
     const contentLength = Number(request.headers.get('content-length') || 0);
     if (contentLength > MAX_IMAGE_BYTES + 4096) {
-      return NextResponse.json({ error: 'Image upload is too large.' }, { status: 413 });
+      return Response.json({ error: 'Image upload is too large.' }, { status: 413 });
     }
 
     const formData = assertGlobalPayload(await request.formData());
     const file = formData.get('image');
     if (!isUploadedFile(file)) {
-      return NextResponse.json({ error: 'Image file is required.' }, { status: 400 });
+      return Response.json({ error: 'Image file is required.' }, { status: 400 });
     }
     if (file.size > MAX_IMAGE_BYTES) {
-      return NextResponse.json({ error: 'Image upload is too large.' }, { status: 413 });
+      return Response.json({ error: 'Image upload is too large.' }, { status: 413 });
     }
 
     const codec = String(formData.get('codec') || 'builtin:authenlora_48bits').trim();
@@ -144,15 +141,15 @@ export async function POST(request: NextRequest) {
     const threshold = normalizedThreshold(formData.get('threshold'));
     const expectedSecret = String(formData.get('expected_secret') || '').trim();
     if (expectedSecret && (expectedSecret.length !== msgBits || /[^01]/.test(expectedSecret))) {
-      return NextResponse.json({ error: 'Expected secret must be binary and match message bits.' }, { status: 400 });
+      return Response.json({ error: 'Expected secret must be binary and match message bits.' }, { status: 400 });
     }
     if (!codec) {
-      return NextResponse.json({ error: 'Codec is required.' }, { status: 400 });
+      return Response.json({ error: 'Codec is required.' }, { status: 400 });
     }
 
     const extension = path.extname(file.name || '').toLowerCase() || '.png';
     if (!allowedExtensions.has(extension)) {
-      return NextResponse.json({ error: 'Unsupported image type.' }, { status: 400 });
+      return Response.json({ error: 'Unsupported image type.' }, { status: 400 });
     }
 
     tempDir = path.join(TOOLKIT_ROOT, '.tmp', 'watermark-check', randomUUID());
@@ -176,10 +173,10 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await runChecker(args);
-    return NextResponse.json(result);
+    return Response.json(result);
   } catch (error) {
     console.error('Watermark check error:', error);
-    return NextResponse.json(
+    return Response.json(
       { error: error instanceof Error ? error.message : 'Watermark check failed.' },
       { status: 500 },
     );

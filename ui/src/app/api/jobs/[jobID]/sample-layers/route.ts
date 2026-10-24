@@ -1,21 +1,18 @@
 import fs from 'fs';
 import { Readable } from 'stream';
-import { NextRequest } from 'next/server';
 import { db } from '@/server/db';
 import { resolveJobSampleFile } from '@/server/jobSamples';
 import { readSampleLayers } from '@/server/sampleLayers';
 import { getRemoteWorker, isLocalWorker, remoteJson, remoteProxyFetch } from '@/server/remoteClient';
 import { isRequestAuthenticated } from '@/utils/authSession';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
-export async function GET(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ jobID: string }> }) {
   if (!(await isRequestAuthenticated(request, process.env.AI_TOOLKIT_AUTH)))
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   const { jobID } = await params;
-  const name = request.nextUrl.searchParams.get('sample') || '';
-  const rawLayer = request.nextUrl.searchParams.get('layer');
+  const name = new URL(request.url).searchParams.get('sample') || '';
+  const rawLayer = new URL(request.url).searchParams.get('layer');
   if (
     !name ||
     /[\\/\x00-\x1f]/.test(name) ||

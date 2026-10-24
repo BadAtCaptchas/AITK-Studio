@@ -1,7 +1,6 @@
 import { withPlainDatasetCommand } from '@/server/plainDatasetCommand';
 import { commandError, readJsonCommand } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
-import { NextResponse } from 'next/server';
 import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 import { copyDatasetBetweenRoots } from '@/server/datasetCopy';
 import { validateDatasetCopyKey } from '@/server/datasetCopyRecovery';
@@ -22,12 +21,12 @@ async function postCommand(request: Request) {
       idempotencyKey,
     });
 
-    return NextResponse.json(destination);
+    return Response.json(destination);
   } catch (error) {
     const invalid = commandError(error);
-    if (invalid) return NextResponse.json({ error: invalid.error, code: invalid.code }, { status: invalid.status });
+    if (invalid) return Response.json({ error: invalid.error, code: invalid.code }, { status: invalid.status });
     const status = error instanceof DatasetScopeError ? error.status : 400;
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to copy dataset' }, { status });
+    return Response.json({ error: error instanceof Error ? error.message : 'Failed to copy dataset' }, { status });
   }
 }
 

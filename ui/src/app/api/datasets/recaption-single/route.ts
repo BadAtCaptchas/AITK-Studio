@@ -1,7 +1,6 @@
 import { withPlainDatasetCommand } from '@/server/plainDatasetCommand';
 import { readJsonCommand } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
-import { NextRequest, NextResponse } from 'next/server';
 import {
   encryptedOpenRouterUploadImageDataUrl,
   plainOpenRouterImageDataUrl,
@@ -14,7 +13,6 @@ import { resolveDatasetFolder } from '@/server/encryptedDatasets';
 import { readDatasetRootCaption } from '@/server/datasetRootCaption';
 import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 
-export const runtime = 'nodejs';
 
 async function rootPromptForDataset(datasetName: string) {
   if (!datasetName.trim()) return '';
@@ -28,7 +26,7 @@ async function rootPromptForDataset(datasetName: string) {
   }
 }
 
-async function postCommand(request: NextRequest) {
+async function postCommand(request: Request) {
   try {
     const contentType = request.headers.get('content-type') || '';
     let provider = '';
@@ -81,7 +79,7 @@ async function postCommand(request: NextRequest) {
       systemPrompt = await rootPromptForDataset(datasetName);
     }
 
-    return NextResponse.json(
+    return Response.json(
       await generateSingleImageRecaption({
         provider,
         model,
@@ -97,7 +95,7 @@ async function postCommand(request: NextRequest) {
     );
   } catch (error) {
     const status = error instanceof DatasetScopeError ? error.status : 400;
-    return NextResponse.json(
+    return Response.json(
       { error: error instanceof Error ? error.message : 'Failed to recaption image.' },
       { status },
     );

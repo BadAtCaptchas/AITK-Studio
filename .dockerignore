@@ -51,6 +51,8 @@ aitk_db.db-*
 node_modules/
 ui/node_modules/
 ui/.next/
+ui/.runtime/
+ui/web-dist/
 ui/out/
 ui/dist/
 ui/.turbo/

@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, use } from 'react';
+import { useState } from 'react';
+import { useParams } from 'react-router-dom';
 import { FaChevronLeft } from 'react-icons/fa';
 import { MdDashboard, MdImage, MdShowChart, MdCode } from 'react-icons/md';
 import { Button } from '@headlessui/react';
@@ -15,8 +16,8 @@ import JobConfigViewer from '@/components/JobConfigViewer';
 import JobLossGraph from '@/components/JobLossGraph';
 import type { Job } from '@/types';
 import { PageNotice, StatusBadge } from '@/components/OperatorPrimitives';
-import { useRouter, useSearchParams } from 'next/navigation';
-import Link from 'next/link';
+import { useRouter, useSearchParams } from '@/navigation';
+import Link from '@/navigation/Link';
 
 type PageKey = 'overview' | 'samples' | 'config' | 'loss_log' | 'notes';
 
@@ -68,11 +69,11 @@ function shouldPollJob(job: Job | null) {
   return isActiveJobStatus(job.status);
 }
 
-export default function JobPage({ params }: { params: Promise<{ jobID: string }> }) {
-  const usableParams = use(params);
+export default function JobPage() {
+  const { jobID = '' } = useParams<'jobID'>();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const jobID = usableParams.jobID;
+
   const [jobReloadInterval, setJobReloadInterval] = useState<number | null>(5000);
   const { job, status, refreshJob } = useJob(jobID, jobReloadInterval);
   const [visitedNotesJobID, setVisitedNotesJobID] = useState<string | null>(null);
@@ -89,9 +90,7 @@ export default function JobPage({ params }: { params: Promise<{ jobID: string }>
   const selectPage = (value: PageKey) => {
     const url = new URL(window.location.href);
     url.searchParams.set('tab', value);
-    // Next copies its history metadata for external changes. Passing its __NA marker
-    // back would bypass the search-parameter update and leave the old panel mounted.
-    window.history.replaceState(null, '', url);
+    router.replace(url.pathname + url.search + url.hash, { scroll: false });
   };
   if (pageKey === 'notes' && visitedNotesJobID !== jobID) setVisitedNotesJobID(jobID);
 

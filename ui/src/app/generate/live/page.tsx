@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
+import Link from '@/navigation/Link';
 import { QwenImageControls } from '@/components/generate/QwenImageControls';
 import { isQwenImage2, transparentQwenPrompt } from '@/domain/qwenImage';
 import { apiClient } from '@/utils/api';

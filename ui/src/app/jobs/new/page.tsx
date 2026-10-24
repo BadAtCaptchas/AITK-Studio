@@ -1,6 +1,6 @@
 'use client';
 
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams } from '@/navigation';
 import { TrainingFormContent } from './TrainingFormContent';
 
 export default function TrainingForm() {

@@ -1,7 +1,7 @@
 'use client';
 import { reportWorkflowError } from '@/components/WorkflowFeedback';
 import { useModelArchs } from '@/extensions/modelArchs';
-import Link from 'next/link';
+import Link from '@/navigation/Link';
 import { QwenImageControls, QwenReferenceInputs } from '@/components/generate/QwenImageControls';
 import { isQwenImage2, qwenSampleReferences, transparentQwenPrompt } from '@/domain/qwenImage';
 import type { ValidationMessage, TrainingFieldTarget } from '@/utils/trainingValidation';

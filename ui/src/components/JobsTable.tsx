@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import QueueSyncStatus from './QueueSyncStatus';
-import Link from 'next/link';
+import Link from '@/navigation/Link';
 import { CgSpinner } from 'react-icons/cg';
 import { ArrowRight, List, Loader2, Pause, Play, RefreshCw, Search } from 'lucide-react';
 import useJobsList from '@/hooks/useJobsList';

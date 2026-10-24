@@ -1,11 +1,8 @@
 import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
-import { NextRequest, NextResponse } from 'next/server';
 import { db, type WorkerNodeRecord } from '@/server/db';
 import { normalizeWorkerBaseUrl } from '@/server/remoteClient';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
 function toPublicWorker(worker: WorkerNodeRecord) {
   const { api_token: _apiToken, ...publicWorker } = worker;
@@ -18,10 +15,10 @@ function asString(value: unknown) {
 
 export async function GET() {
   const workers = await db.workerNodes.list();
-  return NextResponse.json({ workers: workers.map(toPublicWorker) });
+  return Response.json({ workers: workers.map(toPublicWorker) });
 }
 
-async function postCommand(request: NextRequest) {
+async function postCommand(request: Request) {
   try {
     const body = assertGlobalPayload(await readJsonCommand(request));
     const id = asString(body.id);
@@ -31,16 +28,16 @@ async function postCommand(request: NextRequest) {
     const enabled = body.enabled !== false;
     const offlineBypassEnabled = body.offline_bypass_enabled === true;
 
-    if (!name) return NextResponse.json({ error: 'Worker name is required' }, { status: 400 });
+    if (!name) return Response.json({ error: 'Worker name is required' }, { status: 400 });
 
     if (id) {
       const patch: any = { name, base_url: baseUrl, enabled, offline_bypass_enabled: offlineBypassEnabled };
       if (apiToken) patch.api_token = apiToken;
       const worker = await db.workerNodes.update(id, patch);
-      return NextResponse.json(toPublicWorker(worker));
+      return Response.json(toPublicWorker(worker));
     }
 
-    if (!apiToken) return NextResponse.json({ error: 'API token is required for new workers' }, { status: 400 });
+    if (!apiToken) return Response.json({ error: 'API token is required for new workers' }, { status: 400 });
     const worker = await db.workerNodes.create({
       name,
       base_url: baseUrl,
@@ -48,12 +45,12 @@ async function postCommand(request: NextRequest) {
       enabled,
       offline_bypass_enabled: offlineBypassEnabled,
     });
-    return NextResponse.json(toPublicWorker(worker));
+    return Response.json(toPublicWorker(worker));
   } catch (error: any) {
     if (error.code === 'P2002') {
-      return NextResponse.json({ error: 'Worker name already exists' }, { status: 409 });
+      return Response.json({ error: 'Worker name already exists' }, { status: 409 });
     }
-    return NextResponse.json(
+    return Response.json(
       { error: error instanceof Error ? error.message : 'Failed to save worker' },
       { status: 500 },
     );

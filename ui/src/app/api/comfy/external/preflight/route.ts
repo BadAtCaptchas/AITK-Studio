@@ -1,6 +1,5 @@
 import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
-import { NextResponse } from 'next/server';
 import { ExternalComfyError, resolveExternalComfyUrl, runIdeogramComfyPreflight } from '@/server/externalComfy';
 import {
   buildIdeogramComfyWorkflow,
@@ -8,8 +7,6 @@ import {
   type IdeogramWorkflowState,
 } from '@/utils/ideogramWorkflow';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -17,9 +14,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function errorResponse(error: unknown) {
   if (error instanceof ExternalComfyError) {
-    return NextResponse.json({ error: error.message }, { status: error.status });
+    return Response.json({ error: error.message }, { status: error.status });
   }
-  return NextResponse.json(
+  return Response.json(
     { error: error instanceof Error ? error.message : 'External ComfyUI preflight failed.' },
     { status: 500 },
   );
@@ -36,7 +33,7 @@ async function postCommand(request: Request) {
       workflow,
       models: requiredIdeogramModels(state),
     });
-    return NextResponse.json(result);
+    return Response.json(result);
   } catch (error) {
     return errorResponse(error);
   }

@@ -1,5 +1,4 @@
 /* eslint-disable */
-import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { getDatasetsRoot, getTrainingFolder, getDataRoot } from '@/server/settings';
@@ -132,8 +131,8 @@ function extractArtFromTag(buf: Buffer): ArtResult {
   return null;
 }
 
-export async function GET(request: NextRequest, { params }: { params: Promise<{ audioPath: string[] }> }) {
-  if (!await isRequestAuthenticated(request, process.env.AI_TOOLKIT_AUTH)) return new NextResponse('Unauthorized', { status: 401 });
+export async function GET(request: Request, { params }: { params: Promise<{ audioPath: string[] }> }) {
+  if (!await isRequestAuthenticated(request, process.env.AI_TOOLKIT_AUTH)) return new Response('Unauthorized', { status: 401 });
   const { audioPath } = await params;
   try {
     const filepath = path.resolve(catchAllToFilePath(audioPath));
@@ -146,7 +145,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
     const resolvedFile = await fs.promises.realpath(filepath).catch(() => null);
     if (!resolvedFile) {
-      return new NextResponse('File not found', { status: 404 });
+      return new Response('File not found', { status: 404 });
     }
 
     const resolvedRoots = await Promise.all(
@@ -160,21 +159,21 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     });
 
     if (!isAllowed) {
-      return new NextResponse('Access denied', { status: 403 });
+      return new Response('Access denied', { status: 403 });
     }
 
     const stat = await fs.promises.stat(resolvedFile).catch(() => null);
     if (!stat || !stat.isFile()) {
-      return new NextResponse('File not found', { status: 404 });
+      return new Response('File not found', { status: 404 });
     }
 
-    if (!/\.(mp3|wav|flac|ogg|m4a|aac)$/i.test(resolvedFile)) return new NextResponse('Unsupported audio file', { status: 400 });
+    if (!/\.(mp3|wav|flac|ogg|m4a|aac)$/i.test(resolvedFile)) return new Response('Unsupported audio file', { status: 400 });
     const etag = `W/"art-${stat.size}-${stat.mtimeMs}"`;
     const headers = { 'Cache-Control': 'private, no-cache, must-revalidate', 'X-Content-Type-Options': 'nosniff', ETag: etag };
-    if (request.headers.get('if-none-match') === etag) return new NextResponse(null, { status: 304, headers });
+    if (request.headers.get('if-none-match') === etag) return new Response(null, { status: 304, headers });
     const thumbnail = await resolveSampleThumbnail(path.dirname(resolvedFile), path.basename(resolvedFile));
-    if (thumbnail) return new NextResponse(new Uint8Array(await fs.promises.readFile(thumbnail.path)), { headers: { ...headers, 'Content-Type': thumbnail.contentType } });
-    const fallback = async () => new NextResponse(new Uint8Array(await waveformArtwork(resolvedFile, stat.mtimeMs, stat.size)), { headers: { ...headers, 'Content-Type': 'image/png' } });
+    if (thumbnail) return new Response(new Uint8Array(await fs.promises.readFile(thumbnail.path)), { headers: { ...headers, 'Content-Type': thumbnail.contentType } });
+    const fallback = async () => new Response(new Uint8Array(await waveformArtwork(resolvedFile, stat.mtimeMs, stat.size)), { headers: { ...headers, 'Content-Type': 'image/png' } });
 
     // Read only the ID3 tag (first min(tagSize, 4MB) bytes).
     // First read 10 bytes to get tag size, then read the full tag.
@@ -198,7 +197,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         return await fallback();
       }
 
-      return new NextResponse(art.data as any, {
+      return new Response(art.data as any, {
         headers: {
           ...headers,
           'Content-Type': art.mime,
@@ -212,6 +211,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
   } catch (error) {
     console.error('Error extracting album art:', error);
-    return new NextResponse('Internal Server Error', { status: 500 });
+    return new Response('Internal Server Error', { status: 500 });
   }
 }

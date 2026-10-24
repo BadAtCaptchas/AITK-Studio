@@ -9,8 +9,6 @@ import { importLayeredDocument, MAX_LAYERED_UPLOAD_BYTES } from '@/server/layere
 import { LayeredImageError } from '@/server/layeredImages';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   let stagingDirectory: string | undefined;

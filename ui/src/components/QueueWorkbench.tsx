@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'reac
 import type { DragEvent, KeyboardEvent, ReactNode } from 'react';
 import { Dialog, DialogBackdrop, DialogPanel, DialogTitle } from '@headlessui/react';
 import { isAxiosError } from 'axios';
-import Link from 'next/link';
+import Link from '@/navigation/Link';
 import classNames from 'classnames';
 import { ArrowDown, ArrowUp, ArrowUpRight, GripVertical, Loader2, Play, RefreshCcw, Square, X } from 'lucide-react';
 import JobActionBar from '@/components/JobActionBar';

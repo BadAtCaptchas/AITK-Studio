@@ -1,4 +1,3 @@
-import { NextResponse } from 'next/server';
 import { db } from '@/server/db';
 import { listDatasetSummaries } from '@/server/encryptedDatasets';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
@@ -40,7 +39,7 @@ export async function GET(request: Request) {
     if (!isLocalWorker(workerID)) {
       const worker = await getRemoteWorker(workerID);
       const remoteDatasets = await remoteJson<DatasetSummary[]>(worker, '/api/datasets/list');
-      return NextResponse.json({
+      return Response.json({
         datasets: decorateRemoteDatasets(worker, Array.isArray(remoteDatasets) ? remoteDatasets : []),
         errors: [],
       });
@@ -69,14 +68,14 @@ export async function GET(request: Request) {
         )
       : [];
 
-    if (!includeRemote) return NextResponse.json(localDatasets);
+    if (!includeRemote) return Response.json(localDatasets);
 
-    return NextResponse.json({
+    return Response.json({
       datasets: [...localDatasets, ...remoteResults.flat()],
       errors,
     });
   } catch (error: any) {
-    return NextResponse.json(
+    return Response.json(
       {
         error: error?.message || 'Failed to fetch datasets',
         ...(typeof error?.code === 'string' ? { code: error.code } : {}),

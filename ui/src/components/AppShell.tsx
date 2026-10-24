@@ -1,7 +1,7 @@
 'use client';
 import { Suspense, useCallback, useState } from 'react';
 import type { ReactNode } from 'react';
-import { usePathname } from 'next/navigation';
+import { usePathname } from '@/navigation';
 import classNames from 'classnames';
 import Sidebar from '@/components/Sidebar';
 import WorkflowFeedback from '@/components/WorkflowFeedback';

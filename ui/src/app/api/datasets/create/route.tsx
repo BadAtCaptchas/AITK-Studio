@@ -1,6 +1,5 @@
 import { DATASET_MIGRATION_MESSAGE, DATASET_MIGRATION_REQUIRED } from '@/server/datasetDecryption';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
-import { NextResponse } from 'next/server';
 import fs from 'fs';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 import { cleanDatasetName, resolveDatasetFolder } from '@/server/encryptedDatasets';
@@ -20,7 +19,7 @@ export async function POST(request: Request) {
         method: 'POST',
         body: JSON.stringify(remoteBody),
       });
-      return NextResponse.json({
+      return Response.json({
         ...remoteResult,
         worker_id: worker.id,
         worker_name: worker.name,
@@ -32,7 +31,7 @@ export async function POST(request: Request) {
     const { datasetsRoot } = await resolveDatasetScope();
     name = cleanDatasetName(name || '');
     if (!name) {
-      return NextResponse.json({ error: 'Dataset name is required' }, { status: 400 });
+      return Response.json({ error: 'Dataset name is required' }, { status: 400 });
     }
 
     const datasetPath = resolveDatasetFolder(datasetsRoot, name);
@@ -41,12 +40,12 @@ export async function POST(request: Request) {
     if (!fs.existsSync(datasetPath)) {
       fs.mkdirSync(datasetPath);
     } else if (fs.readdirSync(datasetPath).length > 0) {
-      return NextResponse.json({ error: 'Dataset already exists' }, { status: 409 });
+      return Response.json({ error: 'Dataset already exists' }, { status: 409 });
     }
 
-    return NextResponse.json({ success: true, name: name, encrypted: !!encrypted });
+    return Response.json({ success: true, name: name, encrypted: !!encrypted });
   } catch (error: any) {
-    return NextResponse.json(
+    return Response.json(
       { error: error?.message || 'Failed to create dataset' },
       { status: typeof error?.status === 'number' ? error.status : 500 },
     );

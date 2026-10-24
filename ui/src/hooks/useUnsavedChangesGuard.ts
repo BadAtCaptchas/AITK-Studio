@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname, useRouter } from '@/navigation';
 import { openConfirm } from '@/components/ConfirmModal';
 import { registerHistoryGuard, type HistoryTransition } from '@/components/HistoryNavigationGuard';
 import useCommittedRef from './useCommittedRef';

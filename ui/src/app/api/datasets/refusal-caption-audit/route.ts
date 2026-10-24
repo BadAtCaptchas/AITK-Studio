@@ -1,7 +1,6 @@
 import { withPlainDatasetCommand } from '@/server/plainDatasetCommand';
 import { readJsonCommand } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
-import { NextResponse } from 'next/server';
 import fs from 'fs';
 import { auditDatasetRefusalCaptions } from '@/server/datasetRefusalCaptionAudit';
 import { isEncryptedDatasetFolder, resolveDatasetFolder } from '@/server/encryptedDatasets';
@@ -37,12 +36,12 @@ async function postCommand(request: Request) {
   const body = assertGlobalPayload(await readJsonCommand(request));
   const datasetName = body?.datasetName;
   if (typeof datasetName !== 'string' || !datasetName)
-    return NextResponse.json({ error: 'datasetName is required' }, { status: 400 });
+    return Response.json({ error: 'datasetName is required' }, { status: 400 });
   const workerID = typeof body?.worker_id === 'string' ? body.worker_id : 'local';
 
   try {
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: error.status || 400 });
+    return Response.json({ error: error.message }, { status: error.status || 400 });
   }
 
   if (!isLocalWorker(workerID)) {
@@ -53,9 +52,9 @@ async function postCommand(request: Request) {
         method: 'POST',
         body: JSON.stringify({ datasetName }),
       });
-      return NextResponse.json(mapRemoteAuditResponse(data, workerID, refByRemotePath));
+      return Response.json(mapRemoteAuditResponse(data, workerID, refByRemotePath));
     } catch (error: any) {
-      return NextResponse.json(
+      return Response.json(
         { error: error?.message || 'Failed to audit remote captions.' },
         { status: error?.status || 500 },
       );
@@ -68,17 +67,17 @@ async function postCommand(request: Request) {
     datasetFolder = resolveDatasetFolder(scope.datasetsRoot, datasetName);
   } catch (error: any) {
     if (error instanceof DatasetScopeError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return Response.json({ error: error.message }, { status: error.status });
     }
-    return NextResponse.json({ error: error?.message || 'Invalid dataset name' }, { status: 400 });
+    return Response.json({ error: error?.message || 'Invalid dataset name' }, { status: 400 });
   }
 
   try {
     if (!fs.existsSync(datasetFolder)) {
-      return NextResponse.json({ error: `Folder '${datasetName}' not found` }, { status: 404 });
+      return Response.json({ error: `Folder '${datasetName}' not found` }, { status: 404 });
     }
     if (isEncryptedDatasetFolder(datasetFolder)) {
-      return NextResponse.json({
+      return Response.json({
         datasetFingerprint: '',
         scanned: 0,
         refusalCount: 0,
@@ -88,10 +87,10 @@ async function postCommand(request: Request) {
       });
     }
 
-    return NextResponse.json(await auditDatasetRefusalCaptions(datasetFolder));
+    return Response.json(await auditDatasetRefusalCaptions(datasetFolder));
   } catch (error) {
     console.error('Error auditing dataset refusal captions:', error);
-    return NextResponse.json({ error: 'Failed to audit captions' }, { status: 500 });
+    return Response.json({ error: 'Failed to audit captions' }, { status: 500 });
   }
 }
 

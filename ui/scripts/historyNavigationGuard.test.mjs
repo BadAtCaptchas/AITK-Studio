@@ -130,7 +130,7 @@ function fixture(t, { navigation = false, training = false, insecure = false } =
   const router = { push: url => f.win.history.pushState({ __NA: true, tree: 'pushed-tree' }, '', url) };
   const dependencies = {
     react: harness.react,
-    'next/navigation': { usePathname: () => '/jobs/new', useRouter: () => router },
+    '@/navigation': { usePathname: () => '/jobs/new', useRouter: () => router },
     '@/components/ConfirmModal': { openConfirm: value => prompts.push(value) },
     '@/components/HistoryNavigationGuard': guard,
     './useCommittedRef': committed,

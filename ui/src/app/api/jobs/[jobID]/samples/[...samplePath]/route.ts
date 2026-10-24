@@ -1,4 +1,3 @@
-import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import { Readable } from 'stream';
 import { db } from '@/server/db';
@@ -67,41 +66,41 @@ function parseRange(value: string | null, size: number) {
   return { start, end: Math.min(end, size - 1) };
 }
 
-export async function GET(request: NextRequest, { params }: { params: Promise<SampleRouteParams> }) {
-  if (!await isRequestAuthenticated(request, process.env.AI_TOOLKIT_AUTH)) return new NextResponse('Unauthorized', { status: 401 });
+export async function GET(request: Request, { params }: { params: Promise<SampleRouteParams> }) {
+  if (!await isRequestAuthenticated(request, process.env.AI_TOOLKIT_AUTH)) return new Response('Unauthorized', { status: 401 });
   const { jobID, samplePath } = await params;
   const sampleSegments = samplePath;
 
   if (sampleSegments.length !== 1) {
-    return new NextResponse('Invalid sample path', { status: 400 });
+    return new Response('Invalid sample path', { status: 400 });
   }
 
   const job = await db.jobs.findById(jobID);
   if (!job) {
-    return new NextResponse('Job not found', { status: 404 });
+    return new Response('Job not found', { status: 404 });
   }
 
   const sampleFile = await resolveJobSampleFile(job, sampleSegments[0], {
-    thumbnail: request.nextUrl.searchParams.get('thumb') === '1',
+    thumbnail: new URL(request.url).searchParams.get('thumb') === '1',
   });
-  if (request.signal.aborted) return new NextResponse(null, { status: 499 });
+  if (request.signal.aborted) return new Response(null, { status: 499 });
   if (!sampleFile) {
-    return new NextResponse('File not found', { status: 404 });
+    return new Response('File not found', { status: 404 });
   }
 
   const { path: canonicalPath, stat, contentType } = sampleFile;
-  if (request.nextUrl.searchParams.get('thumb') === '1' && contentType.startsWith('audio/')) {
+  if (new URL(request.url).searchParams.get('thumb') === '1' && contentType.startsWith('audio/')) {
     try {
       const artwork = await waveformArtwork(canonicalPath, stat.mtimeMs, stat.size);
-      return new NextResponse(new Uint8Array(artwork), { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'private, no-cache, must-revalidate', 'X-Content-Type-Options': 'nosniff' } });
-    } catch { return new NextResponse('Artwork unavailable', { status: 503 }); }
+      return new Response(new Uint8Array(artwork), { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'private, no-cache, must-revalidate', 'X-Content-Type-Options': 'nosniff' } });
+    } catch { return new Response('Artwork unavailable', { status: 503 }); }
   }
   const etag = `W/"${stat.ino.toString(36)}-${stat.size.toString(36)}-${stat.mtimeMs.toString(36)}"`;
   const cacheControl = 'private, no-cache, must-revalidate';
 
   const ifNoneMatch = request.headers.get('if-none-match');
   if (ifNoneMatch && ifNoneMatch === etag) {
-    return new NextResponse(null, {
+    return new Response(null, {
       status: 304,
       headers: {
         ETag: etag,
@@ -133,7 +132,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<Sa
 
   const requestedRange = parseRange(request.headers.get('range'), stat.size);
   if (requestedRange === 'invalid') {
-    return new NextResponse(null, {
+    return new Response(null, {
       status: 416,
       headers: {
         'Content-Range': `bytes */${stat.size}`,
@@ -145,7 +144,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<Sa
   if (requestedRange) {
     const chunkSize = requestedRange.end - requestedRange.start + 1;
 
-    return new NextResponse(buildBody(requestedRange.start, requestedRange.end), {
+    return new Response(buildBody(requestedRange.start, requestedRange.end), {
       status: 206,
       headers: {
         'Content-Range': `bytes ${requestedRange.start}-${requestedRange.end}/${stat.size}`,
@@ -159,7 +158,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<Sa
     });
   }
 
-  return new NextResponse(buildBody(), {
+  return new Response(buildBody(), {
     headers: {
       'Content-Type': contentType,
       'Content-Length': String(stat.size),

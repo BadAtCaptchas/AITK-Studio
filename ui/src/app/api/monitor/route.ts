@@ -5,7 +5,6 @@ import { MonitorSample } from '@/types';
 // rolling history plus the latest full sample; then a `sample` event every
 // MONITOR_TICK_MS. Auth is the normal middleware bearer check, so the client
 // uses fetch (EventSource can't send headers).
-export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   const monitor = startMonitor();

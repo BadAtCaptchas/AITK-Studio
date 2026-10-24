@@ -1,17 +1,14 @@
-import { NextResponse } from 'next/server';
 import {
   listRemoteOllamaWorkerModels,
   toPublicRemoteOllamaWorker,
 } from '@/server/remoteOllamaWorkers';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
 export async function GET(_request: Request, { params }: { params: Promise<{ workerID: string }> }) {
   const { workerID } = await params;
   try {
     const { worker, status, models } = await listRemoteOllamaWorkerModels(workerID);
-    return NextResponse.json(
+    return Response.json(
       {
         ok: status.ok,
         worker: toPublicRemoteOllamaWorker(worker),
@@ -22,7 +19,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ wor
       { status: status.ok ? 200 : 502 },
     );
   } catch (error) {
-    return NextResponse.json(
+    return Response.json(
       {
         ok: false,
         models: [],

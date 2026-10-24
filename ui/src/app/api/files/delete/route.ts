@@ -1,6 +1,5 @@
 import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
-import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { getDatasetsRoot, getTrainingFolder } from '@/server/settings';
@@ -29,17 +28,17 @@ async function isInsideRoot(root: string, target: string) {
   return relativePath !== '' && !relativePath.startsWith('..') && !path.isAbsolute(relativePath);
 }
 
-async function postCommand(request: NextRequest) {
+async function postCommand(request: Request) {
   try {
     const body = assertGlobalPayload(await readJsonCommand(request));
     const { filePath } = body;
 
     if (!filePath || typeof filePath !== 'string') {
-      return new NextResponse('filePath is required', { status: 400 });
+      return new Response('filePath is required', { status: 400 });
     }
 
     if (filePath.startsWith('remote://')) {
-      return new NextResponse('Remote files cannot be deleted from this endpoint', { status: 400 });
+      return new Response('Remote files cannot be deleted from this endpoint', { status: 400 });
     }
 
     const decodedFilePath = decodePath(filePath);
@@ -47,7 +46,7 @@ async function postCommand(request: NextRequest) {
 
     if (!resolvedFilePath) {
       console.warn(`File not found: ${decodedFilePath}`);
-      return new NextResponse('File not found', { status: 404 });
+      return new Response('File not found', { status: 404 });
     }
 
     const datasetRoot = await getDatasetsRoot();
@@ -59,20 +58,20 @@ async function postCommand(request: NextRequest) {
     ).some(Boolean);
     if (!isAllowed) {
       console.warn(`Access denied: ${resolvedFilePath} not in ${allowedDirs.join(', ')}`);
-      return new NextResponse('Access denied', { status: 403 });
+      return new Response('Access denied', { status: 403 });
     }
 
     const stat = await fs.promises.stat(resolvedFilePath);
     if (!stat.isFile()) {
-      return new NextResponse('Not a file', { status: 400 });
+      return new Response('Not a file', { status: 400 });
     }
 
     await fs.promises.unlink(resolvedFilePath);
 
-    return NextResponse.json({ success: true });
+    return Response.json({ success: true });
   } catch (error) {
     console.error('Error deleting file:', error);
-    return new NextResponse('Internal Server Error', { status: 500 });
+    return new Response('Internal Server Error', { status: 500 });
   }
 }
 

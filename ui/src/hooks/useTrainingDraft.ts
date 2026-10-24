@@ -1,7 +1,7 @@
 'use client';
 import useCommittedRef from './useCommittedRef';
 import { useEffect, useRef, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter } from '@/navigation';
 import { openConfirm } from '@/components/ConfirmModal';
 import { registerHistoryGuard, type HistoryTransition } from '@/components/HistoryNavigationGuard';
 import { saveStoredTrainingDraft, removeStoredTrainingDraft, type StoredTrainingDraft, type TrainingDraft } from '@/utils/trainingDraftStorage';

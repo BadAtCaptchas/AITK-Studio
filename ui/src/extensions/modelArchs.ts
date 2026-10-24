@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo } from 'react';
 import * as jsx from 'react/jsx-runtime';
 import * as jsxDev from 'react/jsx-dev-runtime';
-import Link from 'next/link';
+import Link from '@/navigation/Link';
 import { createGlobalState } from 'react-global-hooks';
 import * as defaultSamples from '@/helpers/defaultSamples';
 import * as formInputs from '@/components/formInputs';
@@ -15,6 +15,7 @@ const shims: Record<string, unknown> = {
   'react/jsx-runtime': jsx,
   'react/jsx-dev-runtime': jsxDev,
   'next/link': { __esModule: true, default: Link },
+  '@/navigation/Link': { __esModule: true, default: Link },
   '@/helpers/defaultSamples': defaultSamples,
   '@/components/formInputs': formInputs,
   '@/app/jobs/new/options': options,

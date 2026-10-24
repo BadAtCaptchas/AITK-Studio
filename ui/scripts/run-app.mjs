@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { loadEnvironment } from './load-env.mjs';
 import {
   RUNTIME_PATH,
   TOOLKIT_ROOT,
@@ -186,6 +187,8 @@ function spawnManaged(spec) {
 
 async function main() {
   const mode = parseMode();
+  process.env.NODE_ENV ||= mode === 'dev' ? 'development' : 'production';
+  loadEnvironment(UI_ROOT, mode === 'dev' ? 'development' : 'production');
   const port = getUiPort(mode);
   const bind = process.env.AITK_BIND_HOST || '127.0.0.1';
   const internalHost = ['0.0.0.0', '::', 'localhost'].includes(bind) ? '127.0.0.1' : bind.includes(':') ? `[${bind}]` : bind;

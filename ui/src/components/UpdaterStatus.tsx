@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
+import Link from '@/navigation/Link';
 import { MenuItem } from '@headlessui/react';
 import classNames from 'classnames';
 import {

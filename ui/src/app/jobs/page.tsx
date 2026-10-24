@@ -1,7 +1,7 @@
 'use client';
 import QueueWorkbench from '@/components/QueueWorkbench';
 import { TopBar, MainContent } from '@/components/layout';
-import Link from 'next/link';
+import Link from '@/navigation/Link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@headlessui/react';
 import {

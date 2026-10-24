@@ -1,7 +1,6 @@
 import { withPlainDatasetCommand } from '@/server/plainDatasetCommand';
 import { readJsonCommand } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
-import { NextRequest, NextResponse } from 'next/server';
 import {
   deleteDatasetWatcher,
   getDatasetWatcherStatuses,
@@ -12,7 +11,6 @@ import {
 } from '@/server/datasetWatchers';
 import { isLocalWorker } from '@/server/remoteClient';
 
-export const runtime = 'nodejs';
 
 function rejectRemoteWorker(workerID: unknown) {
   const normalizedWorkerID = typeof workerID === 'string' && workerID.trim() ? workerID.trim() : 'local';
@@ -25,7 +23,7 @@ function rejectRemoteWorker(workerID: unknown) {
 function errorResponse(error: unknown, fallback = 'Dataset watcher request failed') {
   const known = error as { status?: unknown; code?: unknown; details?: unknown };
   const status = typeof known?.status === 'number' ? known.status : 400;
-  return NextResponse.json(
+  return Response.json(
     {
       error: error instanceof Error ? error.message : fallback,
       ...(typeof known?.code === 'string' ? { code: known.code } : {}),
@@ -35,9 +33,9 @@ function errorResponse(error: unknown, fallback = 'Dataset watcher request faile
   );
 }
 
-export async function GET(request: NextRequest) {
+export async function GET(request: Request) {
   try {
-    const params = request.nextUrl.searchParams;
+    const params = new URL(request.url).searchParams;
     const datasetName = params.get('datasetName') || undefined;
 
     const workerID = params.get('worker_id') || 'local';
@@ -45,12 +43,12 @@ export async function GET(request: NextRequest) {
 
     if (params.get('action') === 'root-caption') {
       const sourcePath = params.get('sourcePath') || '';
-      if (!sourcePath.trim()) return NextResponse.json({ found: false, systemPrompt: '' });
-      return NextResponse.json(await readWatcherSourceRootCaption(sourcePath));
+      if (!sourcePath.trim()) return Response.json({ found: false, systemPrompt: '' });
+      return Response.json(await readWatcherSourceRootCaption(sourcePath));
     }
 
     const watchers = await listDatasetWatchers({ datasetName });
-    return NextResponse.json({
+    return Response.json({
       watchers,
       statuses: await getDatasetWatcherStatuses(watchers.map(watcher => watcher.id)),
     });
@@ -59,7 +57,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-async function postCommand(request: NextRequest) {
+async function postCommand(request: Request) {
   try {
     const body = assertGlobalPayload(await readJsonCommand(request));
 
@@ -68,14 +66,14 @@ async function postCommand(request: NextRequest) {
     if (body?.action === 'run') {
       const id = typeof body?.id === 'string' ? body.id : '';
       const watcher = (await listDatasetWatchers({})).find(item => item.id === id);
-      if (!watcher) return NextResponse.json({ error: 'Watcher not found' }, { status: 404 });
-      return NextResponse.json({ result: await runDatasetWatcherOnce(watcher, { stableMs: 0 }) });
+      if (!watcher) return Response.json({ error: 'Watcher not found' }, { status: 404 });
+      return Response.json({ result: await runDatasetWatcherOnce(watcher, { stableMs: 0 }) });
     }
 
     const watcher = await saveDatasetWatcher({
       ...body,
     });
-    return NextResponse.json({
+    return Response.json({
       watcher,
       statuses: await getDatasetWatcherStatuses([watcher.id]),
     });
@@ -84,7 +82,7 @@ async function postCommand(request: NextRequest) {
   }
 }
 
-async function patchCommand(request: NextRequest) {
+async function patchCommand(request: Request) {
   try {
     const body = assertGlobalPayload(await readJsonCommand(request));
 
@@ -92,7 +90,7 @@ async function patchCommand(request: NextRequest) {
     const watcher = await saveDatasetWatcher({
       ...body,
     });
-    return NextResponse.json({
+    return Response.json({
       watcher,
       statuses: await getDatasetWatcherStatuses([watcher.id]),
     });
@@ -101,9 +99,9 @@ async function patchCommand(request: NextRequest) {
   }
 }
 
-async function deleteCommand(request: NextRequest) {
+async function deleteCommand(request: Request) {
   try {
-    const params = request.nextUrl.searchParams;
+    const params = new URL(request.url).searchParams;
 
     let workerID: unknown = params.get('worker_id');
     rejectRemoteWorker(workerID);
@@ -116,10 +114,10 @@ async function deleteCommand(request: NextRequest) {
       rejectRemoteWorker(workerID);
     }
     const scopedWatcher = (await listDatasetWatchers({})).find(item => item.id === id);
-    if (!scopedWatcher) return NextResponse.json({ error: 'Watcher not found' }, { status: 404 });
+    if (!scopedWatcher) return Response.json({ error: 'Watcher not found' }, { status: 404 });
     const deleted = await deleteDatasetWatcher(id);
-    if (!deleted) return NextResponse.json({ error: 'Watcher not found' }, { status: 404 });
-    return NextResponse.json({ deleted });
+    if (!deleted) return Response.json({ error: 'Watcher not found' }, { status: 404 });
+    return Response.json({ deleted });
   } catch (error) {
     return errorResponse(error);
   }

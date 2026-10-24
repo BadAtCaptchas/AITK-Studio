@@ -1,4 +1,3 @@
-import { NextRequest, NextResponse } from 'next/server';
 import {
   getTrainingJobExportProgress,
   requestTrainingJobExportCancellation,
@@ -8,18 +7,16 @@ import { getRemoteTrainingJobExport, clearRemoteTrainingJobExport } from '@/serv
 import { getRemoteWorker, remoteJson } from '@/server/remoteClient';
 import { makeRemoteAssetRef } from '@/server/remoteAssets';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
 export async function GET(
-  _request: NextRequest,
+  _request: Request,
   { params }: { params: Promise<{ jobID: string; exportID: string }> },
 ) {
   const { jobID, exportID } = await params;
   const progress = getTrainingJobExportProgress(exportID);
 
   if (!progress || progress.jobID !== jobID) {
-    return NextResponse.json({ error: 'Export not found' }, { status: 404 });
+    return Response.json({ error: 'Export not found' }, { status: 404 });
   }
 
   const remote = getRemoteTrainingJobExport(exportID);
@@ -49,7 +46,7 @@ export async function GET(
       if (['completed', 'failed', 'canceled'].includes(remoteProgress.status)) {
         clearRemoteTrainingJobExport(exportID);
       }
-      return NextResponse.json(mapped || progress);
+      return Response.json(mapped || progress);
     } catch (error) {
       const mapped = updateTrainingJobExportProgress(exportID, {
         status: 'failed',
@@ -57,22 +54,22 @@ export async function GET(
         error: error instanceof Error ? error.message : 'Remote export failed',
       });
       clearRemoteTrainingJobExport(exportID);
-      return NextResponse.json(mapped || progress);
+      return Response.json(mapped || progress);
     }
   }
 
-  return NextResponse.json(progress);
+  return Response.json(progress);
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  _request: Request,
   { params }: { params: Promise<{ jobID: string; exportID: string }> },
 ) {
   const { jobID, exportID } = await params;
   const progress = getTrainingJobExportProgress(exportID);
 
   if (!progress || progress.jobID !== jobID) {
-    return NextResponse.json({ error: 'Export not found' }, { status: 404 });
+    return Response.json({ error: 'Export not found' }, { status: 404 });
   }
 
   const remote = getRemoteTrainingJobExport(exportID);
@@ -90,5 +87,5 @@ export async function DELETE(
   }
 
   const updated = requestTrainingJobExportCancellation(exportID);
-  return NextResponse.json(updated || progress);
+  return Response.json(updated || progress);
 }

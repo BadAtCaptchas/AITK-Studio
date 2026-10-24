@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import Link from '@/navigation/Link';
 import { FaChevronLeft } from 'react-icons/fa';
 import { TopBar, MainContent } from '@/components/layout';
 import SecureRemoteCaptionPanel from '@/components/SecureRemoteCaptionPanel';

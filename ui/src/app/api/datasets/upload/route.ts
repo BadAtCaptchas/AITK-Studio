@@ -1,7 +1,6 @@
 import { DATASET_MIGRATION_MESSAGE, DATASET_MIGRATION_REQUIRED } from '@/server/datasetDecryption';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 // src/app/api/datasets/upload/route.ts
-import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import { randomUUID } from 'crypto';
 import { publishDatasetUpload } from '@/server/datasetUploadReservation';
@@ -20,7 +19,6 @@ import {
   streamRequestToStagingFile,
 } from '@/server/streamedUpload';
 
-export const runtime = 'nodejs';
 
 const MAX_STREAMED_FILE_BYTES = 2 * 1024 * 1024 * 1024;
 const MAX_MULTIPART_REQUEST_BYTES = 256 * 1024 * 1024;
@@ -83,7 +81,7 @@ function resolveDatasetUploadDir(datasetsRoot: string, datasetName: string) {
   return uploadDir;
 }
 
-function assertMultipartRequestLength(request: NextRequest) {
+function assertMultipartRequestLength(request: Request) {
   const rawContentLength = request.headers.get('content-length');
   if (!rawContentLength) {
     const error = new Error('Content-Length is required for multipart dataset uploads');
@@ -143,7 +141,7 @@ function assertedRelativeUploadPath(uploadDir: string, targetPath: string) {
   return targetRelative;
 }
 
-function forwardedStreamHeaders(request: NextRequest) {
+function forwardedStreamHeaders(request: Request) {
   const headers = new Headers();
   for (const name of [
     'content-type',
@@ -162,7 +160,7 @@ function forwardedStreamHeaders(request: NextRequest) {
   return headers;
 }
 
-async function streamPlainDatasetFile(request: NextRequest) {
+async function streamPlainDatasetFile(request: Request) {
   const datasetName = decodedUploadHeader(request, 'x-aitk-dataset-name', 256).trim();
   const workerID = decodedUploadHeader(request, 'x-aitk-worker-id', 256).trim() || 'local';
 
@@ -176,8 +174,8 @@ async function streamPlainDatasetFile(request: NextRequest) {
     return Response.json({ error: DATASET_MIGRATION_MESSAGE, code: DATASET_MIGRATION_REQUIRED }, { status: 410 });
   const failIfDatasetExists = request.headers.get('x-aitk-fail-if-dataset-exists') === '1';
 
-  if (!datasetName) return NextResponse.json({ error: 'Dataset name is required' }, { status: 400 });
-  if (!originalFilename) return NextResponse.json({ error: 'Upload filename is required' }, { status: 400 });
+  if (!datasetName) return Response.json({ error: 'Dataset name is required' }, { status: 400 });
+  if (!originalFilename) return Response.json({ error: 'Upload filename is required' }, { status: 400 });
 
   if (!isLocalWorker(workerID)) {
     const worker = await getRemoteWorker(workerID);
@@ -187,7 +185,7 @@ async function streamPlainDatasetFile(request: NextRequest) {
       body: request.body,
       duplex: 'half',
     } as RequestInit & { duplex: 'half' });
-    return NextResponse.json(result);
+    return Response.json(result);
   }
 
   const { datasetsRoot } = await resolveDatasetScope();
@@ -198,7 +196,7 @@ async function streamPlainDatasetFile(request: NextRequest) {
     fs.statSync(uploadDir).isDirectory() &&
     fs.readdirSync(uploadDir).length > 0
   ) {
-    return NextResponse.json({ error: 'Dataset already exists' }, { status: 409 });
+    return Response.json({ error: 'Dataset already exists' }, { status: 409 });
   }
   if (encryptedObjectPath || isEncryptedDatasetFolder(uploadDir))
     return Response.json({ error: DATASET_MIGRATION_MESSAGE, code: DATASET_MIGRATION_REQUIRED }, { status: 410 });
@@ -225,20 +223,20 @@ async function streamPlainDatasetFile(request: NextRequest) {
     });
     const targetRelative = assertedRelativeUploadPath(uploadDir, targetPath);
     await writeDatasetImportMetadataBestEffort(uploadDir, sourceFolderPath);
-    return NextResponse.json({ message: 'File uploaded successfully', files: [targetRelative], uploadGroup: groupID });
+    return Response.json({ message: 'File uploaded successfully', files: [targetRelative], uploadGroup: groupID });
   } finally {
     await cleanupStagedUpload(stagingPath);
   }
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   try {
     const contentType = (request.headers.get('content-type') || '').split(';', 1)[0].trim().toLowerCase();
     if (contentType === 'application/octet-stream') {
       return await streamPlainDatasetFile(request);
     }
     if (contentType !== 'multipart/form-data') {
-      return NextResponse.json({ error: 'Unsupported dataset upload content type' }, { status: 415 });
+      return Response.json({ error: 'Unsupported dataset upload content type' }, { status: 415 });
     }
     // Next's FormData parser buffers the request, so reject an oversized body
     // from its declared length before parsing it into memory.
@@ -252,14 +250,14 @@ export async function POST(request: NextRequest) {
     const datasetNameValue = formData.get('datasetName');
     const datasetName = typeof datasetNameValue === 'string' ? datasetNameValue.trim() : '';
     if (files.length === 0) {
-      return NextResponse.json({ error: 'No files provided' }, { status: 400 });
+      return Response.json({ error: 'No files provided' }, { status: 400 });
     }
     if (!datasetName) {
-      return NextResponse.json({ error: 'Dataset name is required' }, { status: 400 });
+      return Response.json({ error: 'Dataset name is required' }, { status: 400 });
     }
     const { datasetsRoot } = await resolveDatasetScope();
     if (!datasetsRoot) {
-      return NextResponse.json({ error: 'Datasets path not found' }, { status: 500 });
+      return Response.json({ error: 'Datasets path not found' }, { status: 500 });
     }
     if (!isLocalWorker(workerID)) {
       const worker = await getRemoteWorker(workerID);
@@ -267,7 +265,7 @@ export async function POST(request: NextRequest) {
       formData.forEach((value, key) => {
         if (key !== 'worker_id') remoteFormData.append(key, value);
       });
-      return NextResponse.json(
+      return Response.json(
         await remoteJson(worker, '/api/datasets/upload', {
           method: 'POST',
           body: remoteFormData,
@@ -287,7 +285,7 @@ export async function POST(request: NextRequest) {
     if (typeof relativePathsText === 'string' && relativePathsText.trim()) {
       const parsed = JSON.parse(relativePathsText);
       if (!Array.isArray(parsed)) {
-        return NextResponse.json({ error: 'relativePaths must be an array' }, { status: 400 });
+        return Response.json({ error: 'relativePaths must be an array' }, { status: 400 });
       }
       relativePaths = parsed.map(value => (typeof value === 'string' ? value : ''));
     }
@@ -301,7 +299,7 @@ export async function POST(request: NextRequest) {
       fs.statSync(uploadDir).isDirectory() &&
       fs.readdirSync(uploadDir).length > 0
     ) {
-      return NextResponse.json({ error: 'Dataset already exists' }, { status: 409 });
+      return Response.json({ error: 'Dataset already exists' }, { status: 409 });
     }
 
     await mkdir(uploadDir, { recursive: true });
@@ -331,7 +329,7 @@ export async function POST(request: NextRequest) {
 
     await writeDatasetImportMetadataBestEffort(uploadDir, sourceFolderPath);
 
-    return NextResponse.json({
+    return Response.json({
       message: 'Files uploaded successfully',
       files: savedFiles,
     });
@@ -339,7 +337,7 @@ export async function POST(request: NextRequest) {
     console.error('Upload error:', error);
     const status =
       error && typeof error === 'object' && 'status' in error && typeof error.status === 'number' ? error.status : 500;
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Error uploading files' }, { status });
+    return Response.json({ error: error instanceof Error ? error.message : 'Error uploading files' }, { status });
   }
 }
 

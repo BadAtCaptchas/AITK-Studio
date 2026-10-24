@@ -1,6 +1,5 @@
 import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
-import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import zlib from 'zlib';
@@ -64,38 +63,38 @@ async function jsonResponse(request: Request, payload: unknown) {
 
   if (/\bbr\b/.test(acceptEncoding)) {
     const body = await brotliCompress(json);
-    return new NextResponse(new Uint8Array(body), {
+    return new Response(new Uint8Array(body), {
       headers: { 'Content-Type': 'application/json', 'Content-Encoding': 'br' },
     });
   }
 
   if (/\bgzip\b/.test(acceptEncoding)) {
     const body = await gzipCompress(json);
-    return new NextResponse(new Uint8Array(body), {
+    return new Response(new Uint8Array(body), {
       headers: { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' },
     });
   }
 
-  return new NextResponse(json, { headers: { 'Content-Type': 'application/json' } });
+  return new Response(json, { headers: { 'Content-Type': 'application/json' } });
 }
 
 async function postCommand(request: Request) {
   const body = assertGlobalPayload(await readJsonCommand(request));
   const { datasetName } = body;
-  if (typeof datasetName !== 'string' || !datasetName) return NextResponse.json({ error: 'datasetName is required' }, { status: 400 });
+  if (typeof datasetName !== 'string' || !datasetName) return Response.json({ error: 'datasetName is required' }, { status: 400 });
   const workerID = typeof body?.worker_id === 'string' ? body.worker_id : 'local';
 
   const compact = body?.compact === true;
 
   try {
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: error.status || 400 });
+    return Response.json({ error: error.message }, { status: error.status || 400 });
   }
 
   if (!isLocalWorker(workerID)) {
     try {
     } catch (error: any) {
-      return NextResponse.json({ error: error.message }, { status: error.status || 400 });
+      return Response.json({ error: error.message }, { status: error.status || 400 });
     }
     const worker = await getRemoteWorker(workerID);
     const data = await remoteJson<Record<string, unknown>>(worker, '/api/datasets/listImages', {
@@ -127,16 +126,16 @@ async function postCommand(request: Request) {
     datasetFolder = resolveDatasetFolder(datasetsPath, datasetName);
   } catch (error: any) {
     if (error instanceof DatasetScopeError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return Response.json({ error: error.message }, { status: error.status });
     }
-    return NextResponse.json({ error: error?.message || 'Invalid dataset name' }, { status: 400 });
+    return Response.json({ error: error?.message || 'Invalid dataset name' }, { status: 400 });
   }
 
   try {
     try {
       await fs.promises.access(datasetFolder);
     } catch {
-      return NextResponse.json({ error: `Folder '${datasetName}' not found` }, { status: 404 });
+      return Response.json({ error: `Folder '${datasetName}' not found` }, { status: 404 });
     }
 
     if (isEncryptedDatasetFolder(datasetFolder)) {
@@ -156,7 +155,7 @@ async function postCommand(request: Request) {
     return jsonResponse(request, compact ? { root, images } : { images });
   } catch (error) {
     console.error('Error finding images:', error);
-    return NextResponse.json({ error: 'Failed to process request' }, { status: 500 });
+    return Response.json({ error: 'Failed to process request' }, { status: 500 });
   }
 }
 

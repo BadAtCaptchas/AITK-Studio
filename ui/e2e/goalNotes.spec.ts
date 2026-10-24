@@ -87,6 +87,7 @@ test('Notes guard covers browser Back and failed saves, and clears after revert 
   await page.evaluate(() => window.history.back());
   await expect(page.getByRole('heading', { name: 'Leave notes?', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Leave notes?', exact: true })).not.toBeVisible();
   await expect(notes).toHaveValue('Back-protected notes');
   await notes.fill(state.notes);
   await modelsLink(page);

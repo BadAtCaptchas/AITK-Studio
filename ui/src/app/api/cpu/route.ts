@@ -1,4 +1,3 @@
-import { NextResponse } from 'next/server';
 import si from 'systeminformation';
 import os from 'os';
 import { CpuInfo } from '@/types';
@@ -15,9 +14,9 @@ export async function GET(request: Request) {
       const worker = await getRemoteWorker(workerID);
       const poll = await runRemoteBackgroundPoll(worker, 'CPU telemetry', () => fetchWorkerCpu(worker));
       if ('reason' in poll) {
-        return NextResponse.json({ error: `Remote CPU telemetry unavailable: ${poll.reason}` }, { status: 503 });
+        return Response.json({ error: `Remote CPU telemetry unavailable: ${poll.reason}` }, { status: 503 });
       }
-      return NextResponse.json(poll.value);
+      return Response.json(poll.value);
     }
 
     const localCpuInfo = await cached('cpu-info:local', async () => {
@@ -74,10 +73,10 @@ export async function GET(request: Request) {
       return cpuInfo;
     });
 
-    return NextResponse.json(localCpuInfo);
+    return Response.json(localCpuInfo);
   } catch (error) {
     console.error('Error fetching CPU stats:', error);
-    return NextResponse.json(
+    return Response.json(
       {
         error: `Failed to fetch CPU stats: ${error instanceof Error ? error.message : String(error)}`,
       },

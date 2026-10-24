@@ -4,7 +4,7 @@ import { getTrainingReturnPath } from '@/hooks/useTrainingDraft';
 import { reportWorkflowError } from '@/components/WorkflowFeedback';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal } from '@/components/Modal';
-import Link from 'next/link';
+import Link from '@/navigation/Link';
 import { TextInput } from '@/components/formInputs';
 import useDatasetList from '@/hooks/useDatasetList';
 import useDatasetWatcherLiveRefresh from '@/hooks/useDatasetWatcherLiveRefresh';
@@ -35,7 +35,7 @@ import DatasetWatcherProgressBadge from '@/components/DatasetWatcherProgressBadg
 import { TopBar, MainContent } from '@/components/layout';
 import { PageNotice } from '@/components/OperatorPrimitives';
 import { apiClient } from '@/utils/api';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from '@/navigation';
 import { aggregateAutoCaptionProgressByDataset } from '@/utils/datasetWatcherStatus';
 import {
   folderImportExtension,

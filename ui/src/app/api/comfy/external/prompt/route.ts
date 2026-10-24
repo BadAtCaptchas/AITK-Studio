@@ -1,7 +1,6 @@
 import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import { randomUUID } from 'crypto';
-import { NextResponse } from 'next/server';
 import {
   ExternalComfyError,
   queueComfyPrompt,
@@ -14,8 +13,6 @@ import {
   type IdeogramWorkflowState,
 } from '@/utils/ideogramWorkflow';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -23,9 +20,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function errorResponse(error: unknown) {
   if (error instanceof ExternalComfyError) {
-    return NextResponse.json({ error: error.message }, { status: error.status });
+    return Response.json({ error: error.message }, { status: error.status });
   }
-  return NextResponse.json(
+  return Response.json(
     { error: error instanceof Error ? error.message : 'External ComfyUI prompt failed.' },
     { status: 500 },
   );
@@ -45,14 +42,14 @@ async function postCommand(request: Request) {
       models: requiredIdeogramModels(state),
     });
     if (!preflight.ok) {
-      return NextResponse.json(
+      return Response.json(
         { error: preflight.error || 'External ComfyUI preflight failed.', preflight },
         { status: 400 },
       );
     }
 
     const queued = await queueComfyPrompt({ serverUrl, workflow, clientId });
-    return NextResponse.json({ ...queued, serverUrl });
+    return Response.json({ ...queued, serverUrl });
   } catch (error) {
     return errorResponse(error);
   }

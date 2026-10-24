@@ -1,7 +1,7 @@
 /**
  * Turn a `[...param]` catch-all route param into the requested filesystem path.
  *
- * Next.js hands catch-all params over as an array of URL segments with the
+ * The API router supplies catch-all params as an array of URL segments with the
  * percent-encoding of each segment already decoded, so both URL forms map to
  * the same path:
  *   /api/files/%2Fmnt%2Fout%2Fjob%2Ffile.safetensors        (legacy: one segment)

@@ -77,7 +77,7 @@ function fixture() {
   const route = () => load('../src/app/api/jobs/route.ts', {
     '@/domain/configContract': configContract, '@/utils/obsoleteWorkspaceGuard': obsoleteWorkspaceGuard,
     '@/server/commandInput': commandInput, '@/utils/jobIdentity': jobIdentity,
-    '@/utils/validationConfig': validationConfig, 'next/server': { NextResponse: Response },
+    '@/utils/validationConfig': validationConfig,
     '@/helpers/basic': { isMac: () => false }, '@/utils/authSession': { isRequestAuthenticated: async () => authenticated },
     '@/server/db': { db }, '@/server/jobAttempts': {}, '@/server/jobCreateCommand': receipt(),
     '@/server/remoteClient': { isLocalWorker: id => id === 'local' },

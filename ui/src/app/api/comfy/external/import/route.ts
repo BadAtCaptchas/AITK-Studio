@@ -1,6 +1,5 @@
 import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
-import { NextResponse } from 'next/server';
 import {
   ExternalComfyError,
   getComfyHistory,
@@ -11,14 +10,12 @@ import {
 } from '@/server/externalComfy';
 import { parseIdeogramComfyWorkflow } from '@/utils/ideogramWorkflow';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
 function errorResponse(error: unknown) {
   if (error instanceof ExternalComfyError) {
-    return NextResponse.json({ error: error.message }, { status: error.status });
+    return Response.json({ error: error.message }, { status: error.status });
   }
-  return NextResponse.json(
+  return Response.json(
     { error: error instanceof Error ? error.message : 'External ComfyUI import failed.' },
     { status: 500 },
   );
@@ -29,20 +26,20 @@ async function postCommand(request: Request) {
     const body = assertGlobalPayload(await readJsonCommand(request));
     const promptId = typeof body?.promptId === 'string' ? body.promptId.trim() : '';
     if (!promptId) {
-      return NextResponse.json({ error: 'promptId is required.' }, { status: 400 });
+      return Response.json({ error: 'promptId is required.' }, { status: 400 });
     }
     const serverUrl = await resolveExternalComfyUrl(body?.server_url ?? body?.serverUrl);
     const history = await getComfyHistory(serverUrl, promptId);
     const entry = normalizeComfyHistoryEntry(history, promptId);
     if (!entry) {
-      return NextResponse.json({ error: `No ComfyUI history entry found for prompt ${promptId}.` }, { status: 404 });
+      return Response.json({ error: `No ComfyUI history entry found for prompt ${promptId}.` }, { status: 404 });
     }
     const workflow = workflowFromHistoryEntry(entry);
     if (!workflow) {
-      return NextResponse.json({ error: 'ComfyUI history entry does not include an API workflow.' }, { status: 422 });
+      return Response.json({ error: 'ComfyUI history entry does not include an API workflow.' }, { status: 422 });
     }
     const imported = parseIdeogramComfyWorkflow(workflow);
-    return NextResponse.json({
+    return Response.json({
       ...imported,
       promptId,
       serverUrl,

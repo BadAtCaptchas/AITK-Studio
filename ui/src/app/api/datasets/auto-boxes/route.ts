@@ -1,7 +1,6 @@
 import { withPlainDatasetCommand } from '@/server/plainDatasetCommand';
 import { readJsonCommand } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
-import { NextRequest, NextResponse } from 'next/server';
 import {
   boolFromValue,
   encryptedOpenRouterUploadImageDataUrl,
@@ -13,7 +12,6 @@ import { generateOpenRouterBoxPatches } from '@/server/openRouterBoxes';
 import { generateOllamaBoxPatches, generateRemoteOllamaBoxPatches } from '@/server/ollamaVision';
 import { getOpenRouterApiKey } from '@/server/settings';
 
-export const runtime = 'nodejs';
 
 type StudioBoxProvider = 'openrouter' | 'ollama' | 'remote_ollama';
 
@@ -21,7 +19,7 @@ function normalizeProvider(value: unknown): StudioBoxProvider {
   return value === 'ollama' || value === 'remote_ollama' ? value : 'openrouter';
 }
 
-async function postCommand(request: NextRequest) {
+async function postCommand(request: Request) {
   try {
     const contentType = request.headers.get('content-type') || '';
     let caption = '';
@@ -64,10 +62,10 @@ async function postCommand(request: NextRequest) {
 
     const imageSize = { width: imageWidth, height: imageHeight };
     if (provider === 'ollama') {
-      return NextResponse.json(await generateOllamaBoxPatches({ imageDataUrl, caption, model, refine, imageSize }));
+      return Response.json(await generateOllamaBoxPatches({ imageDataUrl, caption, model, refine, imageSize }));
     }
     if (provider === 'remote_ollama') {
-      return NextResponse.json(
+      return Response.json(
         await generateRemoteOllamaBoxPatches({
           imageDataUrl,
           caption,
@@ -79,7 +77,7 @@ async function postCommand(request: NextRequest) {
       );
     }
 
-    return NextResponse.json(
+    return Response.json(
       await generateOpenRouterBoxPatches({
         apiKey: await getOpenRouterApiKey(),
         imageDataUrl,
@@ -91,7 +89,7 @@ async function postCommand(request: NextRequest) {
     );
   } catch (error) {
     const status = error instanceof DatasetScopeError ? error.status : 400;
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to create boxes.' }, { status });
+    return Response.json({ error: error instanceof Error ? error.message : 'Failed to create boxes.' }, { status });
   }
 }
 

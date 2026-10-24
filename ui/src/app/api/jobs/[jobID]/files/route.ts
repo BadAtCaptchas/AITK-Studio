@@ -1,5 +1,4 @@
 import { jobStorageKey } from '../../../../../utils/jobIdentity';
-import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import fs from 'fs';
 import { db } from '@/server/db';
@@ -13,18 +12,18 @@ import {
 } from '@/server/remoteClient';
 import { makeRemoteAssetRef } from '@/server/remoteAssets';
 
-export async function GET(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ jobID: string }> }) {
   const { jobID } = await params;
 
   const job = await db.jobs.findById(jobID);
 
   if (!job) {
-    return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+    return Response.json({ error: 'Job not found' }, { status: 404 });
   }
 
   if (!isLocalWorker(job.worker_id)) {
     if (!job.remote_job_id) {
-      return NextResponse.json({ files: [] });
+      return Response.json({ files: [] });
     }
     try {
       const worker = await getRemoteWorker(job.worker_id);
@@ -32,7 +31,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         worker,
         `/api/jobs/${encodeURIComponent(job.remote_job_id)}/files`,
       );
-      return NextResponse.json({
+      return Response.json({
         files: (data.files || []).map(file => ({
           ...file,
           path: makeRemoteAssetRef(job.id, 'file', file.path),
@@ -41,10 +40,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     } catch (error) {
       if (isRemoteJobMissingError(error)) {
         await markRemoteJobMissing(job);
-        return NextResponse.json({ files: [] });
+        return Response.json({ files: [] });
       }
       console.error('Error reading remote files:', error);
-      return NextResponse.json({ error: 'Error reading remote files' }, { status: 502 });
+      return Response.json({ error: 'Error reading remote files' }, { status: 502 });
     }
   }
 
@@ -54,7 +53,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   try {
     await fs.promises.access(jobFolder);
   } catch {
-    return NextResponse.json({ files: [] });
+    return Response.json({ files: [] });
   }
 
   // find all safetensors files in the job folder
@@ -90,5 +89,5 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     // Optimizer state is optional.
   }
 
-  return NextResponse.json({ files: fileObjects });
+  return Response.json({ files: fileObjects });
 }

@@ -7,7 +7,7 @@ import sqlite3 from 'sqlite3';
 import { fileURLToPath } from 'node:url';
 const execute = promisify(execFile);
 const ui = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const nextMode = process.env.AITK_TEST_NEXT_MODE === 'dev' ? 'dev' : 'start';
+const mode = process.env.AITK_TEST_APP_MODE === 'dev' ? 'dev' : 'start';
 const root = await fs.mkdtemp(path.join(os.tmpdir(), 'aitk-browser-fixture-'));
 const env = {
   ...process.env,
@@ -63,7 +63,7 @@ async function stop() {
   process.exit(0);
 }
 for (const [script, args] of [
-  ['cron/fileServer.js', [nextMode, '--port', '15875']],
+  ['cron/fileServer.js', [mode, '--port', '15875']],
   ['cron/worker.js', []],
 ]) {
   const child = spawn(process.execPath, [path.join(process.env.AITK_TEST_WORKER_DIR || 'dist', script), ...args], {

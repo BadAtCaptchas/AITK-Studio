@@ -1,5 +1,4 @@
 import { jobStorageKey } from '../../../../../utils/jobIdentity';
-import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import { db } from '@/server/db';
 import { getJobTrainingRoot } from '@/server/trainingPaths';
@@ -12,7 +11,6 @@ import {
   RemotePollUnavailableError,
 } from '@/server/remoteClient';
 
-export const runtime = 'nodejs';
 
 const DEFAULT_KEYS = ['loss*', 'learning_rate*', 'lr*', 'phase/*', 'event/*', 'train/*'];
 // max_points applies per series; multi-series histories can exceed the generic JSON limit.
@@ -40,21 +38,21 @@ function parseSinceSteps(value: string | null): Record<string, number | null> | 
   return out;
 }
 
-export async function GET(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ jobID: string }> }) {
   const { jobID } = await params;
 
   const job = await db.jobs.findById(jobID);
-  if (!job) return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+  if (!job) return Response.json({ error: 'Job not found' }, { status: 404 });
 
   const url = new URL(request.url);
 
   if (!isLocalWorker(job.worker_id)) {
     if (!job.remote_job_id) {
-      return NextResponse.json({ keys: [], keyInfo: [], series: {} });
+      return Response.json({ keys: [], keyInfo: [], series: {} });
     }
     try {
       const worker = await getRemoteWorker(job.worker_id);
-      return NextResponse.json(
+      return Response.json(
         await remotePollingJson(worker, `/api/jobs/${encodeURIComponent(job.remote_job_id)}/metrics?${url.searchParams}`, 'metrics', {
           maxResponseBytes: MAX_REMOTE_METRICS_BYTES,
           signal: request.signal,
@@ -64,12 +62,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       if (request.signal.aborted) return new Response(null, { status: 499 });
       if (isRemoteJobMissingError(error)) {
         await markRemoteJobMissing(job);
-        return NextResponse.json({ keys: [], keyInfo: [], series: {} });
+        return Response.json({ keys: [], keyInfo: [], series: {} });
       }
       if (!(error instanceof RemotePollUnavailableError)) {
         console.error('Error reading remote metrics:', error instanceof Error ? error.message : 'Unknown error');
       }
-      return NextResponse.json({ error: 'Error reading remote metrics' }, { status: 502 });
+      return Response.json({ error: 'Error reading remote metrics' }, { status: 502 });
     }
   }
 
@@ -80,7 +78,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const sinceStep = sinceStepParam != null ? Number(sinceStepParam) : null;
   const maxPoints = Math.min(Math.max(Number(url.searchParams.get('max_points') ?? 4000), 2), 20000);
 
-  return NextResponse.json(
+  return Response.json(
     await db.metrics.getMetrics(jobID, logPath, {
       keys: parseKeys(url.searchParams.get('keys')),
       maxPoints,

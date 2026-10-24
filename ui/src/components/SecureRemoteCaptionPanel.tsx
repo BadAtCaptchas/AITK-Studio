@@ -4,7 +4,7 @@ import useStoredString from '@/hooks/useStoredString';
 import useScopedState from '@/hooks/useScopedState';
 import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
+import Link from '@/navigation/Link';
 import { Loader2, RotateCcw, Save } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import type { SelectOption } from '@/types';

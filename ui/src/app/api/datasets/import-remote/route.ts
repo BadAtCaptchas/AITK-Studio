@@ -6,7 +6,6 @@ import fsp from 'fs/promises';
 import path from 'path';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
-import { NextRequest, NextResponse } from 'next/server';
 import { getRemoteWorker, remoteFetch } from '@/server/remoteClient';
 import { extractZipSafely, getExtractedDatasetPath, readDatasetExportManifest } from '@/server/datasetTransfer';
 import { isEncryptedDatasetFolder, listDatasetSummaries } from '@/server/encryptedDatasets';
@@ -14,15 +13,13 @@ import { nextAvailablePath } from '@/server/trainingJobTransfer';
 import type { DatasetSummary } from '@/types';
 import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
 async function writeResponseBodyToFile(response: Response, targetPath: string) {
   if (!response.body) throw new Error('Remote worker returned an empty dataset archive');
   await pipeline(Readable.fromWeb(response.body as any), fs.createWriteStream(targetPath));
 }
 
-async function postCommand(request: NextRequest) {
+async function postCommand(request: Request) {
   let workRoot: string | null = null;
 
   try {
@@ -37,7 +34,7 @@ async function postCommand(request: NextRequest) {
     const workerID = typeof body?.worker_id === 'string' ? body.worker_id : '';
     const datasetName = typeof body?.datasetName === 'string' ? body.datasetName : '';
     if (!workerID || !datasetName) {
-      return NextResponse.json({ error: 'worker_id and datasetName are required' }, { status: 400 });
+      return Response.json({ error: 'worker_id and datasetName are required' }, { status: 400 });
     }
 
     const worker = await getRemoteWorker(workerID);
@@ -53,7 +50,7 @@ async function postCommand(request: NextRequest) {
     const manifest = await readDatasetExportManifest(extractRoot);
     const datasetSource = getExtractedDatasetPath(extractRoot, manifest.dataset.archivePath);
     if (!fs.existsSync(datasetSource) || !fs.statSync(datasetSource).isDirectory()) {
-      return NextResponse.json({ error: 'Dataset payload missing from archive' }, { status: 400 });
+      return Response.json({ error: 'Dataset payload missing from archive' }, { status: 400 });
     }
 
     const targetPath = await nextAvailablePath(datasetsRoot, manifest.dataset.name || datasetName);
@@ -72,14 +69,14 @@ async function postCommand(request: NextRequest) {
       path: targetPath,
     };
 
-    return NextResponse.json({
+    return Response.json({
       dataset,
       path: targetPath,
       renamed: importedName !== manifest.dataset.name,
     });
   } catch (error) {
     const status = error instanceof DatasetScopeError ? error.status : 500;
-    return NextResponse.json(
+    return Response.json(
       { error: error instanceof Error ? error.message : 'Failed to import remote dataset' },
       { status },
     );

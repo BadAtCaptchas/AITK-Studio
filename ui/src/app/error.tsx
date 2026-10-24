@@ -9,8 +9,7 @@ export default function GlobalError({ reset }: { error: Error & { digest?: strin
         <AlertTriangle className="h-7 w-7 text-rose-300" aria-hidden="true" />
         <h1 className="mt-4 text-lg font-semibold">This page could not be loaded</h1>
         <p className="mt-2 text-sm leading-6 text-gray-400">
-          The current operation stopped safely. Retry the page, then check the job or application log if the problem
-          continues.
+          Try opening the page again. If you started a task, check its status before retrying it.
         </p>
         <button type="button" onClick={reset} className="operator-button mt-5 h-9">
           <RefreshCw className="h-4 w-4" aria-hidden="true" />

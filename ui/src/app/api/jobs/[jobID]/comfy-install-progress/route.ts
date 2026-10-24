@@ -1,27 +1,26 @@
-import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/server/db';
 import { getComfyInstallProgress } from '@/server/comfyInstallProgress';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 
-export async function GET(_request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
+export async function GET(_request: Request, { params }: { params: Promise<{ jobID: string }> }) {
   const { jobID } = await params;
   const job = await db.jobs.findById(jobID);
 
   if (!job) {
-    return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+    return Response.json({ error: 'Job not found' }, { status: 404 });
   }
 
   if (!isLocalWorker(job.worker_id)) {
-    if (!job.remote_job_id) return NextResponse.json({ progress: null });
+    if (!job.remote_job_id) return Response.json({ progress: null });
     try {
       const worker = await getRemoteWorker(job.worker_id);
-      return NextResponse.json(
+      return Response.json(
         await remoteJson(worker, `/api/jobs/${encodeURIComponent(job.remote_job_id)}/comfy-install-progress`),
       );
     } catch {
-      return NextResponse.json({ progress: null });
+      return Response.json({ progress: null });
     }
   }
 
-  return NextResponse.json({ progress: await getComfyInstallProgress(job) });
+  return Response.json({ progress: await getComfyInstallProgress(job) });
 }

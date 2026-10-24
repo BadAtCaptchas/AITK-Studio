@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import Link from '@/navigation/Link';
 import { ArrowLeft, FileQuestion } from 'lucide-react';
 
 export default function NotFound() {

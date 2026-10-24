@@ -136,7 +136,7 @@ test('front server waits for workers and routes startup failures through cleanup
   assert.match(source, /process\.send\(\{ type: 'aitk-file-server-ready' \}\)/);
   assert.match(
     source,
-    /try \{[\s\S]*await waitForUpstream\(upstreamPort, nextChild\)[\s\S]*\} catch \(error\) \{[\s\S]*shutdown\(1\)/,
+    /try \{[\s\S]*await waitForUpstream\(upstreamPort, appChild\)[\s\S]*\} catch \(error\) \{[\s\S]*shutdown\(1\)/,
   );
   assert.match(source, /registerWorkerCrash\([\s\S]*if \(crashDecision\.shouldStop\)/);
 });

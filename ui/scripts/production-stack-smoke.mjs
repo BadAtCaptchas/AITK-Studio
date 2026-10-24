@@ -14,7 +14,7 @@ try {
   let ready = false;
   for (let attempt = 0; attempt < 120 && server.exitCode === null; attempt++) {
     try {
-      ready = (await fetch(origin, { signal: AbortSignal.timeout(1000) })).ok;
+      ready = (await fetch(origin, { headers: { Accept: 'text/html' }, signal: AbortSignal.timeout(1000) })).ok;
     } catch {
       /* Startup. */
     }

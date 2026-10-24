@@ -1,9 +1,9 @@
 /**
  * Public UI front server.
  *
- * The primary process owns one loopback-only Next.js child. One or more cluster
+ * The primary process owns one loopback-only application server. One or more cluster
  * workers share the public port, serve authorized local files with raw Node
- * streams, and proxy every other HTTP/WebSocket request to Next.js.
+ * streams, and proxy every other HTTP/WebSocket request to application.
  */
 import { hasObsoleteWorkspaceScope, hasObsoleteWorkspaceHeaders } from '../src/utils/obsoleteWorkspaceGuard';
 import cluster, { type Worker } from 'cluster';
@@ -138,6 +138,7 @@ async function tryServeAccelerated(req: IncomingMessage, res: ServerResponse) {
     return true;
   }
   const headers = requestHeaders(req.headers);
+  if (!requestUrl.pathname.startsWith('/api/files/') && !requestUrl.pathname.startsWith('/api/img/')) return false;
   const serving = await getFileServingModule();
   let resolution: FileResponseResolution;
 
@@ -330,11 +331,11 @@ function waitForUpstream(port: number, child: ChildProcess) {
       else resolve();
     };
     const onExit = (code: number | null) =>
-      finish(new Error(`Next.js exited during startup with code ${code ?? 'unknown'}`));
+      finish(new Error(`application exited during startup with code ${code ?? 'unknown'}`));
     const probe = () => {
       if (settled) return;
       if (Date.now() >= deadline) {
-        finish(new Error('Timed out waiting for Next.js to start'));
+        finish(new Error('Timed out waiting for application to start'));
         return;
       }
       const socket = net.connect(port, UPSTREAM_HOST);
@@ -404,18 +405,17 @@ function waitForWorkerReady(worker: Worker) {
 
 async function primaryMain() {
   const upstreamPort = await getFreePort();
-  const nextBin = require.resolve('next/dist/bin/next');
-  const nextArgs = isDev ? ['dev', '--turbopack'] : ['start'];
-  nextArgs.push('--port', String(upstreamPort), '--hostname', UPSTREAM_HOST);
+  const serverScript = require('path').resolve(process.cwd(), 'scripts/server.mjs');
+  const appArgs = [isDev ? 'dev' : 'start', '--port', String(upstreamPort)];
 
-  const nextChild = spawn(process.execPath, [nextBin, ...nextArgs], {
-    stdio: ['ignore', 'pipe', 'pipe'],
+  const appChild = spawn(process.execPath, [serverScript, ...appArgs], {
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
     cwd: process.cwd(),
     env: process.env,
     windowsHide: true,
   });
-  rewriteChildOutput(nextChild.stdout!, process.stdout, upstreamPort);
-  rewriteChildOutput(nextChild.stderr!, process.stderr, upstreamPort);
+  rewriteChildOutput(appChild.stdout!, process.stdout, upstreamPort);
+  rewriteChildOutput(appChild.stderr!, process.stderr, upstreamPort);
 
   let shuttingDown = false;
   let clusterReady = false;
@@ -423,9 +423,9 @@ async function primaryMain() {
   let localServer: http.Server | null = null;
   const recentWorkerCrashes: number[] = [];
   const forceExit = () => {
-    if (nextChild.exitCode === null && nextChild.signalCode === null) {
+    if (appChild.exitCode === null && appChild.signalCode === null) {
       try {
-        nextChild.kill('SIGKILL');
+        appChild.kill('SIGKILL');
       } catch {
         // Best effort during shutdown.
       }
@@ -440,9 +440,10 @@ async function primaryMain() {
     for (const worker of Object.values(cluster.workers || {})) {
       worker?.kill(signal);
     }
-    if (nextChild.exitCode === null && nextChild.signalCode === null) {
+    if (appChild.exitCode === null && appChild.signalCode === null) {
       try {
-        nextChild.kill(signal);
+        if (appChild.connected) appChild.send({ type: 'aitk-shutdown' });
+        else appChild.kill(signal);
       } catch {
         forceExit();
         return;
@@ -454,13 +455,13 @@ async function primaryMain() {
     setTimeout(forceExit, 5_000).unref();
   };
 
-  nextChild.once('error', error => {
-    console.error('Next.js failed to start:', error);
+  appChild.once('error', error => {
+    console.error('application failed to start:', error);
     shutdown(1);
   });
-  nextChild.once('exit', code => {
+  appChild.once('exit', code => {
     if (!shuttingDown) {
-      console.error(`Next.js exited with code ${code ?? 'unknown'}`);
+      console.error(`application exited with code ${code ?? 'unknown'}`);
       shutdown(code && code !== 0 ? code : 1);
       return;
     }
@@ -485,7 +486,7 @@ async function primaryMain() {
   });
 
   try {
-    await waitForUpstream(upstreamPort, nextChild);
+    await waitForUpstream(upstreamPort, appChild);
 
     if (numWorkers === 1) {
       localServer = await listen(PUBLIC_PORT, upstreamPort);

@@ -1,10 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/server/db';
 import { getRemoteWorker, isLocalWorker, remoteProxyFetch } from '@/server/remoteClient';
 import { remoteAssetProxyPath, type RemoteAssetType } from '@/server/remoteAssets';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
 function copyResponseHeaders(source: Response) {
   const headers = new Headers();
@@ -23,19 +20,19 @@ function copyResponseHeaders(source: Response) {
   return headers;
 }
 
-export async function GET(request: NextRequest) {
-  const jobID = request.nextUrl.searchParams.get('job_id') || '';
-  const remotePath = request.nextUrl.searchParams.get('path') || '';
-  const type = (request.nextUrl.searchParams.get('type') || 'img') as RemoteAssetType;
-  const thumbnail = request.nextUrl.searchParams.get('thumb') === '1';
+export async function GET(request: Request) {
+  const jobID = new URL(request.url).searchParams.get('job_id') || '';
+  const remotePath = new URL(request.url).searchParams.get('path') || '';
+  const type = (new URL(request.url).searchParams.get('type') || 'img') as RemoteAssetType;
+  const thumbnail = new URL(request.url).searchParams.get('thumb') === '1';
 
   if (!jobID || !remotePath) {
-    return new NextResponse('Missing remote asset parameters', { status: 400 });
+    return new Response('Missing remote asset parameters', { status: 400 });
   }
 
   const job = await db.jobs.findById(jobID);
   if (!job || isLocalWorker(job.worker_id)) {
-    return new NextResponse('Remote job not found', { status: 404 });
+    return new Response('Remote job not found', { status: 404 });
   }
 
   try {
@@ -47,12 +44,12 @@ export async function GET(request: NextRequest) {
       request.method === 'HEAD' ? 'HEAD' : 'GET',
       request.signal,
     );
-    return new NextResponse(remoteResponse.body, {
+    return new Response(remoteResponse.body, {
       status: remoteResponse.status,
       headers: copyResponseHeaders(remoteResponse),
     });
   } catch (error) {
     console.error('Remote asset proxy failed:', error);
-    return new NextResponse('Remote asset unavailable', { status: 502 });
+    return new Response('Remote asset unavailable', { status: 502 });
   }
 }

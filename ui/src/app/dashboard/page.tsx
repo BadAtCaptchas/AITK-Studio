@@ -1,6 +1,6 @@
 'use client';
 import { useMemo, useState } from 'react';
-import Link from 'next/link';
+import Link from '@/navigation/Link';
 import { Cpu, RefreshCw, Search, ExternalLink, Server } from 'lucide-react';
 import useGPUInfo from '@/hooks/useGPUInfo';
 import useCPUInfo from '@/hooks/useCPUInfo';

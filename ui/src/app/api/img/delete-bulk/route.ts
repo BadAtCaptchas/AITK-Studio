@@ -1,6 +1,5 @@
 import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
-import { NextResponse } from 'next/server';
 import {
   deletePlainImagePaths,
   isImageDeleteError,
@@ -21,7 +20,7 @@ type RemoteGroup = {
 async function requireAuth(request: Request) {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH || null;
   if (!(await isRequestAuthenticated(request, tokenToUse))) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
   return null;
 }
@@ -112,7 +111,7 @@ async function postCommand(request: Request) {
     const body = assertGlobalPayload(await readJsonCommand(request));
     const { localPaths, remoteGroups, error } = splitRemoteAndLocalPaths(body?.imgPaths);
     if (error || !localPaths || !remoteGroups) {
-      return NextResponse.json({ error: error || 'Invalid image paths' }, { status: 400 });
+      return Response.json({ error: error || 'Invalid image paths' }, { status: 400 });
     }
 
     const results: ImageDeleteBulkResult[] = [];
@@ -131,15 +130,15 @@ async function postCommand(request: Request) {
       results.push(mapRemoteResult(remoteResult, group.refByRemotePath));
     }
 
-    return NextResponse.json(combineBulkResults(results));
+    return Response.json(combineBulkResults(results));
   } catch (error) {
     if (error instanceof DatasetScopeError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return Response.json({ error: error.message }, { status: error.status });
     }
     if (isImageDeleteError(error)) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return Response.json({ error: error.message }, { status: error.status });
     }
-    return NextResponse.json({ error: 'Failed to delete images' }, { status: 500 });
+    return Response.json({ error: 'Failed to delete images' }, { status: 500 });
   }
 }
 

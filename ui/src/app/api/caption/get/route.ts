@@ -1,6 +1,5 @@
 import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
-import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
 import { getRemoteWorker, remoteFetch } from '@/server/remoteClient';
@@ -9,21 +8,21 @@ import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 import { sanitizeCaptionText } from '@/utils/captionQuality';
 
-async function postCommand(request: NextRequest) {
+async function postCommand(request: Request) {
   let body;
   try {
     body = assertGlobalPayload(await readJsonCommand(request));
   } catch {
     // Client aborted the request before body was fully sent
-    return new NextResponse(null, { status: 499 });
+    return new Response(null, { status: 499 });
   }
 
   if (request.signal.aborted) {
-    return new NextResponse(null, { status: 499 });
+    return new Response(null, { status: 499 });
   }
 
   const { imgPath } = body;
-  if (typeof imgPath !== 'string' || !imgPath) return NextResponse.json({ error: 'imgPath is required' }, { status: 400 });
+  if (typeof imgPath !== 'string' || !imgPath) return Response.json({ error: 'imgPath is required' }, { status: 400 });
   try {
     const remoteAsset = parseRemoteDatasetAssetRef(imgPath);
     if (remoteAsset) {
@@ -34,7 +33,7 @@ async function postCommand(request: NextRequest) {
         headers: { 'Content-Type': 'application/json' },
       });
       if (remoteResponse.ok) {
-        return new NextResponse(sanitizeCaptionText(await remoteResponse.text()), {
+        return new Response(sanitizeCaptionText(await remoteResponse.text()), {
           status: remoteResponse.status,
           headers: {
             'Content-Type': remoteResponse.headers.get('content-type') || 'text/plain; charset=utf-8',
@@ -42,7 +41,7 @@ async function postCommand(request: NextRequest) {
           },
         });
       }
-      return new NextResponse(remoteResponse.body, {
+      return new Response(remoteResponse.body, {
         status: remoteResponse.status,
         headers: {
           'Content-Type': remoteResponse.headers.get('content-type') || 'text/plain; charset=utf-8',
@@ -65,20 +64,20 @@ async function postCommand(request: NextRequest) {
 
     if (!isAllowed) {
       console.warn(`Access denied: ${filepath} not in ${allowedDir}`);
-      return new NextResponse('Access denied', { status: 403 });
+      return new Response('Access denied', { status: 403 });
     }
 
     if (findEncryptedDatasetRoot(resolvedFilePath, allowedRoot)) {
-      return new NextResponse('Encrypted captions are not served through this route', { status: 403 });
+      return new Response('Encrypted captions are not served through this route', { status: 403 });
     }
 
-    return new NextResponse(await readCaptionSidecarAsync(resolvedFilePath));
+    return new Response(await readCaptionSidecarAsync(resolvedFilePath));
   } catch (error) {
     console.error('Error getting caption:', error);
     if (error instanceof DatasetScopeError) {
-      return new NextResponse(error.message, { status: error.status });
+      return new Response(error.message, { status: error.status });
     }
-    return new NextResponse('Error getting caption', { status: 500 });
+    return new Response('Error getting caption', { status: 500 });
   }
 }
 

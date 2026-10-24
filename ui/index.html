@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#14161b" />
+    <meta name="description" content="A training studio for diffusion models, datasets, and generation workflows." />
+    <meta name="apple-mobile-web-app-title" content="AITK Studio" />
+    <link rel="icon" type="image/png" href="/web-app-manifest-192x192.png" />
+    <link rel="apple-touch-icon" href="/web-app-manifest-192x192.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <title>AITK Studio</title>
+    <script>
+      try { document.documentElement.classList.toggle('dark', localStorage.getItem('theme') !== 'light'); } catch {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>Enable JavaScript to open AITK Studio.</noscript>
+    <script type="module" src="/src/client/main.tsx"></script>
+  </body>
+</html>

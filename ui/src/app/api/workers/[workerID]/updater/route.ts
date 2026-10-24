@@ -1,11 +1,8 @@
 import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
-import { NextRequest, NextResponse } from 'next/server';
 import { db, type WorkerNodeRecord } from '@/server/db';
 import { getRemoteWorker, RemoteClientError, remoteJson } from '@/server/remoteClient';
 import type { RepoUpdateRequestAction, RepoUpdateStatus } from '@/server/updater';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
 function toPublicWorker(worker: WorkerNodeRecord) {
   const { api_token: _apiToken, ...publicWorker } = worker;
@@ -23,7 +20,7 @@ function remoteUpdaterError(error: unknown) {
         ? 'Remote worker does not expose the updater API yet. Update that worker manually once, then remote updates will be available.'
         : error.message;
 
-    return NextResponse.json(
+    return Response.json(
       {
         error: unavailableMessage,
         remoteStatus: error.status,
@@ -33,7 +30,7 @@ function remoteUpdaterError(error: unknown) {
     );
   }
 
-  return NextResponse.json(
+  return Response.json(
     { error: error instanceof Error ? error.message : 'Failed to contact remote worker updater' },
     { status: 500 },
   );
@@ -42,21 +39,21 @@ function remoteUpdaterError(error: unknown) {
 export async function GET(_request: Request, { params }: { params: Promise<{ workerID: string }> }) {
   const { workerID } = await params;
   const existing = await db.workerNodes.findById(workerID);
-  if (!existing) return NextResponse.json({ error: 'Worker not found' }, { status: 404 });
+  if (!existing) return Response.json({ error: 'Worker not found' }, { status: 404 });
 
   try {
     const worker = await getRemoteWorker(workerID);
     const status = await remoteJson<RepoUpdateStatus>(worker, '/api/updater');
-    return NextResponse.json({ worker: toPublicWorker(worker), status });
+    return Response.json({ worker: toPublicWorker(worker), status });
   } catch (error) {
     return remoteUpdaterError(error);
   }
 }
 
-async function postCommand(request: NextRequest, { params }: { params: Promise<{ workerID: string }> }) {
+async function postCommand(request: Request, { params }: { params: Promise<{ workerID: string }> }) {
   const { workerID } = await params;
   const existing = await db.workerNodes.findById(workerID);
-  if (!existing) return NextResponse.json({ error: 'Worker not found' }, { status: 404 });
+  if (!existing) return Response.json({ error: 'Worker not found' }, { status: 404 });
 
   try {
     const body = await readJsonCommand(request);
@@ -66,7 +63,7 @@ async function postCommand(request: NextRequest, { params }: { params: Promise<{
       method: 'POST',
       body: JSON.stringify({ action }),
     });
-    return NextResponse.json({ worker: toPublicWorker(worker), result });
+    return Response.json({ worker: toPublicWorker(worker), result });
   } catch (error) {
     return remoteUpdaterError(error);
   }

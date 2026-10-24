@@ -2,9 +2,9 @@
 
 ## Project Shape
 
-- AITK Studio is a Python diffusion-model training toolkit with a Next.js/React control surface in `ui/`.
+- AITK Studio is a Python diffusion-model training toolkit with a Vite/React control surface in `ui/`.
 - Root-level Python code (`run.py`, `toolkit/`, `extensions/`, `extensions_built_in/`) owns training, model integration, and CLI workflows.
-- `ui/` is a Next 16 / React 19 / TypeScript app with Tailwind, Prisma-backed UI state, API routes under `ui/src/app/api/**/route.ts`, server helpers under `ui/src/server/`, shared helpers under `ui/src/utils/`, and a cron worker under `ui/cron/`.
+- `ui/` is a Vite / React 19 / TypeScript app with React Router, a Hono API server, Tailwind, Prisma-backed UI state, API routes under `ui/src/app/api/**/route.ts`, server helpers under `ui/src/server/`, shared helpers under `ui/src/utils/`, and a cron worker under `ui/cron/`. API handlers use standard Web Request/Response. The typed route registry and server bundle in `ui/.runtime/` and browser assets in `ui/web-dist/` are generated and ignored.
 - AITK Studio uses one global training workspace. Resolve configured dataset, training, and model roots through existing settings and path helpers, including `resolveDatasetScope` and `getJobTrainingRoot`; never hard-code runtime folders. Preserve canonical path-containment checks and encrypted-data protections. Retired workspace compatibility belongs only in the database upgrade and obsolete-request guards.
 - Treat `datasets/`, `models/`, `output/`, `projects/`, `aitk_db.db*`, `.tmp/`, and generated runtime artifacts as user/runtime data. Do not clean, rename, or rewrite them unless the task explicitly requires it.
 - Do not hand-edit generated Prisma client files under `ui/src/generated/prisma/`; update the Prisma/schema path and regenerate instead.
@@ -13,9 +13,9 @@
 ## Local Commands
 
 - UI commands run from `ui/`: `npm run dev`, `npm run build`, `npm run start`, and the targeted `npm run test:*` scripts in `ui/package.json`.
-- `npm run dev` starts the managed app stack on port `3000`: Next UI, cron worker, and updater.
+- `npm run dev` starts the managed app stack on port `3000`: Vite UI, API server, cron worker, and updater.
 - `npm run start` starts the managed app stack on port `8675` after DB prep; TensorBoard may use port `6006` when enabled.
-- `npm run build` compiles the worker with `tsconfig.worker.json` and then runs `next build --webpack`, which enforces UI route/page type errors. Development uses Turbopack. Prefer `npm run typecheck` when you need the explicit app-and-worker type gate without producing a build.
+- `npm run build` checks types, compiles the worker with `tsconfig.worker.json`, bundles the API server with esbuild, and builds the browser interface with Vite. `npm run typecheck` generates the API registry and checks the app, handlers, and worker without producing browser assets.
 - Prefer the narrowest relevant verification: run the matching `npm run test:<area>` script for touched UI/server utilities, and use `python -m py_compile` or focused Python tests/checks for Python-only changes.
 - Run Python checks with the existing project environment (`.venv` first, then `venv`) rather than assuming the system `python` has the training dependencies. On Windows, invoke `.\.venv\Scripts\python.exe`; on Linux/macOS, use `.venv/bin/python`.
 - For Python changes involving imports, model classes, mixins, or moved symbols, require a runtime import smoke check of the affected modules and public classes; `py_compile` alone does not catch missing imports or undefined names. For diffusion-model changes, also import `extensions_built_in.diffusion_models` to exercise registry initialization. Use the real dependencies, without downloading model weights or starting training. Check symbols used only inside functions with focused tests or an undefined-name lint check, since importing alone does not execute those paths. If dependencies prevent these checks, report the blocker and leave runtime verification explicitly incomplete.
@@ -41,7 +41,7 @@
 - Keep shared business logic outside React components when it can be tested with the existing Node test scripts.
 - Follow the existing UI style: Tailwind utilities, `classNames`, existing components/modals/hooks, and established dark theme tokens.
 - For icons, prefer the icon libraries already in use (`lucide-react` or `react-icons`) instead of custom inline SVG unless the existing component requires it.
-- Next route params use the project's current Next 16 async style, often typed as `Promise<{ ... }>` in route handlers.
+- API route params retain the async handler contract, typed as `Promise<{ ... }>`; the generated Hono registry validates every route's parameter types. Browser routes live in `ui/src/client/routes.tsx` and use React Router parameters.
 
 ## Security and Data Handling
 

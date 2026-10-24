@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import Link from '@/navigation/Link';
 import { GitBranch, ShieldCheck, ArrowRight, Wrench } from 'lucide-react';
 import { TopBar, MainContent } from '@/components/layout';
 

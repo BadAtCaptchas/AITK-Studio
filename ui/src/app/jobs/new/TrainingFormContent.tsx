@@ -13,7 +13,7 @@ import { readStoredTrainingDraft, removeStoredTrainingDraft, type StoredTraining
 import { parseTrainingSource } from '@/utils/trainingSource';
 import { parseTrainingConfigImport } from '@/utils/trainingConfigImport';
 import useHydrated from '@/hooks/useHydrated';
-import { useSearchParams, useRouter } from 'next/navigation';
+import { useSearchParams, useRouter } from '@/navigation';
 import { defaultJobConfig, defaultDatasetConfig, migrateJobConfig } from './jobConfig';
 import { jobTypeOptions, modelArchs } from './options';
 import type { JobConfig } from '@/types';
@@ -25,7 +25,7 @@ import useSettings from '@/hooks/useSettings';
 import useGPUInfo from '@/hooks/useGPUInfo';
 import useDatasetList from '@/hooks/useDatasetList';
 import useWorkers from '@/hooks/useWorkers';
-import path from 'path';
+import { datasetDisplayPath } from '@/utils/displayPaths';
 import { TopBar } from '@/components/layout';
 import { Button } from '@headlessui/react';
 import { Activity, AlertCircle, CheckCircle2, ChevronLeft, Save, X } from 'lucide-react';
@@ -220,7 +220,7 @@ function TrainingFormEditor({ draftKey, initialDraft }: { draftKey: string; init
     const workerID = dataset.worker_id || 'local';
     const ref = source === 'remote' ? dataset.ref || makeRemoteDatasetRef(workerID, dataset.name) : dataset.ref || '';
     return {
-      value: source === 'remote' ? ref : dataset.path || path.join(settings.DATASETS_FOLDER, dataset.name),
+      value: source === 'remote' ? ref : dataset.path || datasetDisplayPath(settings.DATASETS_FOLDER, dataset.name),
       label:
         source === 'remote'
           ? `${dataset.name}${dataset.encrypted ? ' (encrypted)' : ''} - ${dataset.worker_name || workerID}`
@@ -357,7 +357,7 @@ function TrainingFormEditor({ draftKey, initialDraft }: { draftKey: string; init
       .then(res => {
         const importedName = res.data?.dataset?.name;
         const importedPath =
-          res.data?.path || (importedName ? path.join(settings.DATASETS_FOLDER, importedName) : null);
+          res.data?.path || (importedName ? datasetDisplayPath(settings.DATASETS_FOLDER, importedName) : null);
         if (!importedName || !importedPath) {
           throw new Error('Remote dataset import did not return a local dataset path');
         }

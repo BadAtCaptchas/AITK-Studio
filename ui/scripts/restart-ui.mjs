@@ -20,6 +20,7 @@ const PROJECT_MARKERS = [
   'dist/cron/fileserver.js',
   'cron/fileserver.ts',
   'node_modules/next/dist/bin/next',
+  'scripts/server.mjs',
   'next start',
   'next dev',
   'node_modules',

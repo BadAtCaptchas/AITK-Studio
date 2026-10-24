@@ -1,4 +1,3 @@
-import { NextResponse } from 'next/server';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import os from 'os';
@@ -94,14 +93,14 @@ export async function GET(request: Request) {
       const worker = await getRemoteWorker(workerID);
       const poll = await runRemoteBackgroundPoll(worker, 'GPU telemetry', () => fetchWorkerGpu(worker));
       if ('reason' in poll) {
-        return NextResponse.json({
+        return Response.json({
           hasNvidiaSmi: false,
           isMac: false,
           gpus: [],
           error: `Remote GPU telemetry unavailable: ${poll.reason}`,
         });
       }
-      return NextResponse.json(poll.value);
+      return Response.json(poll.value);
     }
 
     const localGpuInfo = await cached('gpu-info:local', async () => {
@@ -167,10 +166,10 @@ export async function GET(request: Request) {
       };
     });
 
-    return NextResponse.json(localGpuInfo);
+    return Response.json(localGpuInfo);
   } catch (error) {
     console.error('Error fetching NVIDIA GPU stats:', error);
-    return NextResponse.json(
+    return Response.json(
       {
         hasNvidiaSmi: false,
         isMac: false,

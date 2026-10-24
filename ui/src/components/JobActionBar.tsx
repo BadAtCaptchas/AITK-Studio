@@ -1,5 +1,5 @@
 import { reportWorkflowError } from '@/components/WorkflowFeedback';
-import Link from 'next/link';
+import Link from '@/navigation/Link';
 import { useEffect, useRef, useState } from 'react';
 import {
   Eye,

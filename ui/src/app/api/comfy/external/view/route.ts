@@ -1,14 +1,11 @@
-import { NextResponse } from 'next/server';
 import { ExternalComfyError, getComfyViewImage, resolveExternalComfyUrl } from '@/server/externalComfy';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
 function errorResponse(error: unknown) {
   if (error instanceof ExternalComfyError) {
-    return NextResponse.json({ error: error.message }, { status: error.status });
+    return Response.json({ error: error.message }, { status: error.status });
   }
-  return NextResponse.json({ error: error instanceof Error ? error.message : 'External ComfyUI image fetch failed.' }, { status: 500 });
+  return Response.json({ error: error instanceof Error ? error.message : 'External ComfyUI image fetch failed.' }, { status: 500 });
 }
 
 function imageContentType(filename: string) {

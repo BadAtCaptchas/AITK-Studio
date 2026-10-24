@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Button } from '@headlessui/react';
 import { openCaptionDatasetModal } from '@/components/CaptionDatasetModal';
 import useJobByRef from '@/hooks/useJobByRef';
-import Link from 'next/link';
+import Link from '@/navigation/Link';
 import { Loader2, Sparkles } from 'lucide-react';
 import classNames from 'classnames';
 const ACTIVE_CAPTION_STATUSES = new Set(['running', 'queued', 'stopping']);

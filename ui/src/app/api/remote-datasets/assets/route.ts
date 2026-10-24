@@ -1,10 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
 import { getRemoteWorker, remoteProxyFetch } from '@/server/remoteClient';
 import { isRemoteDatasetAssetRequestAuthorized } from '@/server/remoteDatasetAssetAccess';
 import type { RemoteDatasetAssetType } from '@/utils/remoteDatasetRefs';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
 function remoteAssetPath(type: RemoteDatasetAssetType, remotePath: string) {
   const encoded = encodeURIComponent(remotePath);
@@ -32,41 +29,41 @@ function copyResponseHeaders(source: Response) {
   return headers;
 }
 
-export async function GET(request: NextRequest) {
-  const workerID = request.nextUrl.searchParams.get('worker_id') || '';
-  const remotePath = request.nextUrl.searchParams.get('path') || '';
-  const type = (request.nextUrl.searchParams.get('type') || 'img') as RemoteDatasetAssetType;
+export async function GET(request: Request) {
+  const workerID = new URL(request.url).searchParams.get('worker_id') || '';
+  const remotePath = new URL(request.url).searchParams.get('path') || '';
+  const type = (new URL(request.url).searchParams.get('type') || 'img') as RemoteDatasetAssetType;
 
   if (!workerID || !remotePath) {
-    return new NextResponse('Missing remote dataset asset parameters', { status: 400 });
+    return new Response('Missing remote dataset asset parameters', { status: 400 });
   }
   if (type !== 'img' && type !== 'file' && type !== 'audio-art') {
-    return new NextResponse('Invalid remote dataset asset type', { status: 400 });
+    return new Response('Invalid remote dataset asset type', { status: 400 });
   }
   if (
     !(await isRemoteDatasetAssetRequestAuthorized(
       request.headers,
       workerID,
       remotePath,
-      request.nextUrl.searchParams.get('expires'),
-      request.nextUrl.searchParams.get('sig'),
+      new URL(request.url).searchParams.get('expires'),
+      new URL(request.url).searchParams.get('sig'),
       type,
       request.method,
     ))
   ) {
-    return new NextResponse('Unauthorized', { status: 401 });
+    return new Response('Unauthorized', { status: 401 });
   }
 
   try {
     const worker = await getRemoteWorker(workerID);
     const remoteResponse = await remoteProxyFetch(worker, remoteAssetPath(type, remotePath), request.headers, request.method === 'HEAD' ? 'HEAD' : 'GET', request.signal);
-    return new NextResponse(request.method === 'HEAD' ? null : remoteResponse.body, {
+    return new Response(request.method === 'HEAD' ? null : remoteResponse.body, {
       status: remoteResponse.status,
       headers: copyResponseHeaders(remoteResponse),
     });
   } catch (error) {
     console.error('Remote dataset asset proxy failed:', error);
-    return new NextResponse('Remote dataset asset unavailable', { status: 502 });
+    return new Response('Remote dataset asset unavailable', { status: 502 });
   }
 }
 

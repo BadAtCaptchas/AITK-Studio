@@ -1,16 +1,13 @@
 import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
-import { NextResponse } from 'next/server';
 import { copyToolkitLoraToExternalComfy, ExternalComfyError } from '@/server/externalComfy';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
 function errorResponse(error: unknown) {
   if (error instanceof ExternalComfyError) {
-    return NextResponse.json({ error: error.message }, { status: error.status });
+    return Response.json({ error: error.message }, { status: error.status });
   }
-  return NextResponse.json(
+  return Response.json(
     { error: error instanceof Error ? error.message : 'External ComfyUI LoRA copy failed.' },
     { status: 500 },
   );
@@ -28,7 +25,7 @@ async function postCommand(request: Request) {
     const loraDir =
       typeof body?.loraDir === 'string' ? body.loraDir : typeof body?.lora_dir === 'string' ? body.lora_dir : undefined;
     const result = await copyToolkitLoraToExternalComfy({ toolkitPath, loraDir });
-    return NextResponse.json(result);
+    return Response.json(result);
   } catch (error) {
     return errorResponse(error);
   }

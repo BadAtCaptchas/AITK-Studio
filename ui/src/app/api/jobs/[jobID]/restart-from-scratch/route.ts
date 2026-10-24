@@ -1,19 +1,18 @@
 import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
-import { NextRequest, NextResponse } from 'next/server';
 import { JobStartError } from '@/server/jobStart';
 import { restartTrainingJobFromScratch, TrainingJobRestartError } from '@/server/trainingJobRestart';
 import type { JobStartRequest } from '@/types';
 import { isRequestAuthenticated } from '@/utils/authSession';
 
-async function ensureApiAccess(request: NextRequest): Promise<NextResponse | null> {
+async function ensureApiAccess(request: Request): Promise<Response | null> {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH;
   if (!tokenToUse) {
     return null;
   }
 
   if (!(await isRequestAuthenticated(request, tokenToUse))) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   return null;
@@ -21,12 +20,12 @@ async function ensureApiAccess(request: NextRequest): Promise<NextResponse | nul
 
 function handleRestartError(error: unknown) {
   if (error instanceof JobStartError || error instanceof TrainingJobRestartError) {
-    return NextResponse.json(error.payload, { status: error.status });
+    return Response.json(error.payload, { status: error.status });
   }
   throw error;
 }
 
-async function postCommand(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
+async function postCommand(request: Request, { params }: { params: Promise<{ jobID: string }> }) {
   const accessResponse = await ensureApiAccess(request);
   if (accessResponse) {
     return accessResponse;
@@ -42,7 +41,7 @@ async function postCommand(request: NextRequest, { params }: { params: Promise<{
   const { jobID } = await params;
 
   try {
-    return NextResponse.json(
+    return Response.json(
       await restartTrainingJobFromScratch(jobID, {
         encryptedDatasetKeys: body.encryptedDatasetKeys,
         durableEncryptedDatasetKeys: body.durableEncryptedDatasetKeys === true,

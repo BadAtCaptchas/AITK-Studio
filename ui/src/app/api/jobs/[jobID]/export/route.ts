@@ -1,7 +1,6 @@
 import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { jobStorageKey } from '../../../../../utils/jobIdentity';
 import { getDatasetsRoot } from '@/server/settings';
-import { NextRequest, NextResponse } from 'next/server';
 import archiver from 'archiver';
 import fs from 'fs';
 import fsp from 'fs/promises';
@@ -33,8 +32,6 @@ import { db } from '@/server/db';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 import { registerRemoteTrainingJobExport } from '@/server/remoteExportProgress';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
 const MAX_CONCURRENT_BACKGROUND_EXPORTS = 2;
 
@@ -508,7 +505,7 @@ async function runBackgroundExport(
   }
 }
 
-async function postCommand(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
+async function postCommand(request: Request, { params }: { params: Promise<{ jobID: string }> }) {
   const { jobID } = await params;
 
   try {
@@ -520,7 +517,7 @@ async function postCommand(request: NextRequest, { params }: { params: Promise<{
 
     if (currentJob && !isLocalWorker(currentJob.worker_id)) {
       if (!currentJob.remote_job_id) {
-        return NextResponse.json({ error: 'Remote job has not been uploaded yet' }, { status: 409 });
+        return Response.json({ error: 'Remote job has not been uploaded yet' }, { status: 409 });
       }
 
       const worker = await getRemoteWorker(currentJob.worker_id);
@@ -533,7 +530,7 @@ async function postCommand(request: NextRequest, { params }: { params: Promise<{
             body: JSON.stringify({ includeDatasets, checkpointMode }),
           },
         );
-        return NextResponse.json({
+        return Response.json({
           ...remoteResult,
           zipPath: remoteResult.zipPath
             ? `remote://${jobID}/file/${encodeURIComponent(remoteResult.zipPath)}/${encodeURIComponent(remoteResult.fileName || 'export.aitk.zip')}`
@@ -542,7 +539,7 @@ async function postCommand(request: NextRequest, { params }: { params: Promise<{
       }
 
       if (hasActiveTrainingJobExportForJob(jobID)) {
-        return NextResponse.json({ error: 'An export is already running for this job' }, { status: 409 });
+        return Response.json({ error: 'An export is already running for this job' }, { status: 409 });
       }
       const localProgress = createTrainingJobExportProgress(jobID, includeDatasets, checkpointMode);
       const remoteStarted = await remoteJson<any>(
@@ -564,7 +561,7 @@ async function postCommand(request: NextRequest, { params }: { params: Promise<{
         message: remoteStarted.progress?.message || 'Remote export started',
         percent: remoteStarted.progress?.percent || 0,
       });
-      return NextResponse.json(
+      return Response.json(
         {
           exportID: localProgress.exportID,
           statusUrl: `/api/jobs/${jobID}/export/${localProgress.exportID}`,
@@ -577,16 +574,16 @@ async function postCommand(request: NextRequest, { params }: { params: Promise<{
     if (background) {
       const job = currentJob;
       if (!job) {
-        return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+        return Response.json({ error: 'Job not found' }, { status: 404 });
       }
       if (job.job_type !== 'train') {
-        return NextResponse.json({ error: 'Only training jobs can be exported' }, { status: 400 });
+        return Response.json({ error: 'Only training jobs can be exported' }, { status: 400 });
       }
       if (hasActiveTrainingJobExportForJob(jobID)) {
-        return NextResponse.json({ error: 'An export is already running for this job' }, { status: 409 });
+        return Response.json({ error: 'An export is already running for this job' }, { status: 409 });
       }
       if (countActiveTrainingJobExports() >= MAX_CONCURRENT_BACKGROUND_EXPORTS) {
-        return NextResponse.json(
+        return Response.json(
           { error: 'Too many background exports are running. Please try again shortly.' },
           { status: 429 },
         );
@@ -594,7 +591,7 @@ async function postCommand(request: NextRequest, { params }: { params: Promise<{
 
       const progress = createTrainingJobExportProgress(jobID, includeDatasets, checkpointMode);
       runBackgroundExport(progress.exportID, jobID, includeDatasets, checkpointMode);
-      return NextResponse.json(
+      return Response.json(
         {
           exportID: progress.exportID,
           statusUrl: `/api/jobs/${jobID}/export/${progress.exportID}`,
@@ -605,12 +602,12 @@ async function postCommand(request: NextRequest, { params }: { params: Promise<{
     }
 
     const result = await performTrainingJobExport(jobID, includeDatasets, checkpointMode);
-    return NextResponse.json(result);
+    return Response.json(result);
   } catch (error) {
     console.error('Training job export failed:', error);
     const status = typeof (error as any)?.status === 'number' ? (error as any).status : 500;
     const message = error instanceof Error ? error.message : 'Failed to export training job';
-    return NextResponse.json({ error: message }, { status });
+    return Response.json({ error: message }, { status });
   }
 }
 

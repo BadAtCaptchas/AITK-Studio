@@ -67,7 +67,6 @@ function fixture(t, remoteResult) {
     '@/server/plainDatasetCommand': plain,
     '@/server/commandInput': commandInput,
     '@/utils/obsoleteWorkspaceGuard': obsolete,
-    'next/server': require('next/server'),
     fs,
     path,
     crypto: require('node:crypto'),

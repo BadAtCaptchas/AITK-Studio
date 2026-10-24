@@ -36,7 +36,6 @@ function settingsFixture() {
     '@/utils/obsoleteWorkspaceGuard': evaluate(
       fs.readFileSync(path.join(root, 'src/utils/obsoleteWorkspaceGuard.ts'), 'utf8'),
     ),
-    'next/server': { NextResponse: { json: (body, options) => ({ body, status: options?.status ?? 200 }) } },
     '@/paths': { defaultTrainFolder: '/training', defaultDatasetsFolder: '/datasets', defaultModelsFolder: '/models' },
     '@/server/commandInput': {
       readJsonCommand: request => request.json(),
@@ -88,22 +87,22 @@ test('new installations default to the continuous training form', async () => {
   const fixture = settingsFixture();
   const result = await fixture.get();
   assert.equal(result.status, 200);
-  assert.equal(result.body.TRAINING_LEGACY_VIEW, 'true');
+  assert.equal((await result.json()).TRAINING_LEGACY_VIEW, 'true');
 });
 
 test('legacy preference survives saving and reading, and can be disabled', async () => {
   const fixture = settingsFixture();
   assert.equal((await fixture.post({ TRAINING_LEGACY_VIEW: 'true' })).status, 200);
-  assert.equal((await fixture.get()).body.TRAINING_LEGACY_VIEW, 'true');
+  assert.equal((await (await fixture.get()).json()).TRAINING_LEGACY_VIEW, 'true');
   assert.equal((await fixture.post({ TRAINING_LEGACY_VIEW: 'false' })).status, 200);
-  assert.equal((await fixture.get()).body.TRAINING_LEGACY_VIEW, 'false');
+  assert.equal((await (await fixture.get()).json()).TRAINING_LEGACY_VIEW, 'false');
 });
 
 test('older settings clients do not reset the legacy preference when omitting it', async () => {
   const fixture = settingsFixture();
   fixture.store.set('TRAINING_LEGACY_VIEW', 'true');
   assert.equal((await fixture.post({})).status, 200);
-  assert.equal((await fixture.get()).body.TRAINING_LEGACY_VIEW, 'true');
+  assert.equal((await (await fixture.get()).json()).TRAINING_LEGACY_VIEW, 'true');
 });
 
 test('malformed preference falls back to the continuous form and does not persist arbitrary data', async () => {
@@ -116,5 +115,5 @@ test('explicit guided preference survives an older settings client', async () =>
   const fixture = settingsFixture();
   fixture.store.set('TRAINING_LEGACY_VIEW', 'false');
   assert.equal((await fixture.post({})).status, 200);
-  assert.equal((await fixture.get()).body.TRAINING_LEGACY_VIEW, 'false');
+  assert.equal((await (await fixture.get()).json()).TRAINING_LEGACY_VIEW, 'false');
 });

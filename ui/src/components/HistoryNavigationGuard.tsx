@@ -165,7 +165,7 @@ export default function HistoryNavigationGuard() {
       removed.delete(unregister);
       window.removeEventListener('popstate', popstate, true);
       window.removeEventListener('hashchange', hashchange, true);
-      // Next may wrap our functions later. Leave that wrapper intact; captured
+      // A router may wrap our functions later. Leave that wrapper intact; captured
       // functions become inert so its own cleanup remains safe as well.
       if (history.pushState === push) history.pushState = originalPush;
       if (history.replaceState === replace) history.replaceState = originalReplace;

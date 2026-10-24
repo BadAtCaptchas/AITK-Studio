@@ -1,7 +1,6 @@
 import { withPlainDatasetCommand } from '@/server/plainDatasetCommand';
 import { readJsonCommand } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
-import { NextRequest, NextResponse } from 'next/server';
 import {
   encryptedOpenRouterUploadImageDataUrl,
   nonNegativeIntegerFromValue,
@@ -13,7 +12,6 @@ import { generateOllamaLayerCaption, generateRemoteOllamaLayerCaption } from '@/
 import { getOpenRouterApiKey } from '@/server/settings';
 import { DatasetScopeError } from '@/server/datasetScope';
 
-export const runtime = 'nodejs';
 
 type StudioBoxProvider = 'openrouter' | 'ollama' | 'remote_ollama';
 
@@ -27,7 +25,7 @@ function requiredElementIndex(value: unknown) {
   return elementIndex;
 }
 
-async function postCommand(request: NextRequest) {
+async function postCommand(request: Request) {
   try {
     const contentType = request.headers.get('content-type') || '';
     let caption = '';
@@ -70,12 +68,12 @@ async function postCommand(request: NextRequest) {
 
     const imageSize = { width: imageWidth, height: imageHeight };
     if (provider === 'ollama') {
-      return NextResponse.json(
+      return Response.json(
         await generateOllamaLayerCaption({ imageDataUrl, caption, elementIndex, model, imageSize }),
       );
     }
     if (provider === 'remote_ollama') {
-      return NextResponse.json(
+      return Response.json(
         await generateRemoteOllamaLayerCaption({
           imageDataUrl,
           caption,
@@ -87,7 +85,7 @@ async function postCommand(request: NextRequest) {
       );
     }
 
-    return NextResponse.json(
+    return Response.json(
       await generateOpenRouterLayerCaption({
         apiKey: await getOpenRouterApiKey(),
         imageDataUrl,
@@ -99,7 +97,7 @@ async function postCommand(request: NextRequest) {
     );
   } catch (error) {
     const status = error instanceof DatasetScopeError ? error.status : 400;
-    return NextResponse.json(
+    return Response.json(
       { error: error instanceof Error ? error.message : 'Failed to caption selected layer.' },
       { status },
     );

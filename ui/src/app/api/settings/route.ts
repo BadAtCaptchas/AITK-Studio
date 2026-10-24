@@ -1,6 +1,5 @@
 import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
-import { NextRequest, NextResponse } from 'next/server';
 import { defaultTrainFolder, defaultDatasetsFolder, defaultModelsFolder } from '@/paths';
 import { flushCache, normalizeBooleanSetting } from '@/server/settings';
 import { normalizeStoragePathSetting } from '@/server/pathContainment';
@@ -22,7 +21,7 @@ import { modelsPathFromEnv, resolveModelsPathState } from '@/server/modelsPath';
 
 type SettingsAccess = {
   authenticated: boolean;
-  response: NextResponse | null;
+  response: Response | null;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -34,7 +33,7 @@ const storagePathSettings = [
   ['DATASETS_FOLDER', defaultDatasetsFolder],
 ] as const;
 
-async function ensureSettingsAccess(request: NextRequest): Promise<SettingsAccess> {
+async function ensureSettingsAccess(request: Request): Promise<SettingsAccess> {
   const tokenToUse = process.env.AI_TOOLKIT_AUTH;
 
   if (!tokenToUse) {
@@ -44,14 +43,14 @@ async function ensureSettingsAccess(request: NextRequest): Promise<SettingsAcces
   if (!(await isRequestAuthenticated(request, tokenToUse))) {
     return {
       authenticated: false,
-      response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),
+      response: Response.json({ error: 'Unauthorized' }, { status: 401 }),
     };
   }
 
   return { authenticated: true, response: null };
 }
 
-export async function GET(request: NextRequest) {
+export async function GET(request: Request) {
   const access = await ensureSettingsAccess(request);
   if (access.response) {
     return access.response;
@@ -103,13 +102,13 @@ export async function GET(request: NextRequest) {
     settingsObject.HF_TOKEN = '';
     settingsObject.OPENROUTER_API_KEY_SET = Boolean(settingsObject.OPENROUTER_API_KEY);
     settingsObject.OPENROUTER_API_KEY = '';
-    return NextResponse.json(settingsObject);
+    return Response.json(settingsObject);
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to fetch settings' }, { status: 500 });
+    return Response.json({ error: 'Failed to fetch settings' }, { status: 500 });
   }
 }
 
-async function postCommand(request: NextRequest) {
+async function postCommand(request: Request) {
   const access = await ensureSettingsAccess(request);
   if (access.response) {
     return access.response;
@@ -118,7 +117,7 @@ async function postCommand(request: NextRequest) {
   try {
     const body: unknown = assertGlobalPayload(await readJsonCommand(request));
     if (!isRecord(body)) {
-      return NextResponse.json({ error: 'Settings payload must be an object' }, { status: 400 });
+      return Response.json({ error: 'Settings payload must be an object' }, { status: 400 });
     }
     const {
       HF_TOKEN,
@@ -139,7 +138,7 @@ async function postCommand(request: NextRequest) {
       allowExternal: access.authenticated,
     });
     if (!normalizedTrainingFolder) {
-      return NextResponse.json(
+      return Response.json(
         { error: 'TRAINING_FOLDER must stay inside the default training folder unless authentication is enabled' },
         { status: 400 },
       );
@@ -149,7 +148,7 @@ async function postCommand(request: NextRequest) {
       allowExternal: access.authenticated,
     });
     if (!normalizedDatasetsFolder) {
-      return NextResponse.json(
+      return Response.json(
         { error: 'DATASETS_FOLDER must stay inside the default datasets folder unless authentication is enabled' },
         { status: 400 },
       );
@@ -164,7 +163,7 @@ async function postCommand(request: NextRequest) {
         allowExternal: access.authenticated,
       });
       if (!normalizedModelsPath) {
-        return NextResponse.json(
+        return Response.json(
           { error: 'MODELS_PATH must stay inside the default models folder unless authentication is enabled' },
           { status: 400 },
         );
@@ -177,7 +176,7 @@ async function postCommand(request: NextRequest) {
       normalizedExternalComfyUrl = normalizeExternalComfyUrl(COMFY_EXTERNAL_URL || DEFAULT_EXTERNAL_COMFY_URL);
       normalizedExternalComfyLoraDir = normalizeExternalComfyLoraDir(COMFY_EXTERNAL_LORA_DIR || '');
     } catch (error) {
-      return NextResponse.json(
+      return Response.json(
         { error: error instanceof Error ? error.message : 'Invalid external ComfyUI setting' },
         { status: 400 },
       );
@@ -217,9 +216,9 @@ async function postCommand(request: NextRequest) {
 
     flushCache();
 
-    return NextResponse.json({ success: true });
+    return Response.json({ success: true });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to update settings' }, { status: 500 });
+    return Response.json({ error: 'Failed to update settings' }, { status: 500 });
   }
 }
 

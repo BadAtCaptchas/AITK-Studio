@@ -8,7 +8,7 @@ override built-in entries by model name; built-in Studio defaults remain availab
 if a module fails. Only install trusted packages: their UI code runs in the browser,
 just as their Python code runs in the trainer.
 
-Supported imports: React, React JSX runtimes, `next/link`,
+Supported imports: React, React JSX runtimes, `@/navigation/Link` (`next/link` remains supported for existing extensions),
 `@/helpers/defaultSamples`, `@/components/formInputs`, `@/types`, and
 `@/app/jobs/new/options`. `customSections(config, setJobConfig)` can return React
 controls; `modelNotes` may be JSX. No arbitrary imports are resolved.

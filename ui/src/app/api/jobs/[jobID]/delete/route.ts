@@ -1,4 +1,3 @@
-import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import fs from 'fs/promises';
 import { db } from '@/server/db';
@@ -9,12 +8,12 @@ import { claimJobMaintenance } from '@/server/jobAttempts';
 import { isPathWithinRoot } from '@/server/pathContainment';
 import { jobStorageKey } from '@/utils/jobIdentity';
 
-export async function POST(request: NextRequest, { params }: { params: Promise<{ jobID: string }> }) {
+export async function POST(request: Request, { params }: { params: Promise<{ jobID: string }> }) {
   const { jobID } = await params;
   const candidate = await db.jobs.findById(jobID);
-  if (!candidate) return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+  if (!candidate) return Response.json({ error: 'Job not found' }, { status: 404 });
   const job = await claimJobMaintenance(candidate, 'deleting');
-  if (!job) return NextResponse.json({ error: 'Stop the job and wait for its process to exit before deleting it' }, { status: 409 });
+  if (!job) return Response.json({ error: 'Stop the job and wait for its process to exit before deleting it' }, { status: 409 });
   try {
     if (!isLocalWorker(job.worker_id)) {
       if (job.remote_job_id) {
@@ -32,13 +31,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
     await clearDurableEncryptedDatasetKeys(jobID);
     await db.jobs.delete(jobID, { attempt_id: job.attempt_id ?? null, status: 'deleting' });
-    return NextResponse.json(job);
+    return Response.json(job);
   } catch (error) {
     await db.jobs.updateIf(jobID, { attempt_id: job.attempt_id ?? null, status: 'deleting' }, { status: 'error', info: 'Deletion did not complete. Review the error and retry.' });
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Deletion failed' }, { status: 409 });
+    return Response.json({ error: error instanceof Error ? error.message : 'Deletion failed' }, { status: 409 });
   }
 }
 
 export function GET() {
-  return NextResponse.json({ error: 'Use POST for this command' }, { status: 405, headers: { Allow: 'POST' } });
+  return Response.json({ error: 'Use POST for this command' }, { status: 405, headers: { Allow: 'POST' } });
 }

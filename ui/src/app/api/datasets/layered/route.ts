@@ -16,8 +16,6 @@ import { makeSignedRemoteDatasetAssetRef } from '@/server/remoteDatasetAssetAcce
 import { getMediaUrl } from '@/utils/media';
 import type { LayeredImageDocument } from '@/domain/layeredImages';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
 async function postCommand(request: Request) {
   try {

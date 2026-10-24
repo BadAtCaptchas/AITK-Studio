@@ -1,7 +1,6 @@
 import { withPlainDatasetCommand } from '@/server/plainDatasetCommand';
 import { isRecord, readJsonCommand } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
-import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { webcrypto } from 'crypto';
@@ -206,7 +205,7 @@ async function postCommand(request: Request) {
     const datasets: DatasetPromptRequest[] = [];
     for (const dataset of Array.isArray(body.datasets) ? body.datasets : []) {
       if (!isRecord(dataset) || typeof dataset.folderPath !== 'string') {
-        return NextResponse.json({ error: 'Invalid dataset selection.' }, { status: 400 });
+        return Response.json({ error: 'Invalid dataset selection.' }, { status: 400 });
       }
       datasets.push({
         folderPath: dataset.folderPath,
@@ -219,7 +218,7 @@ async function postCommand(request: Request) {
       : [];
 
     if (datasets.length === 0) {
-      return NextResponse.json({ error: 'No datasets were provided.' }, { status: 400 });
+      return Response.json({ error: 'No datasets were provided.' }, { status: 400 });
     }
 
     const { datasetsRoot: rawDatasetsRoot } = await resolveDatasetScope();
@@ -268,7 +267,7 @@ async function postCommand(request: Request) {
     }
 
     if (!state.selected) {
-      return NextResponse.json(
+      return Response.json(
         {
           error: 'No captions were found in the configured datasets.',
           scannedMediaCount: state.scannedMediaCount,
@@ -278,7 +277,7 @@ async function postCommand(request: Request) {
       );
     }
 
-    return NextResponse.json({
+    return Response.json({
       prompt: state.selected.prompt,
       source: state.selected.source,
       datasetPath: state.selected.datasetPath,
@@ -291,9 +290,9 @@ async function postCommand(request: Request) {
   } catch (error) {
     console.error('Error importing random dataset prompt:', error);
     if (error instanceof DatasetScopeError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return Response.json({ error: error.message }, { status: error.status });
     }
-    return NextResponse.json({ error: 'Failed to import a random dataset prompt.' }, { status: 500 });
+    return Response.json({ error: 'Failed to import a random dataset prompt.' }, { status: 500 });
   }
 }
 

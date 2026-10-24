@@ -1,6 +1,5 @@
 import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
-import { NextResponse } from 'next/server';
 import { getTrainingFolder } from '@/server/settings';
 import {
   buildScriptInvocation,
@@ -9,8 +8,6 @@ import {
   ScriptValidationError,
 } from '@/server/scriptRunner';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 export const maxDuration = 1200;
 
 async function postCommand(request: Request) {
@@ -18,7 +15,7 @@ async function postCommand(request: Request) {
   try {
     body = assertGlobalPayload(await readJsonCommand(request));
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
   let invocation;
@@ -26,10 +23,10 @@ async function postCommand(request: Request) {
     invocation = buildScriptInvocation(body, await getTrainingFolder());
   } catch (error) {
     if (error instanceof ScriptValidationError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return Response.json({ error: error.message }, { status: error.status });
     }
     console.error('Error validating script request:', error);
-    return NextResponse.json({ error: 'Error validating script request' }, { status: 500 });
+    return Response.json({ error: 'Error validating script request' }, { status: 500 });
   }
 
   if (body && typeof body === 'object' && (body as Record<string, unknown>).stream === true) {
@@ -38,7 +35,7 @@ async function postCommand(request: Request) {
 
   const result = await runScriptBuffered(invocation);
   const status = result.ok ? 200 : result.timedOut ? 504 : 500;
-  return NextResponse.json(result, { status });
+  return Response.json(result, { status });
 }
 
 export const POST = withCommandBoundary(postCommand);

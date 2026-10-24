@@ -1,6 +1,5 @@
 import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
-import { NextRequest, NextResponse } from 'next/server';
 import path from 'path';
 import { findEncryptedDatasetRoot } from '@/server/encryptedDatasets';
 import { getRemoteWorker, remoteJson } from '@/server/remoteClient';
@@ -9,21 +8,21 @@ import { parseRemoteDatasetAssetRef } from '@/utils/remoteDatasetRefs';
 import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
 import { sanitizeCaptionText } from '@/utils/captionQuality';
 
-async function postCommand(request: NextRequest) {
+async function postCommand(request: Request) {
   let body;
   try {
     body = assertGlobalPayload(await readJsonCommand(request));
   } catch {
-    return new NextResponse(null, { status: 499 });
+    return new Response(null, { status: 499 });
   }
 
   if (request.signal.aborted) {
-    return new NextResponse(null, { status: 499 });
+    return new Response(null, { status: 499 });
   }
 
   const { imgPaths } = body as { imgPaths?: string[] };
   if (!Array.isArray(imgPaths)) {
-    return NextResponse.json({ error: 'imgPaths must be an array' }, { status: 400 });
+    return Response.json({ error: 'imgPaths must be an array' }, { status: 400 });
   }
 
   let datasetsRoot = '';
@@ -32,9 +31,9 @@ async function postCommand(request: NextRequest) {
     datasetsRoot = scope.datasetsRoot;
   } catch (error) {
     if (error instanceof DatasetScopeError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
+      return Response.json({ error: error.message }, { status: error.status });
     }
-    return NextResponse.json({ error: 'Failed to resolve dataset scope' }, { status: 500 });
+    return Response.json({ error: 'Failed to resolve dataset scope' }, { status: 500 });
   }
   const allowedRoot = path.resolve(datasetsRoot);
   const captions: Record<string, string> = {};
@@ -86,7 +85,7 @@ async function postCommand(request: NextRequest) {
     }),
   );
 
-  return NextResponse.json({ captions });
+  return Response.json({ captions });
 }
 
 export const POST = withCommandBoundary(postCommand);

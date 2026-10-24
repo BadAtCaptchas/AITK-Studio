@@ -125,7 +125,6 @@ test('remote metrics route accepts multi-series histories above the generic 8 Mi
   ).outputText;
   const dependencies = {
     '../../../../../utils/jobIdentity': {},
-    'next/server': { NextResponse: Response },
     path,
     '@/server/db': { db: { jobs: { findById: async () => ({ worker_id: 'worker-1', remote_job_id: 'remote/job' }) } } },
     '@/server/trainingPaths': {},
@@ -302,8 +301,7 @@ test('worker outage logs are shared across jobs, quiet during cooldown, and rese
 
 function loadPollingRoute(kind) {
   const dependencies = {
-    '../../../../../utils/jobIdentity': {},
-    'next/server': { NextResponse: Response }, path,
+    '../../../../../utils/jobIdentity': {}, path,
     '@/server/db': { db: { jobs: { findById: async () => ({ id: 'mirror', worker_id: 'worker-1', remote_job_id: 'remote-job' }) } } },
     '@/server/trainingPaths': {}, '@/server/remoteAssets': {}, '@/server/jobSamples': {}, '@/utils/sampleMetadata': {},
     '@/server/remoteClient': {

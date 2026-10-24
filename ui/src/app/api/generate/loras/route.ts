@@ -1,4 +1,3 @@
-import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import { db } from '@/server/db';
@@ -112,7 +111,7 @@ async function getSafeJobFolder(trainingRoot: string, jobName: string) {
   return canonicalFolder;
 }
 
-export async function GET(request: NextRequest) {
+export async function GET(request: Request) {
   try {
     const loras: LoraLibraryItem[] = [];
 
@@ -164,10 +163,10 @@ export async function GET(request: NextRequest) {
     }
 
     loras.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-    return NextResponse.json({ loras });
+    return Response.json({ loras });
   } catch (error) {
     console.error('Error listing generated LoRAs:', error);
-    return NextResponse.json({ error: 'Failed to list generated LoRAs' }, { status: 500 });
+    return Response.json({ error: 'Failed to list generated LoRAs' }, { status: 500 });
   }
 }
 import { jobStorageKey } from '@/utils/jobIdentity';

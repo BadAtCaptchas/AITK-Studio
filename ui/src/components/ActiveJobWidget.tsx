@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import Link from '@/navigation/Link';
 import { CgSpinner } from 'react-icons/cg';
 import useJobsList from '@/hooks/useJobsList';
 import type { JobConfig } from '@/types';

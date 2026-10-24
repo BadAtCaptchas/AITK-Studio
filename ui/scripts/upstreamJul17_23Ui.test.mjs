@@ -151,7 +151,7 @@ test('validation uploads and previews use protected global storage', () => {
   assert.match(fileServing, /realpathIfExists\(filepath\)/);
   assert.match(fileServing, /isPathWithinRoot\(root, canonicalPath\)/);
   const middleware = read('src/proxy.ts');
-  assert.match(middleware, /hasObsoleteWorkspaceScope\(request\.nextUrl\.searchParams\)/);
+  assert.match(middleware, /hasObsoleteWorkspaceScope\(new URL\(request.url\).searchParams\)/);
   assert.match(middleware, /hasObsoleteWorkspaceHeaders\(request\.headers\)/);
   assert.match(jobConfig, /resolution: 1024/);
   assert.match(jobConfig, /validate_every_n_steps: 1/);

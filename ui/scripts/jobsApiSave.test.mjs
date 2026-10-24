@@ -51,7 +51,6 @@ function fixture(existing = null) {
     '@/server/commandInput': commandInput,
     '@/utils/jobIdentity': jobIdentity,
     '@/utils/validationConfig': validationConfig,
-    'next/server': { NextResponse: Response },
     '@/helpers/basic': { isMac: () => false },
     '@/utils/authSession': { isRequestAuthenticated: async () => true },
     '@/server/db': {

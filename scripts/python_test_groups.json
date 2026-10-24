@@ -96,8 +96,7 @@
       "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
     },
     "testing.test_dfe_video_contract_static": {
-      "group": "manual",
-      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+      "group": "runtime"
     },
     "testing.test_ema_scheduler_lifecycle": {
       "group": "runtime"

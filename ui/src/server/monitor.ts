@@ -36,8 +36,13 @@ const NV_BATCH_FLUSH_MS = 100;
 // Temperature refresh is decoupled from the tick (see refreshCpuTemp)
 const CPU_TEMP_REFRESH_MS = 5000;
 
-// GB10 has no configurable GPU power limit; this is the shared SoC rating.
-const KNOWN_POWER_LIMITS_W: Readonly<Record<string, number>> = { 'NVIDIA GB10': 140 };
+// Shared SoC ratings are fallbacks only; driver-reported power limits win.
+const KNOWN_POWER_LIMITS_W: ReadonlyArray<readonly [RegExp, number]> = [
+  [/\bGB10\b/i, 140],
+  [/RTX Spark.*5120-core/i, 80],
+  [/RTX Spark/i, 140],
+];
+const UNIFIED_MEMORY_GPU = /\b(GB10|RTX Spark)\b/i;
 
 function withSharedMemory(gpu: GPUApiResponse, cpu: CpuInfo | null): GPUApiResponse {
   if (!cpu || !Number.isFinite(cpu.totalMemory) || cpu.totalMemory <= 0 || !Number.isFinite(cpu.availableMemory)) return gpu;
@@ -46,7 +51,7 @@ function withSharedMemory(gpu: GPUApiResponse, cpu: CpuInfo | null): GPUApiRespo
   return {
     ...gpu,
     gpus: gpu.gpus.map(device =>
-      device.name === 'NVIDIA GB10' && !Number.isFinite(device.memory.total)
+      UNIFIED_MEMORY_GPU.test(device.name)
         ? { ...device, memory: { total, free, used: total - free, shared: true } }
         : device,
     ),
@@ -96,7 +101,7 @@ function parseGpuLine(line: string): GpuInfo | null {
     },
     power: {
       draw: parseFloat(powerDraw),
-      limit: Number.isFinite(parseFloat(powerLimit)) ? parseFloat(powerLimit) : (KNOWN_POWER_LIMITS_W[name] ?? NaN),
+      limit: Number.isFinite(parseFloat(powerLimit)) ? parseFloat(powerLimit) : (KNOWN_POWER_LIMITS_W.find(([pattern]) => pattern.test(name))?.[1] ?? NaN),
     },
     clocks: {
       graphics: parseInt(clockGraphics),

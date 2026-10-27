@@ -2,7 +2,8 @@ import Link from '@/navigation/Link';
 import { reportWorkflowError } from '@/components/WorkflowFeedback';
 import React from 'react';
 import useFilesList from '@/hooks/useFilesList';
-import { Loader2, AlertCircle, Download, Box, Brain, Trash2, SlidersHorizontal } from 'lucide-react';
+import { Loader2, AlertCircle, Download, Box, Brain, Trash2, SlidersHorizontal, Info } from 'lucide-react';
+import { openSafetensorsInfoModal } from './SafetensorsInfoModal';
 import { openMergeLoRAsModal } from './MergeLoRAsModal';
 import { getDisplayPath, getDownloadUrl, parseRemoteAssetRef } from '@/utils/media';
 import { openConfirm } from './ConfirmModal';
@@ -133,6 +134,12 @@ export default function FilesWidget({
                   </a>
                   <div className="flex items-center space-x-3 flex-shrink-0">
                     <span className="text-xs text-gray-400">{cleanSize(file.size)}</span>
+                    {!isRemote && /\.safetensors$/i.test(fileName) && (
+                      <button type="button" onClick={() => openSafetensorsInfoModal(file.path)}
+                        className="p-1 text-sky-400 hover:bg-gray-800" aria-label={`Inspect ${fileName}`} title="Safetensors info">
+                        <Info className="w-4 h-4" />
+                      </button>
+                    )}
                     {!isRemote && canGenerate && fileName.endsWith('.safetensors') && (
                       <Link
                         className="studio-text-link text-xs"

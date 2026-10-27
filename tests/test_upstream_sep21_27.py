@@ -281,7 +281,7 @@ class SeptemberPortsTests(unittest.TestCase):
             with patch.dict(os.environ, {'AITK_DISABLE_UNIFIED_MEMORY': '1'}):
                 self.assertFalse(unified_memory.is_unified_memory())
             with patch.object(unified_memory.sys, 'platform', 'win32'):
-                self.assertFalse(unified_memory.is_unified_memory())
+                self.assertTrue(unified_memory.is_unified_memory())
             with patch.object(torch.version, 'hip', 'rocm'):
                 self.assertFalse(unified_memory.is_unified_memory())
             with patch.object(torch.cuda, 'get_device_properties', return_value=SimpleNamespace(is_integrated=False)):

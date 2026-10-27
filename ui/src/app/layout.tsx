@@ -7,6 +7,7 @@ import ConfirmModal from '@/components/ConfirmModal';
 import AuthWrapper from '@/components/AuthWrapper';
 import DocModal from '@/components/DocModal';
 import { CaptionDatasetModal } from '@/components/CaptionDatasetModal';
+import SafetensorsInfoModal from '@/components/SafetensorsInfoModal';
 import MergeLoRAsModal from '@/components/MergeLoRAsModal';
 import AppShell from '@/components/AppShell';
 
@@ -24,6 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <DocModal />
         <CaptionDatasetModal />
         <MergeLoRAsModal />
+        <SafetensorsInfoModal />
     </>
   );
 }

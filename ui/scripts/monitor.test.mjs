@@ -505,3 +505,21 @@ test('failed one-shot queries cannot preserve an old busy GPU reading forever', 
   assert.deepEqual(fixture.monitor.getInit().gpu.gpus, []);
   assert.deepEqual(fixture.samples.at(-1).gpu.gpus, []);
 });
+
+for (const [name, expected] of [['NVIDIA RTX Spark 5120-core', 80], ['NVIDIA RTX Spark 6144-core', 140], ['NVIDIA GB10', 140]]) {
+  test(`${name} replaces WDDM dedicated segment with shared RAM and respects driver power limits`, async t => {
+    const fixture = monitorFixture(t);
+    await flush();
+    fixture.output(`0, ${name}, 580, 45, 20, 0, 8192, 4096, 4096, 60, [N/A], 1500, 0, [N/A]\n`);
+    await fixture.advance(500);
+    const sample = fixture.samples.at(-1);
+    const device = sample.gpu.gpus[0];
+    assert.equal(device.memory.shared, true);
+    assert.equal(device.memory.total, sample.cpu.totalMemory);
+    assert.equal(device.memory.free, sample.cpu.availableMemory);
+    assert.equal(device.power.limit, expected);
+    fixture.output(`0, ${name}, 580, 45, 20, 0, 8192, 4096, 4096, 60, 65, 1500, 0, [N/A]\n`);
+    await fixture.advance(500);
+    assert.equal(fixture.monitor.getInit().gpu.gpus[0].power.limit, 65);
+  });
+}

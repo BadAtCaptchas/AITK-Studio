@@ -34,9 +34,12 @@ import albumentations as A
 from toolkit.print import print_acc
 from toolkit.accelerator import get_accelerator
 from toolkit.prompt_utils import PromptEmbeds
+from toolkit.advanced_prompt_embeds import AdvancedPromptEmbeds
 from torchvision.transforms import functional as TF
 
 from toolkit.train_tools import get_torch_dtype
+
+TEXT_EMBED_CACHE_BATCH = 16
 
 if TYPE_CHECKING:
     from toolkit.data_loader import AiToolkitDataset
@@ -2886,6 +2889,43 @@ class TextEmbeddingCachingMixin:
             print_acc(" - Saving text embeddings to disk")
             
             did_move = False
+            pending = []
+            pending_paths = set()
+            batch_size = TEXT_EMBED_CACHE_BATCH
+
+            def flush_pending():
+                nonlocal batch_size
+                # Group similarly sized plain-text prompts to reduce padding.
+                pending.sort(key=lambda target: len(target[1]))
+                start = 0
+                while start < len(pending):
+                    chunk = pending[start:start + batch_size]
+                    captions = [caption for _, caption in chunk]
+                    try:
+                        embeds = self.sd.encode_prompt(captions if len(chunk) > 1 else captions[0])
+                    except torch.OutOfMemoryError:
+                        if len(chunk) == 1:
+                            raise
+                        # Batching must not make a previously viable single-item
+                        # cache job require more VRAM. Retry outside this handler
+                        # so the failed encoder's traceback can release tensors.
+                        batch_size = 1
+                        continue
+                    if isinstance(embeds, AdvancedPromptEmbeds):
+                        parts = AdvancedPromptEmbeds.split_prompt_embeds(embeds, len(chunk))
+                    elif len(chunk) == 1:
+                        parts = [embeds]
+                    else:
+                        # Legacy containers have no per-item splitting contract.
+                        del embeds
+                        batch_size = 1
+                        continue
+                    for (path, _), part in zip(chunk, parts):
+                        part.save(path)
+                    del embeds, parts, part
+                    start += len(chunk)
+                pending.clear()
+                pending_paths.clear()
 
             # use tqdm to show progress
             i = 0
@@ -3002,9 +3042,11 @@ class TextEmbeddingCachingMixin:
                         file_item.tensor = None
                     else:
                         for path, caption in encode_targets:
-                            prompt_embeds: PromptEmbeds = self.sd.encode_prompt(caption)
-                            prompt_embeds.save(path)
-                            del prompt_embeds
+                            if path not in pending_paths:
+                                pending_paths.add(path)
+                                pending.append((path, caption))
+                        if len(pending) >= 4 * TEXT_EMBED_CACHE_BATCH:
+                            flush_pending()
                 if getattr(file_item, 'dopsd_self_ref', False):
                     # D-OPSD teacher embeds encode with the item's own media as the reference
                     control_video_paths = getattr(file_item, 'control_video_paths', None) or []
@@ -3049,8 +3091,11 @@ class TextEmbeddingCachingMixin:
                             prompt_embeds: PromptEmbeds = self.sd.encode_prompt(caption, control_images=ctrl_img)
                             prompt_embeds.save(path)
                             del prompt_embeds
-                file_item.is_text_embedding_cached = True
                 i += 1
+            flush_pending()
+            # Do not advertise a queued cache as usable before all writes succeed.
+            for file_item in self.file_list:
+                file_item.is_text_embedding_cached = True
             # restore device state
             # if did_move:
             #     self.sd.restore_device_state()

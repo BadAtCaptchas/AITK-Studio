@@ -582,6 +582,9 @@
     },
     "tests.test_unified_memory": {
       "group": "runtime"
+    },
+    "tests.test_text_embedding_batches": {
+      "group": "runtime"
     }
   }
 }

@@ -117,9 +117,14 @@ class DatasetCaptionLoadingTests(unittest.TestCase):
         batch = next(iter(loader))
         self.assertEqual(
             [call.args[0] for call in encoder.encode_prompt.call_args_list],
-            [self.caption, ""],
+            [["", self.caption], "", self.caption],
         )
+        # The legacy probe must never be saved as either per-caption cache.
+        # Dropout still loads the blank entry, while the normal entry keeps its
+        # own conditioning after the length-sorted single-item fallback.
         self.assertTrue(torch.equal(batch.prompt_embeds.text_embeds, torch.zeros(1, 2, 4)))
+        normal = PromptEmbeds.load(batch.file_items[0].get_text_embedding_path())
+        self.assertTrue(torch.equal(normal.text_embeds, torch.full((1, 2, 4), float(len(self.caption)))))
 
     def test_enabling_dropout_fills_missing_cache_without_reencoding_caption(self):
         encoder = self.encoder()

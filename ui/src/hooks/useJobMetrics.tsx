@@ -172,6 +172,7 @@ export default function useJobMetrics(
   const didInitialLoadRef = useRef(false);
   const inFlightRef = useRef(false);
   const needsFullRefreshRef = useRef(false);
+  const incrementalReadsRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
   const lastStepByKeyRef = useRef<Record<string, number | null>>({});
   const activeScopeRef = useCommittedRef(requestScope);
@@ -189,7 +190,9 @@ export default function useJobMetrics(
         return;
       }
 
-      const full = options.full || !didInitialLoadRef.current || needsFullRefreshRef.current;
+      // Periodically reconcile delayed rows and deletions, including older workers
+      // whose cursors only describe steps and cannot describe mutations.
+      let full = options.full || !didInitialLoadRef.current || needsFullRefreshRef.current || incrementalReadsRef.current >= 15;
       needsFullRefreshRef.current = false;
       inFlightRef.current = true;
       abortRef.current?.abort();
@@ -215,7 +218,7 @@ export default function useJobMetrics(
           params.since_steps = encodeSinceSteps(lastStepByKeyRef.current);
         }
 
-        const data = await apiClient
+        let data = await apiClient
           .get<unknown>(`/api/jobs/${jobID}/metrics`, { params, signal: controller.signal })
           .then(res => res.data);
 
@@ -226,12 +229,30 @@ export default function useJobMetrics(
         ) {
           return;
         }
-        const response = parseMetricsResponse(data);
+        let response = parseMetricsResponse(data);
+        if (!full && Object.entries(response.series).some(([key, payload]) => {
+          const previousStep = lastStepByKeyRef.current[key];
+          return previousStep != null && (payload.latest === null || payload.latest.step < previousStep);
+        })) {
+          // A restart or tail deletion invalidates cached history. Fetch a bounded
+          // snapshot before publishing, retaining all scope/abort guards.
+          data = await apiClient.get<unknown>(`/api/jobs/${jobID}/metrics`, {
+            params: { keys: metricKeys, max_points: maxPoints }, signal: controller.signal,
+          }).then(res => res.data);
+          if (controller.signal.aborted || abortRef.current !== controller || activeScopeRef.current !== currentRequestScope) return;
+          response = parseMetricsResponse(data);
+          full = true;
+        }
+        if (full) lastStepByKeyRef.current = {};
+        incrementalReadsRef.current = full ? 0 : incrementalReadsRef.current + 1;
         setKeys(response.keys);
         setLatest(prev => {
           const next = full ? {} : { ...prev };
           for (const [key, payload] of Object.entries(response.series ?? {})) {
-            next[key] = payload.latest ?? next[key] ?? null;
+            next[key] = payload.latest;
+          }
+          for (const key of Object.keys(next)) {
+            if (!response.keys.includes(key)) delete next[key];
           }
           return next;
         });
@@ -240,14 +261,15 @@ export default function useJobMetrics(
           let shouldCompact = false;
 
           for (const [key, payload] of Object.entries(response.series ?? {})) {
-            const incoming = payload.points ?? [];
+            // latest also carries corrections written at the cursor's same step.
+            const incoming = [...payload.points];
+            if (payload.latest) incoming.push(payload.latest);
             if (full || !didInitialLoadRef.current) {
-              next[key] = incoming;
+              next[key] = Array.from(new Map(incoming.map(point => [point.step, point])).values()).sort((a, b) => a.step - b.step);
             } else if (incoming.length) {
               const existing = next[key] ?? [];
-              const prevLast = existing.length ? existing[existing.length - 1].step : null;
-              const filtered = prevLast == null ? incoming : incoming.filter(point => point.step > prevLast);
-              next[key] = filtered.length ? [...existing, ...filtered] : existing;
+              next[key] = Array.from(new Map([...existing, ...incoming].map(point => [point.step, point])).values())
+                .sort((a, b) => a.step - b.step);
             } else {
               next[key] = next[key] ?? [];
             }
@@ -262,6 +284,12 @@ export default function useJobMetrics(
             }
           }
 
+          for (const key of Object.keys(next)) {
+            if (!response.keys.includes(key)) {
+              delete next[key];
+              delete lastStepByKeyRef.current[key];
+            }
+          }
           if (shouldCompact) needsFullRefreshRef.current = true;
           return next;
         });
@@ -296,6 +324,7 @@ export default function useJobMetrics(
     activeController?.abort();
     didInitialLoadRef.current = false;
     needsFullRefreshRef.current = false;
+    incrementalReadsRef.current = 0;
     lastStepByKeyRef.current = {};
     return () => {
       const controller = abortRef.current;

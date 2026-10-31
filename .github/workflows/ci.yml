@@ -170,6 +170,6 @@ jobs:
         run: npm --prefix node_modules/sqlite3 run rebuild
       - run: npm run generate:prisma
       - run: node node_modules/typescript/bin/tsc -p tsconfig.worker.json
-      - run: node --test scripts/mongoPersistence.test.mjs
+      - run: node --test scripts/mongoPersistence.test.mjs scripts/metricStorageParity.test.mjs
         env:
           AITK_TEST_MONGODB_URI: mongodb://127.0.0.1:27017

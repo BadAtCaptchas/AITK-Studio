@@ -28,7 +28,7 @@ function fixture(t) {
       return new Promise(resolve => requests.push({ options, resolve: data => resolve({ data }) }));
     } } },
   }).default;
-  const render = () => harness.render(() => hook('metric-fixture', 'running', { attemptId: 'attempt-1' }));
+  const render = (jobID = 'metric-fixture') => harness.render(() => hook(jobID, 'running', { attemptId: 'attempt-1' }));
   return {
     requests, render,
     async read(payload, { incremental = false } = {}) {
@@ -153,4 +153,71 @@ test('an invalid initial response stays retryable without publishing partial key
   const recovered = await f.read(payload(1));
   assert.equal(recovered.status, 'success');
   assert.deepEqual(recovered.series['loss/loss'], [numeric(1)]);
+});
+
+test('per-key cursors admit late new series, same-step corrections and phase markers', async t => {
+  const f = fixture(t);
+  await f.read(payload(100));
+  const corrected = { step: 100, value: 0.125 };
+  const phase = { step: 2, value: 1 };
+  const state = await f.read({ keys: ['loss/loss', 'late', 'phase/index', 'event/save'], series: {
+    'loss/loss': { points: [], latest: corrected },
+    late: { points: [numeric(3)], latest: numeric(3) },
+    'phase/index': { points: [phase], latest: phase },
+    'event/save': { points: [{ step: 2, value: null, value_text: 'saved' }] },
+  } }, { incremental: true });
+  assert.deepEqual(state.series['loss/loss'], [corrected]);
+  assert.deepEqual(state.series.late, [numeric(3)]);
+  assert.deepEqual(state.phasePoints, [phase]);
+  assert.deepEqual(state.eventKeys, ['event/save']);
+  const pending = f.poll();
+  const cursors = f.requests.at(-1).options.params.since_steps;
+  assert.match(cursors, /loss%2Floss:100/);
+  assert.match(cursors, /late:3/);
+  f.requests.at(-1).resolve({ keys: [], series: {} });
+  await pending;
+  assert.deepEqual(f.render().series, {});
+  assert.deepEqual(f.render().latest, {});
+});
+
+test('restart or tail deletion fetches a replacement before publishing old history', async t => {
+  const f = fixture(t);
+  await f.read(payload(100));
+  const pending = f.poll();
+  f.requests.at(-1).resolve(payload(5));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.requests.at(-1).options.params.since_steps, undefined);
+  assert.deepEqual(f.render().series['loss/loss'], [numeric(100)]);
+  f.requests.at(-1).resolve(payload(5));
+  await pending;
+  assert.deepEqual(f.render().series['loss/loss'], [numeric(5)]);
+});
+
+test('periodic bounded snapshot reconciles delayed rows below cursors and interior deletions', async t => {
+  const f = fixture(t);
+  await f.read(payload(100));
+  for (let i = 0; i < 15; i++) await f.read(payload(100), { incremental: true });
+  const pending = f.poll();
+  assert.equal(f.requests.at(-1).options.params.since_steps, undefined);
+  assert.equal(f.requests.at(-1).options.params.max_points, 4000);
+  f.requests.at(-1).resolve({ keys: ['loss/loss'], series: { 'loss/loss': {
+    points: [numeric(3), numeric(99)], latest: numeric(99),
+  } } });
+  await pending;
+  assert.deepEqual(f.render().series['loss/loss'], [numeric(3), numeric(99)]);
+});
+
+
+test('job switch aborts restart reconciliation without publishing the old response', async t => {
+  const f = fixture(t);
+  await f.read(payload(100));
+  const pending = f.poll();
+  f.requests.at(-1).resolve(payload(5));
+  await new Promise(resolve => setImmediate(resolve));
+  const old = f.requests.at(-1);
+  f.render('other-job');
+  assert.equal(old.options.signal.aborted, true);
+  old.resolve(payload(5));
+  await pending;
+  assert.deepEqual(f.render('other-job').series, {});
 });

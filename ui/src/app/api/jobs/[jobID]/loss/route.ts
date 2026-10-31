@@ -1,3 +1,4 @@
+import { metricJsonResponse } from '@/server/metricJsonResponse';
 import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { jobStorageKey } from '../../../../../utils/jobIdentity';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
@@ -25,8 +26,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ jobI
     if (!job.remote_job_id) return Response.json({ keys: [], key: 'loss', points: [] });
     try {
       const worker = await getRemoteWorker(job.worker_id);
-      return Response.json(
+      return metricJsonResponse(request,
         await remoteJson(worker, `/api/jobs/${encodeURIComponent(job.remote_job_id)}/loss?${url.searchParams}`),
+        8 * 1024 * 1024,
       );
     } catch (error) {
       if (isRemoteJobMissingError(error)) {
@@ -43,12 +45,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ jobI
   const logPath = path.join(jobFolder, 'loss_log.db');
 
   const key = url.searchParams.get('key') ?? 'loss';
-  const limit = Math.min(Number(url.searchParams.get('limit') ?? 2000), 20000);
+  const rawLimit = Number(url.searchParams.get('limit') ?? 2000);
+  const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(Math.floor(rawLimit), 1), 20000) : 2000;
   const sinceStepParam = url.searchParams.get('since_step');
-  const sinceStep = sinceStepParam != null ? Number(sinceStepParam) : null;
-  const stride = Math.max(1, Number(url.searchParams.get('stride') ?? 1));
+  const sinceStepValue = sinceStepParam != null ? Number(sinceStepParam) : null;
+  const sinceStep = Number.isFinite(sinceStepValue) ? sinceStepValue : null;
+  const rawStride = Number(url.searchParams.get('stride') ?? 1);
+  const stride = Number.isFinite(rawStride) ? Math.max(1, Math.floor(rawStride)) : 1;
 
-  return Response.json(await db.metrics.getLossLog(jobID, logPath, { key, limit, sinceStep, stride }));
+  return metricJsonResponse(request, await db.metrics.getLossLog(jobID, logPath, { key, limit, sinceStep, stride }), 8 * 1024 * 1024);
 }
 
 // Delete every logged step in [min_step, max_step] (inclusive) across all

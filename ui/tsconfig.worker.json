@@ -53,6 +53,7 @@
         "src/components/dataset-image-studio/recaption.ts",
         "src/server/pythonPath.ts",
         "src/server/commandInput.ts",
+        "src/server/metricJsonResponse.ts",
         "src/server/remoteDatasetAssetAccess.ts",
         "src/server/loginLimiter.ts",
         "src/server/apiCache.ts",

@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
+import { gunzipSync } from 'node:zlib';
 
 import {
   RemoteClientError,
@@ -124,6 +125,7 @@ test('remote metrics route accepts multi-series histories above the generic 8 Mi
     { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } },
   ).outputText;
   const dependencies = {
+    '@/server/metricJsonResponse': require('../dist/src/server/metricJsonResponse.js'),
     '../../../../../utils/jobIdentity': {},
     path,
     '@/server/db': { db: { jobs: { findById: async () => ({ worker_id: 'worker-1', remote_job_id: 'remote/job' }) } } },
@@ -147,6 +149,11 @@ test('remote metrics route accepts multi-series histories above the generic 8 Mi
   }
   assert.equal(requests.at(-1).url, `https://worker.example/api/jobs/remote%2Fjob/metrics?${query}`);
   assert.equal(Object.hasOwn(requests.at(-1).init, 'maxResponseBytes'), false);
+  const compressed = await loadedModule.exports.GET(new Request(`http://localhost/api/jobs/mirror/metrics?${query}`, {
+    headers: { 'accept-encoding': 'gzip' },
+  }), { params: Promise.resolve({ jobID: 'mirror' }) });
+  assert.equal(compressed.headers.get('content-encoding'), 'gzip');
+  assert.deepEqual(JSON.parse(gunzipSync(Buffer.from(await compressed.arrayBuffer())).toString()), payload);
 });
 
 test('remote JSON custom limit bounds chunked bodies and cancels oversized responses', async () => {
@@ -301,6 +308,7 @@ test('worker outage logs are shared across jobs, quiet during cooldown, and rese
 
 function loadPollingRoute(kind) {
   const dependencies = {
+    '@/server/metricJsonResponse': require('../dist/src/server/metricJsonResponse.js'),
     '../../../../../utils/jobIdentity': {}, path,
     '@/server/db': { db: { jobs: { findById: async () => ({ id: 'mirror', worker_id: 'worker-1', remote_job_id: 'remote-job' }) } } },
     '@/server/trainingPaths': {}, '@/server/remoteAssets': {}, '@/server/jobSamples': {}, '@/utils/sampleMetadata': {},

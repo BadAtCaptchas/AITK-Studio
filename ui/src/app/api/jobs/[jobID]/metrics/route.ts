@@ -1,3 +1,4 @@
+import { metricJsonResponse } from '@/server/metricJsonResponse';
 import { jobStorageKey } from '../../../../../utils/jobIdentity';
 import path from 'path';
 import { db } from '@/server/db';
@@ -52,11 +53,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ jobI
     }
     try {
       const worker = await getRemoteWorker(job.worker_id);
-      return Response.json(
+      return metricJsonResponse(request,
         await remotePollingJson(worker, `/api/jobs/${encodeURIComponent(job.remote_job_id)}/metrics?${url.searchParams}`, 'metrics', {
           maxResponseBytes: MAX_REMOTE_METRICS_BYTES,
           signal: request.signal,
         }),
+        MAX_REMOTE_METRICS_BYTES,
       );
     } catch (error) {
       if (request.signal.aborted) return new Response(null, { status: 499 });
@@ -78,12 +80,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ jobI
   const sinceStep = sinceStepParam != null ? Number(sinceStepParam) : null;
   const maxPoints = Math.min(Math.max(Number(url.searchParams.get('max_points') ?? 4000), 2), 20000);
 
-  return Response.json(
+  return metricJsonResponse(request,
     await db.metrics.getMetrics(jobID, logPath, {
       keys: parseKeys(url.searchParams.get('keys')),
       maxPoints,
       sinceStep: Number.isFinite(sinceStep) ? sinceStep : null,
       sinceSteps: parseSinceSteps(url.searchParams.get('since_steps')),
     }),
+    MAX_REMOTE_METRICS_BYTES,
   );
 }

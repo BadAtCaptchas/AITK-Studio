@@ -4,16 +4,34 @@ export const objectCopy = <T>(obj: T): T => {
 
 export const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+export type PollVisibilitySource = {
+  readonly visibilityState: string;
+  addEventListener(type: 'visibilitychange', listener: () => void): void;
+  removeEventListener(type: 'visibilitychange', listener: () => void): void;
+};
+
 export function startSettledPollLoop(
   callback: (signal: AbortSignal) => void | Promise<unknown>,
   intervalMs: number | null | undefined,
   onError: (error: unknown) => void = error => console.error('Polling request failed:', error),
+  visibility?: PollVisibilitySource,
 ) {
   let stopped = false;
   let timeout: ReturnType<typeof setTimeout> | undefined;
   let activeController: AbortController | null = null;
+  let hidden = visibility?.visibilityState === 'hidden';
+  let refreshOnSettle = false;
+
+  const clearTimer = () => {
+    if (timeout !== undefined) clearTimeout(timeout);
+    timeout = undefined;
+  };
 
   const tick = async () => {
+    // A transport may take time to settle after abort. Foregrounding queues a
+    // refresh rather than overlapping that outstanding request.
+    if (stopped || hidden || activeController) return;
+    refreshOnSettle = false;
     const controller = new AbortController();
     activeController = controller;
     try {
@@ -21,24 +39,42 @@ export function startSettledPollLoop(
     } catch (error) {
       if (!controller.signal.aborted) onError(error);
     } finally {
-      if (activeController === controller) {
-        activeController = null;
-      }
+      if (activeController === controller) activeController = null;
     }
 
-    if (!stopped && intervalMs) {
+    if (stopped || hidden) return;
+    if (refreshOnSettle) {
+      void tick();
+    } else if (intervalMs) {
       timeout = setTimeout(() => {
+        timeout = undefined;
         void tick();
       }, intervalMs);
     }
   };
 
+  const onVisibilityChange = () => {
+    const nextHidden = visibility?.visibilityState === 'hidden';
+    if (stopped || nextHidden === hidden) return;
+    hidden = nextHidden;
+    clearTimer();
+    if (hidden) {
+      refreshOnSettle = false;
+      activeController?.abort();
+    } else {
+      refreshOnSettle = true;
+      void tick();
+    }
+  };
+
+  visibility?.addEventListener('visibilitychange', onVisibilityChange);
   void tick();
 
   return () => {
     stopped = true;
+    visibility?.removeEventListener('visibilitychange', onVisibilityChange);
     activeController?.abort();
-    if (timeout) clearTimeout(timeout);
+    clearTimer();
   };
 }
 

@@ -22,6 +22,7 @@ from toolkit.config_modules import DatasetConfig, preprocess_dataset_raw_config
 from toolkit.dataloader_mixins import CaptionMixin, BucketsMixin, LatentCachingMixin, Augments, CLIPCachingMixin, ControlCachingMixin, TextEmbeddingCachingMixin
 from toolkit.data_transfer_object.data_loader import FileItemDTO, DataLoaderBatchDTO
 from toolkit.print import print_acc
+from toolkit.text_embedding_cache import job_text_embedding_cache
 from toolkit.accelerator import get_accelerator
 from toolkit.encrypted_dataset import is_encrypted_dataset_path
 from toolkit.layered_dataset import discover_layered_samples, validate_layered_config
@@ -532,6 +533,7 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
             if hasattr(self.sd.unet, 'config') and hasattr(self.sd.unet.config, 'temporal_compression_ratio'):
                 temporal_compression = self.sd.unet.config.temporal_compression_ratio
         
+        text_embedding_cache = job_text_embedding_cache(self.sd) if self.dataset_config.cache_text_embeddings else None
         bad_count = 0
         for file in tqdm(file_list):
             try:
@@ -553,6 +555,7 @@ class AiToolkitDataset(LatentCachingMixin, ControlCachingMixin, CLIPCachingMixin
                     temporal_compression=temporal_compression,
                     sample_rate=self.sd.sample_rate if (self.is_audio_model or self.is_multimodal_llm) and self.sd is not None else 48000,
                 )
+                file_item._cpu_text_embedding_cache = text_embedding_cache
                 self.file_list.append(file_item)
             except Exception as e:
                 if self.is_layered:

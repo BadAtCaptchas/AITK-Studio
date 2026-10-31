@@ -26,6 +26,7 @@ function fixture(t, name) {
   const requests = [],
     polls = [];
   const dependencies = {
+    '@/utils/metricSnapshot': load('../src/utils/metricSnapshot.ts', {}),
     react: harness.react,
     './useScopedState': load('../src/hooks/useScopedState.ts', { react: harness.react }),
     './useCommittedRef': load('../src/hooks/useCommittedRef.ts', { react: harness.react }),

@@ -5,13 +5,8 @@ import useScopedState from './useScopedState';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { apiClient } from '@/utils/api';
 import usePollLoop from './usePollLoop';
-
-export interface MetricPoint {
-  step: number;
-  wall_time?: number;
-  value: number | null;
-  value_text?: string | null;
-}
+import { emptyMetricSnapshot, mergeMetricSnapshot, type MetricPoint } from '@/utils/metricSnapshot';
+export type { MetricPoint } from '@/utils/metricSnapshot';
 
 export interface MetricSeriesPayload {
   key: string;
@@ -29,8 +24,6 @@ export interface MetricsResponse {
   series: Record<string, MetricSeriesPayload>;
 }
 
-type SeriesMap = Record<string, MetricPoint[]>;
-type LatestMap = Record<string, MetricPoint | null>;
 type ValidatedMetricsResponse = {
   keys: string[];
   series: Record<string, Pick<MetricSeriesPayload, 'latest' | 'points'>>;
@@ -48,6 +41,8 @@ type UseJobMetricsOptions =
 const DEFAULT_METRIC_KEYS = ['*'];
 const DEFAULT_MAX_POINTS = 4000;
 const COMPACT_THRESHOLD = 5000;
+const EMPTY_POINTS: MetricPoint[] = [];
+const FALLBACK_LOSS_KEYS = ['loss'];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -163,11 +158,10 @@ export default function useJobMetrics(
   const enabled = normalizedOptions.enabled;
   const attemptId = normalizedOptions.attemptId;
   const requestScope = JSON.stringify([enabled, jobID, attemptId, maxPoints, metricKeys]);
-  const [series, setSeries] = useScopedState<SeriesMap>(requestScope, {});
-  const [latest, setLatest] = useScopedState<LatestMap>(requestScope, {});
-  const [keys, setKeys] = useScopedState<string[]>(requestScope, []);
+  const [snapshot, setSnapshot] = useScopedState(requestScope, emptyMetricSnapshot);
+  const { series, latest, keys, version } = snapshot;
+  const snapshotRef = useRef(emptyMetricSnapshot());
   const [status, setStatus] = useScopedState<Status>(requestScope, 'idle');
-  const [version, setVersion] = useScopedState(requestScope, 0);
 
   const didInitialLoadRef = useRef(false);
   const inFlightRef = useRef(false);
@@ -245,55 +239,16 @@ export default function useJobMetrics(
         }
         if (full) lastStepByKeyRef.current = {};
         incrementalReadsRef.current = full ? 0 : incrementalReadsRef.current + 1;
-        setKeys(response.keys);
-        setLatest(prev => {
-          const next = full ? {} : { ...prev };
-          for (const [key, payload] of Object.entries(response.series ?? {})) {
-            next[key] = payload.latest;
-          }
-          for (const key of Object.keys(next)) {
-            if (!response.keys.includes(key)) delete next[key];
-          }
-          return next;
-        });
-        setSeries(prev => {
-          const next: SeriesMap = full ? {} : { ...prev };
-          let shouldCompact = false;
-
-          for (const [key, payload] of Object.entries(response.series ?? {})) {
-            // latest also carries corrections written at the cursor's same step.
-            const incoming = [...payload.points];
-            if (payload.latest) incoming.push(payload.latest);
-            if (full || !didInitialLoadRef.current) {
-              next[key] = Array.from(new Map(incoming.map(point => [point.step, point])).values()).sort((a, b) => a.step - b.step);
-            } else if (incoming.length) {
-              const existing = next[key] ?? [];
-              next[key] = Array.from(new Map([...existing, ...incoming].map(point => [point.step, point])).values())
-                .sort((a, b) => a.step - b.step);
-            } else {
-              next[key] = next[key] ?? [];
-            }
-
-            const finalArr = next[key] ?? [];
-            lastStepByKeyRef.current[key] = finalArr.length
-              ? finalArr[finalArr.length - 1].step
-              : (lastStepByKeyRef.current[key] ?? null);
-
-            if (finalArr.length > COMPACT_THRESHOLD) {
-              shouldCompact = true;
-            }
-          }
-
-          for (const key of Object.keys(next)) {
-            if (!response.keys.includes(key)) {
-              delete next[key];
-              delete lastStepByKeyRef.current[key];
-            }
-          }
-          if (shouldCompact) needsFullRefreshRef.current = true;
-          return next;
-        });
-        setVersion(v => v + 1);
+        const next = mergeMetricSnapshot(snapshotRef.current, response, full);
+        snapshotRef.current = next;
+        setSnapshot(next);
+        for (const [key, points] of Object.entries(next.series)) {
+          lastStepByKeyRef.current[key] = points.length ? points[points.length - 1].step : null;
+          if (points.length > COMPACT_THRESHOLD) needsFullRefreshRef.current = true;
+        }
+        for (const key of Object.keys(lastStepByKeyRef.current)) {
+          if (!Object.hasOwn(next.series, key)) delete lastStepByKeyRef.current[key];
+        }
         setStatus('success');
         didInitialLoadRef.current = true;
       } catch (error: unknown) {
@@ -314,7 +269,7 @@ export default function useJobMetrics(
         }
       }
     },
-    [enabled, jobID, maxPoints, metricKeys, requestScope, setStatus, setKeys, setLatest, setSeries, setVersion],
+    [enabled, jobID, maxPoints, metricKeys, requestScope, setStatus, setSnapshot],
   );
 
   useEffect(() => {
@@ -326,6 +281,7 @@ export default function useJobMetrics(
     needsFullRefreshRef.current = false;
     incrementalReadsRef.current = 0;
     lastStepByKeyRef.current = {};
+    snapshotRef.current = emptyMetricSnapshot();
     return () => {
       const controller = abortRef.current;
       abortRef.current = null;
@@ -356,10 +312,10 @@ export default function useJobMetrics(
     series,
     latest,
     keys,
-    lossKeys: lossKeys.length ? lossKeys : ['loss'],
+    lossKeys: lossKeys.length ? lossKeys : FALLBACK_LOSS_KEYS,
     eventKeys,
-    phasePoints: series['phase/index'] ?? [],
-    phaseNamePoints: series['phase/name'] ?? [],
+    phasePoints: series['phase/index'] ?? EMPTY_POINTS,
+    phaseNamePoints: series['phase/name'] ?? EMPTY_POINTS,
     status,
     version,
     refreshMetrics: () => refreshMetrics({ full: true }),

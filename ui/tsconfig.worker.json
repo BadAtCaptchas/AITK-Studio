@@ -68,6 +68,7 @@
         "src/server/captionFiles.ts",
         "src/server/datasetRootCaption.ts",
         "src/server/datasetImages.ts",
+        "src/server/datasetListing.ts",
         "src/server/datasetRefusalCaptionAudit.ts",
         "src/server/imageDelete.ts",
         "src/server/sampleLayers.ts",

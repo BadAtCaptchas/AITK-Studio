@@ -1,61 +1,17 @@
 import { readJsonCommand, withCommandBoundary } from '@/server/commandInput';
 import { assertGlobalPayload } from '@/utils/obsoleteWorkspaceGuard';
 import fs from 'fs';
-import path from 'path';
 import zlib from 'zlib';
 import { promisify } from 'util';
 import { isEncryptedDatasetFolder, readEncryptedManifest, resolveDatasetFolder } from '@/server/encryptedDatasets';
 import { getRemoteWorker, isLocalWorker, remoteJson } from '@/server/remoteClient';
 import { makeSignedRemoteDatasetAssetRef } from '@/server/remoteDatasetAssetAccess';
-import { findDatasetItemsRecursivelyAsync } from '@/server/datasetImages';
-import { findExistingCaptionSidecarAsync, isTextCaptionFilePath } from '@/server/captionFiles';
+import { listDatasetImages } from '@/server/datasetListing';
+import { resolveDatasetDirectoryInsideRoot } from '@/server/remoteCaptionSecurity';
 import { DatasetScopeError, resolveDatasetScope } from '@/server/datasetScope';
-import { listLayeredImages } from '@/server/layeredImages';
 
 const brotliCompress = promisify(zlib.brotliCompress);
 const gzipCompress = promisify(zlib.gzip);
-
-type DatasetImageListEntry = {
-  img_path: string;
-  media_url?: string;
-  added_at: string | null;
-  captioned_at: string | null;
-  size_bytes: number;
-  layer_count?: number;
-};
-
-function dateToIso(date: Date | undefined) {
-  if (!date) return null;
-  const ms = date.getTime();
-  return typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? date.toISOString() : null;
-}
-
-function addedAtForStat(stat: fs.Stats) {
-  return dateToIso(stat.birthtime) || dateToIso(stat.ctime) || dateToIso(stat.mtime);
-}
-
-async function captionedAtForItem(itemPath: string) {
-  try {
-    const captionPath = isTextCaptionFilePath(itemPath) ? itemPath : await findExistingCaptionSidecarAsync(itemPath);
-    if (!captionPath) return null;
-    const stat = await fs.promises.stat(captionPath);
-    return stat.isFile() ? dateToIso(stat.mtime) : null;
-  } catch {
-    return null;
-  }
-}
-
-async function imageEntry(imgPath: string, root: string | null): Promise<DatasetImageListEntry> {
-  const stat = await fs.promises.stat(imgPath);
-  let mediaUrl: string | undefined;
-  return {
-    img_path: root && imgPath.startsWith(root) ? imgPath.slice(root.length) : imgPath,
-    ...(mediaUrl ? { media_url: mediaUrl } : {}),
-    added_at: addedAtForStat(stat),
-    captioned_at: await captionedAtForItem(imgPath),
-    size_bytes: stat.size,
-  };
-}
 
 async function jsonResponse(request: Request, payload: unknown) {
   const json = JSON.stringify(payload);
@@ -85,6 +41,12 @@ async function postCommand(request: Request) {
   const workerID = typeof body?.worker_id === 'string' ? body.worker_id : 'local';
 
   const compact = body?.compact === true;
+  const limit = body.limit;
+  const offset = body.offset ?? 0;
+  if (limit !== undefined && (typeof limit !== 'number' || !Number.isSafeInteger(limit) || limit < 1 || limit > 1000) ||
+      typeof offset !== 'number' || !Number.isSafeInteger(offset) || offset < 0 || offset > 10_000_000) {
+    return Response.json({ error: 'Invalid listing pagination' }, { status: 400 });
+  }
 
   try {
   } catch (error: any) {
@@ -99,7 +61,7 @@ async function postCommand(request: Request) {
     const worker = await getRemoteWorker(workerID);
     const data = await remoteJson<Record<string, unknown>>(worker, '/api/datasets/listImages', {
       method: 'POST',
-      body: JSON.stringify({ datasetName, compact: true }),
+      body: JSON.stringify({ datasetName, compact: true, ...(limit !== undefined ? { limit, offset } : {}) }),
     });
     const responseData: Record<string, unknown> = { ...data };
     const remoteRoot = typeof data?.root === 'string' ? data.root : '';
@@ -138,6 +100,7 @@ async function postCommand(request: Request) {
       return Response.json({ error: `Folder '${datasetName}' not found` }, { status: 404 });
     }
 
+    datasetFolder = await resolveDatasetDirectoryInsideRoot(datasetFolder, datasetsPath);
     if (isEncryptedDatasetFolder(datasetFolder)) {
       return jsonResponse(request, {
         encrypted: true,
@@ -146,13 +109,9 @@ async function postCommand(request: Request) {
       });
     }
 
-    const imageFiles = await findDatasetItemsRecursivelyAsync(datasetFolder);
-    const layered = new Map((await listLayeredImages(datasetFolder)).map(group => [path.resolve(datasetFolder, group.composite), group.layers.length]));
-    imageFiles.sort((a, b) => a.localeCompare(b));
-    const root = datasetFolder + path.sep;
-    const images = await Promise.all(imageFiles.map(async imgPath => ({ ...await imageEntry(imgPath, compact ? root : null), ...(layered.has(path.resolve(imgPath)) ? { layer_count: layered.get(path.resolve(imgPath)) } : {}) })));
-
-    return jsonResponse(request, compact ? { root, images } : { images });
+    return jsonResponse(request, await listDatasetImages(datasetFolder, {
+      compact, ...(typeof limit === 'number' ? { limit, offset } : {}),
+    }));
   } catch (error) {
     console.error('Error finding images:', error);
     return Response.json({ error: 'Failed to process request' }, { status: 500 });

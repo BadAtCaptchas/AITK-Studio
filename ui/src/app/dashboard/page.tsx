@@ -104,13 +104,15 @@ function HardwareStrip() {
 }
 
 function RunOutput({ job, expanded = true }: { job: Job; expanded?: boolean }) {
+  const [open, setOpen] = useState(expanded);
   const { log, status, refresh } = useJobLog(
     job.id,
     isActiveJobStatus(job.status) ? 3000 : null,
     job.attempt_id ?? null,
+    open,
   );
   return (
-    <details className="studio-output" open={expanded}>
+    <details className="studio-output" open={open} onToggle={event => setOpen(event.currentTarget.open)}>
       <summary>
         Output{' '}
         <span className="ml-3 text-gray-500">

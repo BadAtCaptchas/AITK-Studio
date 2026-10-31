@@ -7,6 +7,7 @@ import useJobMetrics, { type MetricPoint } from '@/hooks/useJobMetrics';
 import useGPUInfo from '@/hooks/useGPUInfo';
 import { getTotalSteps } from '@/utils/jobs';
 import { isActiveJobStatus } from '@/utils/jobStatus';
+import { emaWithNulls } from '@/utils/lossSmoothing';
 import { assignSeriesColors } from '@/utils/seriesColors';
 import {
   Activity,
@@ -178,46 +179,6 @@ function computeCanvasSize(host: HTMLElement): { width: number; height: number }
   const { width, height } = host.getBoundingClientRect();
   if (width <= 0 || height <= 0) return null;
   return { width, height: Math.max(MIN_CANVAS_HEIGHT, height) };
-}
-
-function emaPass(ys: (number | null)[], alpha: number, reverse: boolean) {
-  const vals: (number | null)[] = new Array(ys.length).fill(null);
-  const weights: number[] = new Array(ys.length).fill(0);
-  const start = reverse ? ys.length - 1 : 0;
-  const step = reverse ? -1 : 1;
-  let s = 0;
-  let n = 0;
-  for (let i = start; i >= 0 && i < ys.length; i += step) {
-    const v = ys[i];
-    if (v === null || !Number.isFinite(v)) {
-      continue;
-    }
-    s = alpha * (v as number) + (1 - alpha) * s;
-    n += 1;
-    const w = 1 - Math.pow(1 - alpha, n);
-    vals[i] = s / w;
-    weights[i] = w;
-  }
-  return { vals, weights };
-}
-
-function emaWithNulls(ys: (number | null)[], alpha: number): (number | null)[] {
-  const fwd = emaPass(ys, alpha, false);
-  const bwd = emaPass(ys, alpha, true);
-  const out: (number | null)[] = new Array(ys.length);
-  for (let i = 0; i < ys.length; i++) {
-    const f = fwd.vals[i];
-    const b = bwd.vals[i];
-    if (f === null || b === null) {
-      out[i] = null;
-      continue;
-    }
-    const wf = fwd.weights[i];
-    const wb = bwd.weights[i];
-    const wsum = wf + wb;
-    out[i] = wsum > 0 ? (wf * f + wb * b) / wsum : (f + b) / 2;
-  }
-  return out;
 }
 
 function sortedNumericPoints(points: MetricPoint[] | undefined, transform?: (value: number) => number | null) {
@@ -460,6 +421,7 @@ function buildChartData({
   showTrend,
   clipOutliers,
   smoothing,
+  primarySmoothing,
 }: {
   chartTab: ChartTab;
   series: Record<string, MetricPoint[]>;
@@ -472,6 +434,7 @@ function buildChartData({
   showTrend: boolean;
   clipOutliers: boolean;
   smoothing: number;
+  primarySmoothing?: { key: string; values: Map<number, number | null> };
 }) {
   const data: (number[] | (number | null)[])[] = [];
   const seriesConfigs: uPlot.Series[] = [{}];
@@ -481,9 +444,10 @@ function buildChartData({
   const trendAlpha = 0.015;
 
   if (chartTab === 'loss') {
+    const numericByKey = Object.fromEntries(lossKeys.map(key => [key, sortedNumericPoints(series[key])]));
     const stepSet = new Set<number>();
     for (const key of lossKeys) {
-      for (const point of sortedNumericPoints(series[key])) {
+      for (const point of numericByKey[key]) {
         if (useLogScale && (point.value as number) <= 0) continue;
         stepSet.add(point.step);
       }
@@ -496,7 +460,7 @@ function buildChartData({
     for (const key of lossKeys) {
       const color = colorByLossKey[key] ?? LOSS_COLOR;
       const values = new Map<number, number>();
-      for (const point of sortedNumericPoints(series[key])) {
+      for (const point of numericByKey[key]) {
         if (!xsSet.has(point.step)) continue;
         if (useLogScale && (point.value as number) <= 0) continue;
         values.set(point.step, point.value as number);
@@ -504,8 +468,6 @@ function buildChartData({
       const raw = xs.map(step => values.get(step) ?? null);
       const sparse = values.size < xs.length;
       sparseFlags.push(sparse);
-      const smooth = emaWithNulls(raw, alpha);
-      const trend = emaWithNulls(raw, trendAlpha);
 
       if (showRaw) {
         data.push(raw);
@@ -518,7 +480,12 @@ function buildChartData({
         });
       }
       if (showSmoothed) {
-        data.push(smooth);
+        // EMA skips nulls in both passes, so aligning the primary summary's
+        // smoothing by step is equivalent even for sparse, interleaved series.
+        // Log filtering changes the observations and must use its own EMA.
+        data.push(!useLogScale && primarySmoothing?.key === key
+          ? xs.map(step => primarySmoothing.values.get(step) ?? null)
+          : emaWithNulls(raw, alpha));
         seriesConfigs.push({
           label: cleanLabel(key),
           stroke: color,
@@ -528,7 +495,7 @@ function buildChartData({
         });
       }
       if (showTrend) {
-        data.push(trend);
+        data.push(emaWithNulls(raw, trendAlpha));
         seriesConfigs.push({
           label: `${cleanLabel(key)} trend`,
           stroke: key === lossKeys[0] ? LOSS_TREND_COLOR : colorWithAlpha(color, 0.7),
@@ -775,14 +742,16 @@ function JobLossGraphContent({ job, compact = false }: Props) {
   const progressPercent = totalSteps != null && totalSteps > 0 ? clamp((job.step / totalSteps) * 100, 0, 100) : null;
   const primaryLossKey = activeLossKeys[0] ?? lossKeys.find(key => (series[key]?.length ?? 0) > 0) ?? lossKeys[0];
 
-  const lossSummary = useMemo(() => {
-    const points = sortedNumericPoints(series[primaryLossKey]);
-    if (!points.length) return { current: null as number | null, deltaPct: null as number | null };
+  const primaryPoints = series[primaryLossKey];
+  const primarySmoothing = useMemo(() => {
+    const points = sortedNumericPoints(primaryPoints);
     const alpha = 1 - clamp(deferredSmoothing / 100, 0, 1) * 0.98;
-    const smoothed = emaWithNulls(
-      points.map(point => point.value as number),
-      alpha,
-    ).filter(value => value != null && Number.isFinite(value)) as number[];
+    const smoothed = emaWithNulls(points.map(point => point.value as number), alpha);
+    return { key: primaryLossKey, values: new Map(points.map((point, i) => [point.step, smoothed[i]])) };
+  }, [deferredSmoothing, primaryLossKey, primaryPoints]);
+
+  const lossSummary = useMemo(() => {
+    const smoothed = [...primarySmoothing.values.values()].filter(value => value != null && Number.isFinite(value)) as number[];
     if (!smoothed.length) return { current: null, deltaPct: null };
     const current = smoothed[smoothed.length - 1];
     const compareIndex = Math.max(0, smoothed.length - Math.max(20, Math.floor(smoothed.length * 0.12)));
@@ -792,7 +761,7 @@ function JobLossGraphContent({ job, compact = false }: Props) {
         ? ((current - previous) / Math.abs(previous)) * 100
         : null;
     return { current, deltaPct };
-  }, [deferredSmoothing, primaryLossKey, series]);
+  }, [primarySmoothing]);
 
   const latestLearningRateKey = learningRateKeys[0];
   const latestLearningRate =
@@ -858,6 +827,7 @@ function JobLossGraphContent({ job, compact = false }: Props) {
         showTrend,
         clipOutliers,
         smoothing: deferredSmoothing,
+        primarySmoothing,
       }),
     [
       activeLossKeys,
@@ -866,12 +836,12 @@ function JobLossGraphContent({ job, compact = false }: Props) {
       clipOutliers,
       deferredSmoothing,
       learningRateKeys,
+      primarySmoothing,
       series,
       showRaw,
       showSmoothed,
       showTrend,
       useLogScale,
-      version,
     ],
   );
 

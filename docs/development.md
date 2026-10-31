@@ -77,3 +77,8 @@ npm --prefix ui run sync:local
 ```
 
 The helper copies files reported by `git status`, including untracked files, and removes target files for local deletions or rename sources. Use `--tracked-only` to skip untracked files, `--no-delete` to leave target deletions alone, and `--no-verify-target` for non-git target directories.
+
+## Performance checks
+
+See [performance controls and CPU benchmarks](performance.md) for cache budgets,
+visibility-aware polling, dataset indexing, and repeatable before/after measurements.

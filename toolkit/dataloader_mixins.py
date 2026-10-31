@@ -26,6 +26,7 @@ from toolkit.config_modules import ControlTypes
 from toolkit.control_generator import ControlGenerator
 from toolkit.dto import DTO, DISK_PREFIX
 from toolkit.metadata import get_meta_for_safetensors
+from toolkit.latent_cache_preparation import LatentImageStager, mark_cached_survivors
 from toolkit.models.pixtral_vision import PixtralVisionImagePreprocessorCompatible
 from toolkit.prompt_utils import inject_trigger_into_prompt
 from torchvision import transforms
@@ -1149,11 +1150,15 @@ class ImageProcessingDTOMixin:
                     require_alpha=self.use_alpha_as_mask,
                 )
             else:
-                img = image_utils.open_static_image(
-                    self.path,
-                    mode='RGBA' if self.use_alpha_as_mask else None,
-                    require_alpha=self.use_alpha_as_mask,
-                )
+                # Only cold-cache decode is staged. All RNG-consuming crop,
+                # augmentation and transforms below remain on the owner thread.
+                img = getattr(self, '_latent_predecoded_image', None)
+                if img is None:
+                    img = image_utils.open_static_image(
+                        self.path,
+                        mode='RGBA' if self.use_alpha_as_mask else None,
+                        require_alpha=self.use_alpha_as_mask,
+                    )
         except Exception as e:
             print_acc(f"Error: {e}")
             print_acc(f"Error loading image: {self.path}")
@@ -2362,7 +2367,7 @@ class LatentCachingMixin:
             # An empty target list validates the state without changing items.
             self._assign_latent_state_to_file_items([], state_dict)
             return state_dict
-        except (OSError, SafetensorError, KeyError, ValueError):
+        except (OSError, SafetensorError, KeyError, ValueError, RuntimeError, TypeError):
             return None
 
     def _assign_latent_state_to_file_items(
@@ -2578,20 +2583,43 @@ class LatentCachingMixin:
                 failed_items = []
 
                 try:
-                    for latent_path in tqdm(missing_latent_paths, desc=f'Caching latents{" to disk" if to_disk else ""}'):
-                        file_items = file_items_by_latent_path[latent_path]
-                        file_item = file_items[0]
-                        try:
-                            state_dict = self._encode_latent_for_file_item(file_item, latent_path, to_disk)
-                            for warning in getattr(self.sd, 'pop_encode_warnings', lambda: [])():
-                                print_acc(f"{file_item.path}: {warning}")
-                        except Exception as error:
-                            print_acc(f"Skipping cache item {file_item.path}: {error}")
-                            failed_items.extend(file_items)
-                            continue
-                        if to_memory:
-                            self._assign_latent_state_to_file_items(file_items, state_dict)
-                        del state_dict
+                    with LatentImageStager(
+                        getattr(self.dataset_config, 'latent_decode_prefetch', True) and len(missing_latent_paths) > 1
+                    ) as stager:
+                        stager.submit(file_items_by_latent_path[missing_latent_paths[0]][0])
+                        for index, latent_path in enumerate(tqdm(missing_latent_paths, desc=f'Caching latents{" to disk" if to_disk else ""}')):
+                            file_items = file_items_by_latent_path[latent_path]
+                            file_item = file_items[0]
+                            next_item = (
+                                file_items_by_latent_path[missing_latent_paths[index + 1]][0]
+                                if index + 1 < len(missing_latent_paths) else None
+                            )
+                            prepared_image = None
+                            try:
+                                try:
+                                    prepared_image = stager.take_and_stage(next_item)
+                                except Exception:
+                                    # Speculation must not bypass a cache published
+                                    # since the missing scan, or change owner errors.
+                                    prepared_image = None
+                                if prepared_image is not None:
+                                    file_item._latent_predecoded_image = prepared_image
+                                state_dict = self._reuse_published_latent(latent_path) if to_disk else None
+                                if state_dict is None:
+                                    state_dict = self._encode_latent_for_file_item(file_item, latent_path, to_disk)
+                                for warning in getattr(self.sd, 'pop_encode_warnings', lambda: [])():
+                                    print_acc(f"{file_item.path}: {warning}")
+                            except Exception as error:
+                                print_acc(f"Skipping cache item {file_item.path}: {error}")
+                                failed_items.extend(file_items)
+                                continue
+                            finally:
+                                if prepared_image is not None:
+                                    del file_item._latent_predecoded_image
+                                    prepared_image.close()
+                            if to_memory:
+                                self._assign_latent_state_to_file_items(file_items, state_dict)
+                            del state_dict
                 finally:
                     self.sd.restore_device_state()
 
@@ -2620,10 +2648,9 @@ class LatentCachingMixin:
                         }
                         self.build_batch_indices()
 
-            for file_items in file_items_by_latent_path.values():
-                for file_item in file_items:
-                    if file_item in self.file_list:
-                        file_item.is_latent_cached = True
+            # Failed samples have already been removed and buckets remapped.
+            # Iterating the survivor list avoids O(n²) equality membership tests.
+            mark_cached_survivors(self.file_list)
 
 class TextEmbeddingFileItemDTOMixin:
     def __init__(self, *args, **kwargs):
@@ -2834,7 +2861,8 @@ class TextEmbeddingFileItemDTOMixin:
 
     def cleanup_text_embedding(self):
         if self.prompt_embeds is not None:
-            # we are caching on disk, don't save in memory
+            # Release the active mutable batch copy; the optional job LRU owns
+            # a separate bounded CPU copy.
             self.prompt_embeds = None
         if self.dop_prompt_embeds is not None:
             self.dop_prompt_embeds = None
@@ -2844,6 +2872,8 @@ class TextEmbeddingFileItemDTOMixin:
     def load_prompt_embedding(self, device=None):
         if not self.is_text_embedding_cached:
             return
+        cache = getattr(self, '_cpu_text_embedding_cache', None)
+        load_embeds = PromptEmbeds.load if cache is None else lambda path: cache.load(path, PromptEmbeds.load)
         if self.prompt_embeds is None:
             te_path = self.get_text_embedding_path()
             self._caption_was_dropped = False
@@ -2855,7 +2885,7 @@ class TextEmbeddingFileItemDTOMixin:
                     te_path = self.get_blank_text_embedding_path()
                     self._caption_was_dropped = True
             # load it from disk
-            self.prompt_embeds = PromptEmbeds.load(te_path)
+            self.prompt_embeds = load_embeds(te_path)
             self._loaded_text_embedding_path = te_path
         if self.dataset_config.diff_output_preservation and self.dop_prompt_embeds is None:
             if self._caption_was_dropped:
@@ -2868,13 +2898,13 @@ class TextEmbeddingFileItemDTOMixin:
                 # no trigger word in caption, same embedding
                 self.dop_prompt_embeds = self.prompt_embeds
             else:
-                self.dop_prompt_embeds = PromptEmbeds.load(dop_path)
+                self.dop_prompt_embeds = load_embeds(dop_path)
         if getattr(self, 'dopsd_self_ref', False) and self.dopsd_prompt_embeds is None:
             if self._caption_was_dropped:
                 dopsd_path = self.get_dopsd_blank_text_embedding_path()
             else:
                 dopsd_path = self.get_dopsd_text_embedding_path()
-            self.dopsd_prompt_embeds = PromptEmbeds.load(dopsd_path)
+            self.dopsd_prompt_embeds = load_embeds(dopsd_path)
 
 class TextEmbeddingCachingMixin:
     def __init__(self: 'AiToolkitDataset', **kwargs):

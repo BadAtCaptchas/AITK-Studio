@@ -20,6 +20,7 @@ function fixture(t) {
   const harness = createHookHarness(), requests = [], polls = [];
   t.after(() => harness.cleanup());
   const hook = load('../src/hooks/useJobMetrics.tsx', {
+    '@/utils/metricSnapshot': load('../src/utils/metricSnapshot.ts', {}),
     react: harness.react,
     './useScopedState': load('../src/hooks/useScopedState.ts', { react: harness.react }),
     './useCommittedRef': load('../src/hooks/useCommittedRef.ts', { react: harness.react }),
@@ -220,4 +221,19 @@ test('job switch aborts restart reconciliation without publishing the old respon
   old.resolve(payload(5));
   await pending;
   assert.deepEqual(f.render('other-job').series, {});
+});
+
+test('unchanged incremental and full replies retain chart references and revision', async t => {
+  const f = fixture(t);
+  const initial = await f.read(payload(10));
+  for (const incremental of [true, false]) {
+    const state = await f.read(payload(10), { incremental });
+    for (const key of ['keys', 'series', 'latest', 'lossKeys', 'eventKeys', 'phasePoints', 'phaseNamePoints']) {
+      assert.strictEqual(state[key], initial[key], `${key} remains shared`);
+    }
+    assert.equal(state.version, initial.version);
+  }
+  const changed = await f.read({ keys: ['loss/loss'], series: { 'loss/loss': { points: [], latest: { step: 10, value: 0.5 } } } }, { incremental: true });
+  assert.equal(changed.version, initial.version + 1);
+  assert.equal(changed.series['loss/loss'][0].value, 0.5);
 });

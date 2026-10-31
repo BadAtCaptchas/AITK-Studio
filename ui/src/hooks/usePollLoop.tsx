@@ -11,7 +11,8 @@ type PollCallback = (signal: AbortSignal) => void | Promise<unknown>;
  * Run a poll immediately, then schedule the next run only after the current
  * promise settles. Changing dependencies aborts the active request and starts
  * a fresh loop. A null/zero interval preserves the one-shot loading behavior
- * used by the data hooks.
+ * used by the data hooks. Hidden documents pause and abort polling; returning
+ * to the foreground refreshes immediately (after canceled work settles).
  */
 export default function usePollLoop(
   callback: PollCallback,
@@ -21,7 +22,12 @@ export default function usePollLoop(
   const callbackRef = useCommittedRef(callback);
 
   useEffect(() => {
-    return startSettledPollLoop(signal => callbackRef.current(signal), intervalMs);
+    return startSettledPollLoop(
+      signal => callbackRef.current(signal),
+      intervalMs,
+      undefined,
+      typeof document === 'undefined' ? undefined : document,
+    );
     // The caller controls restart semantics explicitly through dependencies.
   }, [intervalMs, ...dependencies]);
 }

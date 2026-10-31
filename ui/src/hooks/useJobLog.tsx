@@ -31,6 +31,7 @@ export default function useJobLog(
   jobID: string,
   reloadInterval: null | number = null,
   attemptId: string | null = null,
+  enabled = true,
 ) {
   const requestScope = JSON.stringify([jobID, attemptId]);
   const [log, setLog] = useScopedState<string>(requestScope, '');
@@ -49,7 +50,7 @@ export default function useJobLog(
 
   const refresh = useCallback(
     (signal?: AbortSignal) => {
-      if (!jobID || signal?.aborted || inFlightRef.current || activeScopeRef.current !== requestScope) return;
+      if (!enabled || !jobID || signal?.aborted || inFlightRef.current || activeScopeRef.current !== requestScope) return;
       const controller = new AbortController();
       inFlightRef.current = controller;
       const abort = () => {
@@ -96,7 +97,7 @@ export default function useJobLog(
           if (inFlightRef.current === controller) inFlightRef.current = null;
         });
     },
-    [jobID, requestScope, activeScopeRef, setStatus, setLog],
+    [enabled, jobID, requestScope, activeScopeRef, setStatus, setLog],
   );
 
   useEffect(() => {
@@ -110,7 +111,7 @@ export default function useJobLog(
     };
   }, [requestScope]);
 
-  usePollLoop(signal => refresh(signal), reloadInterval, [requestScope]);
+  usePollLoop(signal => refresh(signal), enabled ? reloadInterval : null, [requestScope, enabled]);
 
   return { log, status, refresh: () => refresh() };
 }

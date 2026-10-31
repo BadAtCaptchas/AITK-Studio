@@ -1423,6 +1423,8 @@ class DatasetConfig:
         self.cache_latents: bool = kwargs.get('cache_latents', False)
         # cache latents to disk will store them on disk. If both are true, it will save to disk, but keep in memory
         self.cache_latents_to_disk: bool = kwargs.get('cache_latents_to_disk', False)
+        # One bounded CPU image decode ahead during cold latent caching only.
+        self.latent_decode_prefetch: bool = kwargs.get('latent_decode_prefetch', True)
         # Persist compact source pixels/audio alongside latents for training
         # modes such as D-OPSD that need the original media after caching.
         self.cache_tensors_to_disk: bool = kwargs.get('cache_tensors_to_disk', False)

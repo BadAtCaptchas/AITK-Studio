@@ -585,6 +585,12 @@
     },
     "tests.test_text_embedding_batches": {
       "group": "runtime"
+    },
+    "tests.test_text_embedding_cache": {
+      "group": "runtime"
+    },
+    "testing.test_latent_cache_preparation": {
+      "group": "runtime"
     }
   }
 }

@@ -46,7 +46,7 @@ class TextEmbeddingCacheTests(unittest.TestCase):
     def test_private_cpu_byte_copy_preserves_shapes_strides_and_dtypes(self):
         for dtype in [torch.bfloat16, torch.float16, torch.float32, torch.float64, torch.int8, torch.int64, torch.bool, torch.complex64]:
             values = [torch.ones((), dtype=dtype), torch.empty((0, 3), dtype=dtype), torch.ones((4, 5), dtype=dtype).T, torch.ones(10, dtype=dtype)[::2]]
-            if dtype.is_complex:
+            if dtype == torch.complex64:
                 values.append(torch.tensor([1 + 2j, 3 - 4j], dtype=dtype).conj())
             for original in values:
                 with self.subTest(dtype=dtype, shape=original.shape):

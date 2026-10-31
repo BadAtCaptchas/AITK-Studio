@@ -100,17 +100,17 @@ async function postCommand(request: Request) {
       return Response.json({ error: `Folder '${datasetName}' not found` }, { status: 404 });
     }
 
-    datasetFolder = await resolveDatasetDirectoryInsideRoot(datasetFolder, datasetsPath);
-    if (isEncryptedDatasetFolder(datasetFolder)) {
+    const canonicalFolder = await resolveDatasetDirectoryInsideRoot(datasetFolder, datasetsPath);
+    if (isEncryptedDatasetFolder(canonicalFolder)) {
       return jsonResponse(request, {
         encrypted: true,
-        manifest: await readEncryptedManifest(datasetFolder),
+        manifest: await readEncryptedManifest(canonicalFolder),
         images: [],
       });
     }
 
-    return jsonResponse(request, await listDatasetImages(datasetFolder, {
-      compact, ...(typeof limit === 'number' ? { limit, offset } : {}),
+    return jsonResponse(request, await listDatasetImages(canonicalFolder, {
+      responseRoot: datasetFolder, compact, ...(typeof limit === 'number' ? { limit, offset } : {}),
     }));
   } catch (error) {
     console.error('Error finding images:', error);

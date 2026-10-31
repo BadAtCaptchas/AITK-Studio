@@ -168,7 +168,15 @@ async function regularFile(filename: string) {
 }
 
 /** Root must already be canonically resolved within the configured dataset scope. */
-export async function listDatasetImages(root: string, options: { compact?: boolean; offset?: number; limit?: number } = {}) {
+export async function listDatasetImages(root: string, options: {
+  compact?: boolean;
+  offset?: number;
+  limit?: number;
+  // Validated configured spelling for operational URLs (e.g. Windows 8.3 paths).
+  // This is never used for filesystem reads or index/security decisions.
+  responseRoot?: string;
+} = {}) {
+  const responseRoot = options.responseRoot ?? root;
   const indexed = await indexedItems(root);
   // Never cache publication/security decisions or layered manifest validation.
   const pending = await pendingLayeredImagePathsAsync(root);
@@ -182,7 +190,7 @@ export async function listDatasetImages(root: string, options: { compact?: boole
     const caption = item.caption === item.filename ? stat : item.caption ? await regularFile(item.caption).catch(() => null) : null;
     const count = layered.get(path.resolve(item.filename));
     return {
-      img_path: options.compact ? path.relative(root, item.filename) : item.filename,
+      img_path: options.compact ? path.relative(root, item.filename) : path.join(responseRoot, path.relative(root, item.filename)),
       added_at: iso(stat.birthtime) || iso(stat.ctime) || iso(stat.mtime),
       captioned_at: caption ? iso(caption.mtime) : null,
       size_bytes: stat.size,
@@ -191,7 +199,7 @@ export async function listDatasetImages(root: string, options: { compact?: boole
   });
   const images = entries.filter((entry): entry is NonNullable<typeof entry> => entry !== null);
   return {
-    ...(options.compact ? { root: root + path.sep } : {}), images,
+    ...(options.compact ? { root: responseRoot + path.sep } : {}), images,
     ...(options.limit === undefined ? {} : { total: items.length, next_offset: offset + selected.length < items.length ? offset + selected.length : null }),
   };
 }

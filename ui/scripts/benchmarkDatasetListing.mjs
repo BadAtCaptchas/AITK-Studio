@@ -49,6 +49,6 @@ for (const size of sizes) {
     const next = await measure('optional API next 100 warm', () => listDatasetImages(root, { offset: 100, limit: 100 }));
     assert.deepEqual(cold.value.images, before.value);
     assert.deepEqual(warm.value.images, before.value);
-    console.log(JSON.stringify({ size, measurements: [before, cold, warm, first, next].map(({ value: _value, ...result }) => result) }));
+    console.log(JSON.stringify({ size, method: { repetitions: 1, variance: 'not measured (one sample per path)', fixture: 'real temporary filesystem entries; synthetic PNG metadata placeholders; 25% text sidecars', cold: 'application index cleared; OS cache not flushed', warm: 'same fixture/index retained from immediately preceding full request', order: 'legacy full, indexed cold full, indexed warm full, cold first page, warm next page', temporaryFilesystemRoot: os.tmpdir(), filesystemTypeMagicHex: (await fsp.statfs(root)).type.toString(16), excludes: 'fixture creation, HTTP, compression, image decoding and browser render' }, measurements: [before, cold, warm, first, next].map(({ value: _value, ...result }) => result) }));
   } finally { clearDatasetListingCache(); await fsp.rm(root, { recursive: true, force: true }); }
 }

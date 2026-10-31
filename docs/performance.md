@@ -84,33 +84,51 @@ are machine-specific and should be reproduced on representative datasets.
 | Default chart data construction | 28.354 ms | 27.613 ms |
 | 1,000-file full listing | 128.23 ms | 28.92 ms cold index / 16.36 ms warm |
 | 10,000-file full listing | 1,141.96 ms | 244.14 ms cold index / 185.93 ms warm |
-| 1,000-item latent finalization | 3.097 ms | 0.00874 ms |
-| 10,000-item latent finalization | 308.247 ms | 0.0864 ms |
-| 100,000-item latent finalization | 32.040 s | 0.906 ms |
+| 1,000-item latent finalization | 3.133 ms | 0.00872 ms |
+| 10,000-item latent finalization | 318.110 ms | 0.0857 ms |
+| 100,000-item latent finalization | 32.930 s | 0.895 ms |
 | Repeated small embedding load, 118,888 retained bytes | 0.1096 ms | 0.0535 ms |
 | Repeated small embedding load, 526,336 retained bytes | 0.1144 ms | 0.0669 ms |
-| 24 JPEG preparations, 1536 × 1024 | 466.77 ms | 356.93 ms |
+| 24 JPEG preparations, 1536 × 1024 | 466.27 ms | 377.35 ms |
 
 Chart timings are five-round medians and exclude React/uPlot rendering. All 24
 histories retain their identities on unchanged polls; 23 do on a single-series
 update. The default-chart timing is close enough that no general rendering
 speedup is claimed.
 
-The listing fixture has 25% caption sidecars and verifies exact payload equality.
+The listing fixture uses real files in Linux `/tmp` (RAM-backed tmpfs in this workspace),
+with synthetic PNG metadata placeholders and 25% caption sidecars; no image decode
+is measured. Exact payload equality is verified. Each path has one timed sample per run; the table records the first sequential
+run, not a statistical estimate. All requests use the same newly created fixture, run
+sequentially in legacy-full, indexed-cold, indexed-warm order. “Cold” clears only
+the application index; OS filesystem caches are not flushed. “Warm” retains the
+index from the preceding request. Fixture creation is outside every timing.
 For 10,000 items, stat/lstat calls fell from 55,001 to 12,502, and warm directory
 reads from one to zero. Optional API pages of 100 items took 48.30 ms with a cold
 index and 5.68 ms for the next warm page. These page timings do not represent the
 current gallery's first render, since it still requests the complete list.
+A second sequential reproduction gave 1,228.37 / 246.85 / 168.23 ms for
+10k legacy / cold-index / warm-index full listings. Across these two runs the
+observed ranges were 1,141.96–1,228.37 / 244.14–246.85 / 168.23–185.93 ms.
+Two observations do not establish a confidence interval or storage-hardware gain.
 
 The polling benchmark uses deterministic time: six consumers over ten hidden
 minutes made 906 baseline requests versus six initial requests and zero hidden
 requests after the change, then six immediate foreground refreshes. Browser
 regressions verify this policy and collapsed-log offset preservation.
 
-Finalization compares one run of the old quadratic loop with a five-run median
-of the linear pass. JPEG preparation uses three interleaved runs and seeded
+Finalization uses synthetic identity objects, all surviving, in pre-existing
+latent-path groups. Both timings include all flag assignments; the old timing also
+includes its original group traversal and list-membership checks. The new pass
+traverses survivors directly: there is no set or lookup construction hidden outside
+the timer. Shared prior work (fixture/group construction, cache validation/encoding,
+failure filtering and bucket remapping) is excluded from both paths. One baseline
+run is compared with five candidate runs; baseline variance is unmeasured, and
+these figures must not be interpreted as a statistical estimate of total startup.
+Candidate min/max across five runs were 0.00864–0.00934 ms (1k),
+0.08566–0.10226 ms (10k), and 0.88323–0.89852 ms (100k). JPEG preparation uses three interleaved runs and seeded
 images. Adding an explicitly simulated 10 ms owner wait per image gave
-736.42 → 367.36 ms; this is not measured GPU encoding or training throughput.
+734.78 → 375.73 ms; this is not measured GPU encoding or training throughput.
 
 Embedding measurements use ten warmup rounds followed by 50 interleaved samples,
 rotating disk/cache/uncapped-copy order. This matters because sequential runs were

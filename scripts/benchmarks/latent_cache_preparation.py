@@ -31,16 +31,34 @@ def timed(callback):
 
 
 def main():
-    result = {'finalization': []}
+    result = {'finalization': [], 'finalization_method': {
+        'fixture': 'synthetic identity objects; all survive; one item per pre-existing latent-path group',
+        'included': 'complete final flag-setting pass, including old group traversal and membership checks',
+        'excluded_shared_work': 'fixture/group creation, cache validation/encoding, failure filtering and bucket remapping',
+        'lookup_construction': 'none: the new implementation directly traverses survivors',
+        'baseline_repetitions': 1, 'candidate_repetitions': 5,
+        'baseline_variance': 'not measured (single baseline sample)',
+    }}
     for size in (1000, 10000, 100000):
         items = [Item() for _ in range(size)]
+        groups = {index: [item] for index, item in enumerate(items)}
         def original():
-            for item in items:
-                if item in items:
-                    item.is_latent_cached = True
+            for group in groups.values():
+                for item in group:
+                    if item in items:
+                        item.is_latent_cached = True
         old = timed(original)
-        new = statistics.median(timed(lambda: mark_cached_survivors(items)) for _ in range(5))
-        result['finalization'].append({'items': size, 'old_seconds': old, 'new_seconds': new, 'speedup': old / new})
+        assert all(item.is_latent_cached for item in items)
+        samples = []
+        for _ in range(5):
+            for item in items:
+                item.is_latent_cached = False
+            samples.append(timed(lambda: mark_cached_survivors(items)))
+            assert all(item.is_latent_cached for item in items)
+        new = statistics.median(samples)
+        result['finalization'].append({'items': size, 'old_seconds': old, 'new_seconds': new,
+            'candidate_min_seconds': min(samples), 'candidate_max_seconds': max(samples),
+            'speedup': old / new})
     with tempfile.TemporaryDirectory() as directory:
         generator = np.random.default_rng(42)
         items = []

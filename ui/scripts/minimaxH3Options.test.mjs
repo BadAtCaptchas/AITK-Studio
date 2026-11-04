@@ -75,3 +75,15 @@ test('model catalog lists current MiniMax H3 support', () => {
   assert.match(readme, /Ref2VA/);
   assert.match(readme, /17n\+5/);
 });
+
+test('P-H3 image uses Studio presets and distinct ConvRot8 text encoder defaults', () => {
+  const block = archBlock(readSource('src/domain/modelOptions.ts'), 'p_h3_image');
+  assert.match(block, /model\.qtype_te': \['convrot8'/);
+  assert.match(block, /p_h3_image_training_adapter_v1/);
+  assert.match(block, /sample\.sample_steps': \[8/);
+  assert.match(block, /sample\.num_frames': \[1/);
+  assert.match(block, /model\.layer_offloading': \[false/);
+  const contract = JSON.parse(readSource('src/domain/modelCapabilities.json'));
+  assert.equal(contract.models.find(row => row.arch === 'p_h3_image').className, 'PH3ImageModel');
+  assert.equal(contract.choices.find(row => row.name === 'p_h3_image').outputType, 'image');
+});

@@ -20,6 +20,7 @@ Scheduler (the released math, not diffusers'):
 """
 
 from typing import Optional
+from toolkit.sample_sigmas import sigmas_with_terminal
 
 import numpy as np
 import torch
@@ -75,6 +76,7 @@ class MiniMaxH3Pipeline:
         num_frames: int = 124,
         num_inference_steps: int = 28,
         guidance_scale: float = 1.0,  # ignored
+        sigmas: Optional[list] = None,
         latents: Optional[torch.Tensor] = None,
         generator: Optional[torch.Generator] = None,
         ctrl_img: Optional[
@@ -203,14 +205,15 @@ class MiniMaxH3Pipeline:
 
         # --- schedules -----------------------------------------------------
         video_shift = getattr(model, "video_sigma_shift", VIDEO_SIGMA_SHIFT)
-        sigmas_v = build_sigma_schedule(
-            num_inference_steps,
-            video_shift,
-            t1000_ladder=getattr(model, "t1000_sample_ladder", False),
-        ).to(device)
+        if sigmas is not None:
+            sigmas_v = torch.tensor(sigmas_with_terminal(sigmas), dtype=torch.float32).to(device)
+        else:
+            sigmas_v = model.build_sample_sigmas(num_inference_steps).to(device)
         # the audio schedule follows the video grid through the closed-form
         # shift remap so both streams sit at the same underlying position
-        sigmas_a = remap_sigma(sigmas_v, video_shift, AUDIO_SIGMA_SHIFT)
+        sigmas_a = remap_sigma(
+            sigmas_v, video_shift, getattr(model, "audio_sigma_shift", AUDIO_SIGMA_SHIFT)
+        )
 
         position_ids = layout.position_ids[None].to(device)
         tags = layout.token_tags[None].to(device)
@@ -219,6 +222,8 @@ class MiniMaxH3Pipeline:
         text_indices = layout.text_indices.to(device)
 
         # --- denoise loop --------------------------------------------------
+        model._park_vae_for_denoise()
+        model._stage_for_sampling()
         num_steps = sigmas_v.shape[0] - 1
         for i in range(num_steps):
             sv, sv_next = sigmas_v[i], sigmas_v[i + 1]
@@ -267,6 +272,7 @@ class MiniMaxH3Pipeline:
 
         # --- decode --------------------------------------------------------
         video_latents = unpatchify_video_tokens(video_rows, t_lat, h_lat, w_lat)
+        model._stage_for_decode()
         video = model.decode_latents(video_latents)  # (1, 3, T, H, W) in [-1, 1]
         video = ((video.float().clamp(-1, 1) + 1.0) * 127.5).round().to(torch.uint8)
         video = video[0].permute(1, 2, 3, 0).cpu()  # (T, H, W, C)

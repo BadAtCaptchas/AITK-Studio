@@ -180,6 +180,7 @@ class SampleItem:
         self.seed: Optional[int] = kwargs.get('seed', None) # if none, default to autogen seed
         self.guidance_scale: float = kwargs.get('guidance_scale', sample_config.guidance_scale)
         self.sample_steps: int = kwargs.get('sample_steps', sample_config.sample_steps)
+        self.sigmas = kwargs.get('sigmas', sample_config.sigmas)
         self.fps: int = kwargs.get('fps', sample_config.fps)
         self.num_frames: int = kwargs.get('num_frames', sample_config.num_frames)
         from toolkit.layered_output import validate_num_layers
@@ -223,6 +224,7 @@ class SampleConfig:
         self.walk_seed = kwargs.get('walk_seed', False)
         self.guidance_scale = kwargs.get('guidance_scale', 7)
         self.sample_steps = kwargs.get('sample_steps', 20)
+        self.sigmas = kwargs.get('sigmas', None)
         self.keep_low_vram_for_samples = kwargs.get('keep_low_vram_for_samples', False)
         self.network_multiplier = kwargs.get('network_multiplier', 1)
         self.guidance_rescale = kwargs.get('guidance_rescale', 0.0)
@@ -847,7 +849,7 @@ class TrainConfig:
         self.moe_aux_loss_alpha: float = kwargs.get("moe_aux_loss_alpha", 0.01)
 
 
-ModelArch = Literal['sd1', 'sd2', 'sd3', 'sdxl', 'pixart', 'pixart_sigma', 'auraflow', 'flux', 'flex1', 'flex2', 'lumina2', 'vega', 'ssd', 'wan21', 'flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'asymflux2_klein_9b', 'zimage', 'ltx2', 'ltx2.3', 'ideogram4', 'i1', 'prx_pixel', 'boogu_image', 'boogu_image_edit', 'boogu_image_turbo', 'anima', 'mageflow', 'mageflow_edit', 'minimax_h3', 'minimax_h3_ref2va', 'minimax_h3_vsa', 'minimax_h3_vsa_v2', 'minimax_h3_omni']
+ModelArch = Literal['sd1', 'sd2', 'sd3', 'sdxl', 'pixart', 'pixart_sigma', 'auraflow', 'flux', 'flex1', 'flex2', 'lumina2', 'vega', 'ssd', 'wan21', 'flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'asymflux2_klein_9b', 'zimage', 'ltx2', 'ltx2.3', 'ideogram4', 'i1', 'prx_pixel', 'boogu_image', 'boogu_image_edit', 'boogu_image_turbo', 'anima', 'mageflow', 'mageflow_edit', 'minimax_h3', 'minimax_h3_ref2va', 'minimax_h3_vsa', 'minimax_h3_vsa_v2', 'minimax_h3_omni', 'p_h3_image']
 LayerOffloadingBackend = Literal['block', 'legacy']
 QuantizationKernel = Literal['auto', 'triton', 'torch']
 
@@ -1600,10 +1602,13 @@ class GenerateImageConfig:
             sample_prompt_index: Optional[int] = None,
             sample_sampler: Optional[str] = None,
             sample_iteration_id: Optional[str] = None,
+            sigmas: Optional[List[float]] = None,
     ):
         self.width: int = width
         self.height: int = height
-        self.num_inference_steps: int = num_inference_steps
+        from toolkit.sample_sigmas import normalize_sample_sigmas
+        self.sigmas = normalize_sample_sigmas(sigmas)
+        self.num_inference_steps = len(self.sigmas) if self.sigmas is not None else num_inference_steps
         self.guidance_scale: float = guidance_scale
         self.guidance_rescale: float = guidance_rescale
         self.prompt: str = prompt
@@ -2154,7 +2159,9 @@ def validate_configs(
             train_config.bypass_guidance_embedding = True
 
     minimax_h3_arches = {'minimax_h3', 'minimax_h3_ref2va', 'minimax_h3_vsa', 'minimax_h3_vsa_v2', 'minimax_h3_omni'}
-    if model_config.arch in minimax_h3_arches:
+    if model_config.arch in minimax_h3_arches or model_config.arch == 'p_h3_image':
+        if model_config.arch == 'p_h3_image' and any(d.num_frames != 1 or d.do_audio or d.auto_frame_count for d in dataset_configs):
+            raise ValueError('P-H3-Image supports single-frame datasets without audio only.')
         if train_config.train_text_encoder:
             raise ValueError("MiniMax H3 text-encoder training is not supported; keep it frozen.")
         if network_config is None or str(network_config.type or '').lower() != 'lora':

@@ -1031,6 +1031,7 @@ class LTX2Model(BaseModel):
     ):
         # A grad-enabled call is the primary, loss-carrying prediction unless
         # the trainer explicitly routed this pass to a secondary slot.
+        stream_input = latent_model_input
         is_primary_pred = (
             torch.is_grad_enabled()
             and batch is not None
@@ -1125,6 +1126,7 @@ class LTX2Model(BaseModel):
                 batch.audio_noisy = None
                 batch.audio_sigma = None
 
+            audio_stream = False
             has_audio_data = do_audio and (
                 batch.audio_latents is not None or batch.audio_tensor is not None
             )
@@ -1240,6 +1242,14 @@ class LTX2Model(BaseModel):
                 if audio_conditions:
                     raise ValueError("LTX audio prefix/suffix conditioning requires dataset audio")
 
+            if do_audio and audio_is_generated and isinstance(stream_input, DTO) and "audio" in stream_input.extras:
+                audio_latents, _, _, audio_stream = self.audio_stream_input(
+                    stream_input, batch, None, self.audio_sigma(timestep.float() / 1000.0),
+                    torch.zeros_like(audio_latents),
+                )
+                if audio_conditions:
+                    audio_latents = raw_audio_latents * audio_conditioning_mask.unsqueeze(-1) + audio_latents * (1 - audio_conditioning_mask.unsqueeze(-1))
+
             if self.pipeline.connectors.device != self.transformer.device:
                 self.pipeline.connectors.to(self.transformer.device)
 
@@ -1303,7 +1313,7 @@ class LTX2Model(BaseModel):
 
         # Add the audio result to the correct prediction slot. Secondary passes
         # must never replace the primary prediction used for backpropagation.
-        if batch.audio_target is not None:
+        if batch.audio_target is not None and not audio_stream:
             if is_primary_pred:
                 batch.audio_pred = noise_pred_audio
                 batch.audio_noisy = audio_latents.detach()
@@ -1320,14 +1330,10 @@ class LTX2Model(BaseModel):
             patch_size_t=self.pipeline.transformer_temporal_patch_size,
         )
 
-        if batch.audio_target is not None:
-            # every pass's DTO carries its own audio stream and target
-            return DTO(
-                unpacked_output,
-                audio=noise_pred_audio,
-                audio_target=batch.audio_target,
-            )
-        return unpacked_output
+        return self.audio_stream_output(
+            unpacked_output, noise_pred_audio, None if audio_stream else batch.audio_target,
+            audio_latents, self.audio_sigma(audio_sigma.float() / 1000.0), audio_stream,
+        )
 
     def get_prompt_embeds(self, prompt: str) -> PromptEmbeds:
         if self.pipeline.text_encoder.device != self.device_torch:

@@ -29,6 +29,7 @@ from toolkit.train_tools import get_torch_dtype, apply_noise_offset
 from toolkit.unloader import FakeTextEncoder
 from toolkit.memory_management import SampleMemoryCoordinator
 import torch
+from toolkit.dto import DTO
 from toolkit.pipelines import CustomStableDiffusionXLPipeline
 from diffusers import StableDiffusionPipeline, StableDiffusionXLPipeline, T2IAdapter, DDPMScheduler, \
     LCMScheduler, Transformer2DModel, AutoencoderTiny, ControlNetModel
@@ -552,6 +553,8 @@ class BaseModel:
             sample_memory.offload_all("pipeline ready")
 
         unwrap_step_hooks = self._install_sample_step_hooks(pipeline)
+        from toolkit.sample_sigmas import install_sample_sigma_override
+        unwrap_sigma_override = lambda: None
 
         start_multiplier = 1.0
         if network is not None:
@@ -560,6 +563,7 @@ class BaseModel:
         # pipeline.to(self.device_torch)
 
         try:
+            unwrap_sigma_override = install_sample_sigma_override(self, pipeline, image_configs)
             with network:
                 with torch.no_grad():
                     if network is not None:
@@ -572,6 +576,7 @@ class BaseModel:
                         position=0,
                     ):
                         gen_config = image_configs[i]
+                        self.sample_sigmas = gen_config.sigmas
 
                         extra = {}
                         validation_image = None
@@ -837,6 +842,7 @@ class BaseModel:
                         self.adapter.clear_memory()
 
         finally:
+            unwrap_sigma_override()
             unwrap_step_hooks()
             # clear pipeline and cache to reduce vram usage
             if sample_memory is not None:
@@ -1309,6 +1315,75 @@ class BaseModel:
     def encode_audio(self, audio_data_list):
         # audio_date_list is a list of {"waveform": waveform[C, L], "sample_rate": int(sample_rate)}
         raise NotImplementedError("Audio encoding not implemented for this model.")
+
+    # ------------------------------------------------------------------
+    # Joint audio stream contract. A model with an audio stream resolves its
+    # audio input through audio_stream_input and returns through
+    # audio_stream_output, so every trainer sees one shape:
+    #   input : a latent DTO carrying `audio` marks a stream-aware caller (an
+    #           on-policy distiller). Its rows, already noised at the audio
+    #           sigma, replace the dataset soundtrack; `audio=None` asks for a
+    #           fresh noised start. Plain tensors keep the dataset path.
+    #   output: DTO(video_pred, audio=pred, audio_target=noise - clean | None,
+    #           audio_noisy=the rows the model saw, audio_sigma=sigma_a)
+    #           whenever a target exists or the caller streams; else the tensor.
+    # ------------------------------------------------------------------
+    def audio_sigma(self, sigma_v: torch.Tensor) -> torch.Tensor:
+        """Audio-stream sigma coupled to a video sigma (0..1). Default: shared."""
+        return sigma_v
+
+    def audio_stream_input(self, latent_model_input, batch, raw_audio, sigma_a, silence_rows):
+        """Returns (audio_rows, audio_target, audio_noisy, stream). raw_audio is the
+        clean dataset audio in the model's row layout or None; silence_rows is the
+        model's no-soundtrack input (shape/dtype/device reference)."""
+        stream = isinstance(latent_model_input, DTO) and "audio" in latent_model_input.extras
+        override = latent_model_input.get("audio") if stream else None
+        sa = sigma_a.to(silence_rows.device, silence_rows.dtype).view(
+            (-1,) + (1,) * (silence_rows.dim() - 1)
+        )
+        if override is not None:
+            if override.shape != silence_rows.shape:
+                raise ValueError("Audio stream shape must match the model audio layout")
+            rows = override.to(silence_rows.device, silence_rows.dtype)
+            return rows, None, rows, True
+        if raw_audio is not None and not stream:
+            raw_audio = raw_audio.to(silence_rows.device, silence_rows.dtype)
+            # the audio noise is drawn once per step and shared by every pass
+            # (prior, primary, cfg/guidance, preservation) so they all see the
+            # same soundtrack; it rides on the latents DTO with the clean audio
+            # so on-the-fly encodes are not repeated per pass
+            noise = batch.latents.get("audio_noise") if isinstance(batch.latents, DTO) else None
+            if noise is not None and noise.shape == raw_audio.shape:
+                noise = noise.to(raw_audio.device, raw_audio.dtype)
+            else:
+                noise = torch.randn_like(raw_audio)
+                if batch.latents is not None:
+                    batch.latents = DTO(batch.latents, audio=raw_audio, audio_noise=noise)
+            # mixed in fp32 so bf16 rows match the scheduler's add_noise numerics
+            rows = ((1.0 - sa.float()) * raw_audio.float() + sa.float() * noise.float()).to(raw_audio.dtype)
+            return rows, (noise - raw_audio).detach(), rows, stream
+        if stream:
+            # no soundtrack: silence noised at the audio sigma (pure noise at 1.0)
+            noise = getattr(batch, "audio_noise", None)
+            if noise is None or noise.shape != silence_rows.shape:
+                noise = torch.randn_like(silence_rows)
+                if batch is not None:
+                    batch.audio_noise = noise.detach()
+            rows = sa * noise.to(silence_rows.device, silence_rows.dtype)
+            return rows, None, rows, True
+        return silence_rows, None, None, False
+
+    def audio_stream_output(self, video_pred, audio_pred, audio_target, audio_noisy, sigma_a, stream):
+        """audio_pred in ai-toolkit's noise - clean convention."""
+        if audio_target is None and not stream:
+            return video_pred
+        return DTO(
+            video_pred,
+            audio=audio_pred,
+            audio_target=audio_target,
+            audio_noisy=audio_noisy,
+            audio_sigma=sigma_a,
+        )
 
     def decode_latents(
             self,

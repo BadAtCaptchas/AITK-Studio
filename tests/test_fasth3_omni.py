@@ -146,7 +146,8 @@ class OmniIntegrationTests(unittest.TestCase):
         self.assertIsNone(omni.vsa_sparsity)
         omni.model = SimpleNamespace(params=SimpleNamespace(pdd_steps=32))
         weights = omni._pdd_weights(torch.tensor([1., .5]))
-        self.assertEqual(weights[0].shape, (2, 32))
+        assert isinstance(weights, tuple), "PDD checkpoints must return video/audio weights"
+        self.assertEqual(torch.stack(weights).shape, (2, 2, 32))
         omni.model.params.pdd_steps = 1
         self.assertIsNone(omni._pdd_weights(torch.tensor([1.])))
         noise, clean = torch.randn(1, 2), torch.randn(1, 2)

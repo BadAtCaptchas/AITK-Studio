@@ -591,6 +591,9 @@
     },
     "testing.test_latent_cache_preparation": {
       "group": "runtime"
+    },
+    "tests.test_nov4_upstream": {
+      "group": "runtime"
     }
   }
 }

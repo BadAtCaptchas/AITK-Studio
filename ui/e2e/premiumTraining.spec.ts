@@ -402,7 +402,8 @@ test('valid advanced Config values survive Form edits and a pending save locks b
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.evaluate(text => navigator.clipboard.writeText(text), YAML.stringify(config));
   await page.keyboard.press('Control+v');
-  expect((await editorSnapshot(page)).text).toEqual(YAML.stringify(config));
+  // Clipboard handling can finish after the key event, especially on Windows.
+  await expect.poll(async () => (await editorSnapshot(page)).text).toEqual(YAML.stringify(config));
   await page.getByRole('tab', { name: 'Form', exact: true }).click();
   await expect.poll(() => page.locator('#training-form-view').evaluate(element => element.scrollTop)).toBeCloseTo(formScroll, 0);
   await expect(page).toHaveURL(/#job-training$/);

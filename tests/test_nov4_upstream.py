@@ -33,7 +33,7 @@ class SigmaTests(unittest.TestCase):
         model.model_config = SimpleNamespace(low_vram=False, assistant_lora_path=None, inference_lora_path=None)
         model.device_torch = torch.device('cpu')
         model.torch_dtype = torch.float32
-        model.adapter = object()
+        model.adapter = None
         model.save_device_state = Mock()
         model.set_device_state_preset = Mock()
         model.restore_device_state = Mock()
@@ -47,7 +47,7 @@ class SigmaTests(unittest.TestCase):
         class FailingConfig:
             sigmas = [1., .5]
             @property
-            def adapter_image_path(self):
+            def network_multiplier(self):
                 scheduler.set_timesteps(2)
                 torch.rand(1)
                 raise RuntimeError('sample setup failed')

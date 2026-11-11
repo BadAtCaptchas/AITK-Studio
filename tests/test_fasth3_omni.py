@@ -123,7 +123,8 @@ class PDDTests(unittest.TestCase):
 
     def test_checkpoint_inference_rejects_mismatched_heads(self):
         for heads in (1, 32):
-            state = {'final_layer.video_out.weight': torch.empty(heads * 96, 8),
+            state = {'audio_patch_proj.weight': torch.empty(8, 32),
+                'final_layer.video_out.weight': torch.empty(heads * 96, 8),
                 'final_layer.audio_out.weight': torch.empty(heads * 32, 8),
                 'adaln_t_table': torch.empty(1000, 8)}
             params = MinimaxH3Model._transformer_params_for_state(state)

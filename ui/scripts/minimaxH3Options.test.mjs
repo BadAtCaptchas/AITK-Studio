@@ -87,3 +87,41 @@ test('P-H3 image uses Studio presets and distinct ConvRot8 text encoder defaults
   assert.equal(contract.models.find(row => row.arch === 'p_h3_image').className, 'PH3ImageModel');
   assert.equal(contract.choices.find(row => row.name === 'p_h3_image').outputType, 'image');
 });
+
+test('MiniMax H3 Image uses its six-step image schedule and safe Studio defaults', () => {
+  const block = archBlock(readSource('src/domain/modelOptions.ts'), 'minimax_h3_image');
+  assert.match(block, /Comfy-Org\/MiniMax-H3-Image/);
+  assert.match(block, /model\.qtype': \['convrot8'/);
+  assert.match(block, /model\.qtype_te': \['nvfp4'/);
+  assert.match(block, /minimax_h3_image_training_adapter_v1/);
+  assert.match(block, /sample\.sample_steps': \[6/);
+  assert.match(block, /sample\.guidance_scale': \[1/);
+  assert.match(block, /sample\.width': \[2048/);
+  assert.match(block, /sample\.height': \[2048/);
+  assert.match(block, /sample\.num_frames': \[1, 1\]/);
+  assert.match(block, /datasets\[x\]\.num_frames': \[1, 1\]/);
+  for (const setting of ['do_audio', 'auto_frame_count', 'do_i2v']) {
+    assert.ok(block.includes(`datasets[x].${setting}': [false, undefined]`));
+  }
+  assert.match(block, /model\.layer_offloading': \[false, false\]/);
+  assert.match(block, /model\.low_vram': \[true, false\]/);
+  assert.match(block, /train\.train_text_encoder': \[false, false\]/);
+  assert.match(block, /disableSections: \['network.conv', 'model.quantize', 'model.quantize_te', 'train.timestep_type', 'train.train_text_encoder', 'train.unload_text_encoder'\]/);
+  assert.match(block, /allowedNetworkTypes: \['lora'\]/);
+
+  const contract = JSON.parse(readSource('src/domain/modelCapabilities.json'));
+  const models = contract.models.filter(row => row.arch === 'minimax_h3_image');
+  assert.equal(models.length, 1);
+  assert.equal(models[0].className, 'MinimaxH3ImageModel');
+  assert.equal(models[0].module, 'extensions_built_in.diffusion_models.minimax_h3');
+  const choices = contract.choices.filter(row => row.name === 'minimax_h3_image');
+  assert.equal(choices.length, 1);
+  const choice = choices[0];
+  assert.equal(choice.outputType, 'image');
+  assert.equal(choice.isVideoModel, false);
+  assert.equal(choice.frames.maximum, 1);
+  assert.equal(choice.offloading.layers, false);
+  assert.ok(!choice.additionalSections.includes('model.layer_offloading'));
+  assert.deepEqual(choice.allowedNetworkTypes, ['lora']);
+  assert.deepEqual(choice.disableSections, ['network.conv', 'model.quantize', 'model.quantize_te', 'train.timestep_type', 'train.train_text_encoder', 'train.unload_text_encoder']);
+});

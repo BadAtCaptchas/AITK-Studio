@@ -223,3 +223,32 @@ test('every registered destination can be transformed without applying a blanket
     assert.equal(result.config.config.process[0].datasets[0].folder_path, 'fixture/dataset', target.name);
   }
 });
+
+test('MiniMax H3 Image migration applies supported model defaults and retains its catalog identity', () => {
+  const source = trainingFixture();
+  const { config, issues } = migrateTrainingModel(source, 'minimax_h3_image');
+  const p = config.config.process[0];
+  assert.deepEqual(issues, []);
+  assert.equal(p.model.arch, 'minimax_h3_image');
+  assert.equal(p.model.name_or_path, 'Comfy-Org/MiniMax-H3-Image');
+  assert.equal(p.model.qtype, 'convrot8');
+  assert.equal(p.model.qtype_te, 'nvfp4');
+  assert.equal(p.model.low_vram, source.config.process[0].model.low_vram);
+  assert.equal(p.model.layer_offloading, false);
+  assert.match(p.model.assistant_lora_path, /minimax_h3_image_training_adapter_v1/);
+  // Migration preserves tuned sampling values; new-job presets provide the defaults.
+  assert.equal(p.sample.sample_steps, source.config.process[0].sample.sample_steps);
+  assert.equal(p.sample.num_frames, 1);
+  assert.equal(p.datasets[0].num_frames, 1);
+  assert.equal(p.datasets[0].do_audio, false);
+  assert.notEqual(p.datasets[0].auto_frame_count, true);
+  assert.notEqual(p.datasets[0].do_i2v, true);
+  const arch = modelArchs.find(row => row.name === 'minimax_h3_image');
+  assert.equal(arch.isVideoModel, false);
+  assert.equal(arch.defaults['config.process[0].sample.sample_steps'][0], 6);
+  assert.equal(arch.defaults['config.process[0].sample.guidance_scale'][0], 1);
+  assert.ok(arch.disableSections.includes('model.quantize'));
+  assert.ok(arch.disableSections.includes('model.quantize_te'));
+  assert.ok(arch.disableSections.includes('train.unload_text_encoder'));
+  assert.equal(arch.defaults['config.process[0].train.unload_text_encoder'][0], false);
+});

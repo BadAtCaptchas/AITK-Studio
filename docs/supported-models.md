@@ -96,6 +96,8 @@ Browse the model integrations included in AITK Studio. Available training modes 
 
 ## MiniMax H3
 
+- [Comfy-Org/MiniMax-H3-Image](https://huggingface.co/Comfy-Org/MiniMax-H3-Image) (`minimax_h3_image`): six-step image generation and reference editing, guidance 1, with a training-only assistant adapter. Only the shipped ConvRot8 transformer and NVFP4 Qwen3-VL encoder are supported, approximately 38 GB of model files. Start at 2048×2048; references use their own aspect ratio and a 1024–2048 short edge. Studio retains low-VRAM whole-component offloading and disables audio, video and layer offloading. Training uses the model’s six sampling timesteps; the Timestep Type setting does not change them. Full-size pretrained training and generation have not been verified by this port.
+
 - [Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3) (MiniMax H3 and MiniMax H3 Ref2VA, joint video/audio and single-image training)
   - Supports T2V, first-frame I2V, image-only training, joint audio/video training, 24 fps defaults, automatic frame counts, and the H3 `17n+5` frame grid.
   - Supports pruned and non-pruned checkpoints, local-first Comfy weights under `MODELS_PATH`, ConvRot/NVFP4 prequantized components, layer offloading, VSA sparse attention when available, and a dense-attention fallback.

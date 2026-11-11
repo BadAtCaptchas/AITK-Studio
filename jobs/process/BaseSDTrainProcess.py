@@ -1836,7 +1836,14 @@ class BaseSDTrainProcess(BaseTrainProcess):
                 if is_reg:
                     content_or_style = self.train_config.content_or_style_reg
 
-                if self.train_config.noise_scheduler == 'flowmatch' and self.train_config.timestep_type == 'shifted_logit_normal':
+                if getattr(self.sd.noise_scheduler, 'fixed_train_sigmas', None) is not None:
+                    # Distilled heads own these exact sigmas, including when a
+                    # legacy job selected a continuous or coarse timestep mode.
+                    timestep_indices = torch.randint(
+                        0, len(self.sd.noise_scheduler.timesteps), (batch_size,),
+                        device=self.device_torch, dtype=torch.long,
+                    )
+                elif self.train_config.noise_scheduler == 'flowmatch' and self.train_config.timestep_type == 'shifted_logit_normal':
                     sampler = getattr(self.sd.noise_scheduler, 'sample_shifted_logit_normal_timesteps', None)
                     if sampler is None:
                         raise ValueError("shifted_logit_normal timestep sampling requires a flowmatch scheduler that supports it")

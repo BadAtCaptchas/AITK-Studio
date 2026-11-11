@@ -2706,7 +2706,8 @@ class SDTrainer(BaseSDTrainProcess):
                     if self.adapter and isinstance(self.adapter, CustomAdapter):
                         noisy_latents = self.adapter.condition_noisy_latents(noisy_latents, batch)
 
-                if self.train_config.timestep_type == 'next_sample':
+                if (self.train_config.timestep_type == 'next_sample'
+                        and getattr(self.sd.noise_scheduler, 'fixed_train_sigmas', None) is None):
                     with self.timer('next_sample_step'):
                         with torch.no_grad():
 

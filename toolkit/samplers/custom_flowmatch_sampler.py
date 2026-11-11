@@ -85,6 +85,7 @@ class CustomFlowMatchEulerDiscreteScheduler(FlowMatchEulerDiscreteScheduler):
         super().__init__(*args, **kwargs)
         self.init_noise_sigma = 1.0
         self.timestep_type = "linear"
+        self.fixed_train_sigmas = None
 
         with torch.no_grad():
             # create weights for timesteps
@@ -117,6 +118,10 @@ class CustomFlowMatchEulerDiscreteScheduler(FlowMatchEulerDiscreteScheduler):
             pass
 
     def get_weights_for_timesteps(self, timesteps: torch.Tensor, v2=False, timestep_type="linear", x0_pred=False) -> torch.Tensor:
+        if self.fixed_train_sigmas is not None:
+            # Fixed heads are sampled uniformly; legacy weighting settings
+            # must not index into an unrelated 1000-point weighting table.
+            return torch.ones_like(timesteps)
         # Get the indices of the timesteps
         step_indices = [(self.timesteps == t).nonzero().item()
                         for t in timesteps]
@@ -242,6 +247,16 @@ class CustomFlowMatchEulerDiscreteScheduler(FlowMatchEulerDiscreteScheduler):
         patch_size=1
     ):
         self.timestep_type = timestep_type
+        if self.fixed_train_sigmas is not None:
+            sigmas = torch.as_tensor(self.fixed_train_sigmas, dtype=torch.float32, device=device)
+            if (sigmas.ndim != 1 or sigmas.numel() == 0
+                    or not bool(torch.isfinite(sigmas).all())
+                    or not bool(((sigmas > 0) & (sigmas <= 1)).all())
+                    or not bool((sigmas[:-1] > sigmas[1:]).all())):
+                raise ValueError("fixed_train_sigmas must be a finite strictly decreasing schedule in (0, 1]")
+            self.timesteps = sigmas * self.config.num_train_timesteps
+            self.sigmas = torch.cat([sigmas, sigmas.new_zeros(1)])
+            return self.timesteps
         if timestep_type in ['linear', 'weighted', 'shifted_logit_normal']:
             timesteps = torch.linspace(1000, 1, num_timesteps, device=device)
             self.timesteps = timesteps

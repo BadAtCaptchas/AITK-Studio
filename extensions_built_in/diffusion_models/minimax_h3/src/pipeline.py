@@ -36,7 +36,6 @@ from .packing import (
     KEYFRAME_NOISE_AUG_T,
     VIDEO_SIGMA_SHIFT,
     align_num_frames_down,
-    audio_latent_num_frames,
     build_packed_sequence,
     build_row_timesteps,
     build_sigma_schedule,
@@ -105,7 +104,7 @@ class MiniMaxH3Pipeline:
             t_lat = 1
         h_lat = height // 16
         w_lat = width // 16
-        a_lat = audio_latent_num_frames(num_frames)
+        a_lat = model._num_audio_latents(num_frames)
 
         text_embeds, token_tags = trim_caption_tokens(
             conditional_embeds.text_embeds[0],

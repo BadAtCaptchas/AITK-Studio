@@ -316,6 +316,10 @@ class MinimaxH3Model(BaseModel):
         hidden states through its text connector)."""
         return {}
 
+    def _num_audio_latents(self, num_frames: int) -> int:
+        """Image-only subclasses omit the target audio stream."""
+        return packing.audio_latent_num_frames(num_frames)
+
     def sample_memory_generate_components(self):
         # References encode before the denoiser is staged.
         return ("vae",)
@@ -1026,7 +1030,7 @@ class MinimaxH3Model(BaseModel):
             else:
                 # invert 17n+5 -> 5n+2 from the latent frame count
                 num_frames = (t_lat - 2) // 5 * 17 + 5 if t_lat > 1 else 1
-            a_lat = packing.audio_latent_num_frames(num_frames)
+            a_lat = self._num_audio_latents(num_frames)
             # audio only trains for video batches from datasets that asked for
             # it. Cached latents can carry audio after do_audio was turned off,
             # and image (single frame) batches must never pick up a soundtrack
@@ -1437,6 +1441,11 @@ class MinimaxH3Ref2VAModel(MinimaxH3Model):
     def get_base_model_version(self):
         return "minimax_h3_ref2va"
 
+    def _reference_pixel_size(
+        self, ref_width: int, ref_height: int, target_height: int, target_width: int
+    ):
+        return packing.reference_pixel_size(ref_width, ref_height, target_height, target_width)
+
     def _build_condition(
         self, batch: "DataLoaderBatchDTO", latent_shape, device, dtype
     ):
@@ -1475,7 +1484,7 @@ class MinimaxH3Ref2VAModel(MinimaxH3Model):
         size_fn = (
             packing.reference_video_pixel_size
             if as_video_frames
-            else packing.reference_pixel_size
+            else self._reference_pixel_size
         )
 
         all_rows = []
@@ -1787,11 +1796,12 @@ class MinimaxH3Ref2VAModel(MinimaxH3Model):
                         self._encode_static_image_ref_for_sampling(img, gen_config)
                     )
                 else:
-                    ref_images.append(
-                        packing.prepare_reference_image(
-                            img, gen_config.height, gen_config.width
-                        )
+                    ph, pw = self._reference_pixel_size(
+                        img.size[0], img.size[1], gen_config.height, gen_config.width
                     )
+                    if img.size != (pw, ph):
+                        img = img.resize((pw, ph), Image.Resampling.LANCZOS)
+                    ref_images.append(img)
 
         with_audio = bool(self.model_config.model_kwargs.get("sample_audio", True))
 

@@ -849,7 +849,7 @@ class TrainConfig:
         self.moe_aux_loss_alpha: float = kwargs.get("moe_aux_loss_alpha", 0.01)
 
 
-ModelArch = Literal['sd1', 'sd2', 'sd3', 'sdxl', 'pixart', 'pixart_sigma', 'auraflow', 'flux', 'flex1', 'flex2', 'lumina2', 'vega', 'ssd', 'wan21', 'flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'asymflux2_klein_9b', 'zimage', 'ltx2', 'ltx2.3', 'ideogram4', 'i1', 'prx_pixel', 'boogu_image', 'boogu_image_edit', 'boogu_image_turbo', 'anima', 'mageflow', 'mageflow_edit', 'minimax_h3', 'minimax_h3_ref2va', 'minimax_h3_vsa', 'minimax_h3_vsa_v2', 'minimax_h3_omni', 'p_h3_image']
+ModelArch = Literal['sd1', 'sd2', 'sd3', 'sdxl', 'pixart', 'pixart_sigma', 'auraflow', 'flux', 'flex1', 'flex2', 'lumina2', 'vega', 'ssd', 'wan21', 'flux2', 'flux2_klein_4b', 'flux2_klein_9b', 'asymflux2_klein_9b', 'zimage', 'ltx2', 'ltx2.3', 'ideogram4', 'i1', 'prx_pixel', 'boogu_image', 'boogu_image_edit', 'boogu_image_turbo', 'anima', 'mageflow', 'mageflow_edit', 'minimax_h3', 'minimax_h3_ref2va', 'minimax_h3_vsa', 'minimax_h3_vsa_v2', 'minimax_h3_omni', 'p_h3_image', 'minimax_h3_image']
 LayerOffloadingBackend = Literal['block', 'legacy']
 QuantizationKernel = Literal['auto', 'triton', 'torch']
 
@@ -2159,9 +2159,21 @@ def validate_configs(
             train_config.bypass_guidance_embedding = True
 
     minimax_h3_arches = {'minimax_h3', 'minimax_h3_ref2va', 'minimax_h3_vsa', 'minimax_h3_vsa_v2', 'minimax_h3_omni'}
-    if model_config.arch in minimax_h3_arches or model_config.arch == 'p_h3_image':
-        if model_config.arch == 'p_h3_image' and any(d.num_frames != 1 or d.do_audio or d.auto_frame_count for d in dataset_configs):
-            raise ValueError('P-H3-Image supports single-frame datasets without audio only.')
+    h3_image_arches = {'p_h3_image', 'minimax_h3_image'}
+    if model_config.arch == 'minimax_h3_image':
+        if train_config.noise_scheduler != 'flowmatch':
+            raise ValueError('MiniMax-H3-Image requires train.noise_scheduler flowmatch for its fixed sigma grid.')
+        phase_mean_flow = isinstance(train_config.phases, list) and any(
+            isinstance(phase, dict) and phase.get('loss_type') == 'mean_flow'
+            for phase in train_config.phases
+        )
+        if train_config.loss_type == 'mean_flow' or phase_mean_flow:
+            raise ValueError('MiniMax-H3-Image does not support mean_flow loss, including training phases, on its fixed sigma grid.')
+        if train_config.train_turbo:
+            raise ValueError('MiniMax-H3-Image does not support the legacy train_turbo mode.')
+    if model_config.arch in minimax_h3_arches | h3_image_arches:
+        if model_config.arch in h3_image_arches and any(d.num_frames != 1 or d.do_audio or d.auto_frame_count for d in dataset_configs):
+            raise ValueError(f'{model_config.arch} supports single-frame datasets without audio only.')
         if train_config.train_text_encoder:
             raise ValueError("MiniMax H3 text-encoder training is not supported; keep it frozen.")
         if network_config is None or str(network_config.type or '').lower() != 'lora':

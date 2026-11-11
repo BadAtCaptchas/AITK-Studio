@@ -153,13 +153,13 @@ class AudioStreamTests(unittest.TestCase):
 
         class Transformer(torch.nn.Module):
             device = torch.device('cpu')
+            params = SimpleNamespace(pdd_steps=1)
             def forward(self, **kwargs):
                 seen.append(kwargs['audio_hidden_states'].clone())
                 return torch.zeros_like(kwargs['hidden_states']), torch.zeros_like(kwargs['audio_hidden_states'])
 
         model.model = Transformer()
         model._build_condition = lambda *args: (None, None, (), ())
-        model._pdd_weights = lambda *args: None
         video = torch.zeros(1, 24, 1, 2, 2)
         batch = SimpleNamespace(num_frames=1, dataset_config=SimpleNamespace(do_audio=False), audio_noise=None,
             audio_latents=torch.ones(1, 4, 32), latents=video)

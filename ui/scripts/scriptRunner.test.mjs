@@ -143,3 +143,24 @@ test('runScriptStreaming tolerates cancellation before child close', async t => 
   await reader.cancel();
   await delay(500);
 });
+
+test('merge dtype contract preserves defaults and explicit legacy requests', () => {
+  const fixture = makeFixture();
+  try {
+    for (const dtype of [undefined, 'preserve', 'float32', 'fp32', 'float16', 'fp16', 'bfloat16', 'bf16']) {
+      const invocation = buildScriptInvocation({
+        script: 'merge_loras.py',
+        args: { loras: [{ path: fixture.loraPath }], output: fixture.outputPath, save_dtype: dtype },
+      }, fixture.root);
+      assert.equal(invocation.args[invocation.args.indexOf('--save_dtype') + 1], dtype ?? 'preserve');
+    }
+    assert.throws(() => buildScriptInvocation({
+      script: 'merge_loras.py',
+      args: { loras: [{ path: fixture.loraPath }], output: fixture.outputPath, save_dtype: 'invalid' },
+    }, fixture.root), ScriptValidationError);
+    const modal = fs.readFileSync(new URL('../src/components/MergeLoRAsModal.tsx', import.meta.url), 'utf8');
+    assert.match(modal, /save_dtype: 'preserve'/);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});

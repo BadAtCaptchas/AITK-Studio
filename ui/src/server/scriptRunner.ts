@@ -9,7 +9,7 @@ export const SCRIPT_TIMEOUT_MS = 20 * 60 * 1000;
 export const ALLOWED_SCRIPT = 'merge_loras.py';
 
 const UI_SCRIPTS_ROOT = path.join(TOOLKIT_ROOT, 'ui_scripts');
-const SAVE_DTYPES = new Set(['float32', 'fp32', 'float16', 'fp16', 'bfloat16', 'bf16']);
+const SAVE_DTYPES = new Set(['preserve', 'float32', 'fp32', 'float16', 'fp16', 'bfloat16', 'bf16']);
 const DEVICE_RE = /^(cpu|mps|cuda(?::\d+)?)$/;
 
 export class ScriptValidationError extends Error {
@@ -138,7 +138,7 @@ function normalizeMergeLorasArgs(rawArgs: unknown, trainingRoot: string) {
     throw new ScriptValidationError('Output must be inside the local training folder');
   }
 
-  const saveDtype = typeof args.save_dtype === 'string' && args.save_dtype.trim() ? args.save_dtype.trim() : 'bfloat16';
+  const saveDtype = typeof args.save_dtype === 'string' && args.save_dtype.trim() ? args.save_dtype.trim() : 'preserve';
   if (!SAVE_DTYPES.has(saveDtype)) {
     throw new ScriptValidationError('args.save_dtype is invalid');
   }

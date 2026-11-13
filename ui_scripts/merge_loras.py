@@ -45,9 +45,9 @@ def main() -> int:
     parser.add_argument("--output", required=True, help="Output .safetensors path.")
     parser.add_argument(
         "--save_dtype",
-        default="bfloat16",
-        choices=list(DTYPE_MAP.keys()),
-        help="Dtype of saved tensors. Merging is always done in float32.",
+        default="preserve",
+        choices=["preserve", *DTYPE_MAP],
+        help="Saved dtype, or preserve each key using safe source dtype promotion. Accumulate in at least float32.",
     )
     parser.add_argument(
         "--device",
@@ -67,7 +67,8 @@ def main() -> int:
         return 2
 
     device = torch.device(args.device)
-    save_dtype = DTYPE_MAP[args.save_dtype]
+    save_dtype = DTYPE_MAP.get(args.save_dtype)
+    save_dtypes: dict[str, torch.dtype] = {}
     merged: dict[str, torch.Tensor] = {}
     metadata: dict[str, str] = {}
 
@@ -93,9 +94,16 @@ def main() -> int:
         state_dict = load_file(lora_path, device=str(device))
 
         for key, tensor in state_dict.items():
-            scaled = tensor.to(torch.float32) * strength
+            work_dtype = torch.promote_types(tensor.dtype, torch.float32)
+            scaled = tensor.to(work_dtype) * strength
             if key in merged:
                 existing = merged[key]
+                # fp16 and bf16 need fp32 to preserve both precision and range.
+                save_dtypes[key] = torch.promote_types(save_dtypes[key], tensor.dtype)
+                work_dtype = torch.promote_types(existing.dtype, scaled.dtype)
+                existing = existing.to(work_dtype)
+                scaled = scaled.to(work_dtype)
+                merged[key] = existing
                 if existing.shape != scaled.shape:
                     if existing.ndim != scaled.ndim:
                         print(
@@ -116,6 +124,7 @@ def main() -> int:
                 merged[key].add_(scaled)
             else:
                 merged[key] = scaled
+                save_dtypes[key] = tensor.dtype
         del state_dict
 
         if index == 0:
@@ -127,7 +136,7 @@ def main() -> int:
                             metadata[meta_key] = original_metadata[meta_key]
 
     log(f"Casting to {args.save_dtype} and moving to CPU")
-    final = {key: tensor.to(save_dtype).cpu().contiguous() for key, tensor in merged.items()}
+    final = {key: tensor.to(save_dtype or save_dtypes[key]).cpu().contiguous() for key, tensor in merged.items()}
     merged.clear()
 
     output_parent = os.path.dirname(os.path.abspath(args.output))

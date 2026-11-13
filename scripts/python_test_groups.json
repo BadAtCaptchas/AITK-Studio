@@ -597,6 +597,9 @@
     },
     "tests.test_nov10_upstream": {
       "group": "runtime"
+    },
+    "tests.test_merge_loras": {
+      "group": "runtime"
     }
   }
 }

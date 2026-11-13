@@ -127,7 +127,7 @@ const MergeLoRAsModal: React.FC = () => {
         args: {
           loras: JSON.stringify(selectedLoRAs.map(({ path, strength }) => ({ path, strength }))),
           output: joinPath(modalInfo.folderPath, outputName),
-          save_dtype: 'bfloat16',
+          save_dtype: 'preserve',
           device: 'cpu',
         },
         onStdout: appendLog,

@@ -971,6 +971,47 @@ class _VisionEncoderConfig:
         self.hidden_size = hidden_size
 
 
+def _infer_vision_config(state: dict[str, torch.Tensor]) -> dict:
+    """Infer only audited architectures; reject ambiguous checkpoint layouts."""
+    def shape(name):
+        key = f"vision_encoder.{name}"
+        tensor = state.get(key)
+        if not isinstance(tensor, torch.Tensor):
+            raise ValueError(f"TIPSv2 checkpoint requires tensor {key}")
+        return tuple(tensor.shape)
+
+    cls_shape = shape("cls_token")
+    if len(cls_shape) != 3 or cls_shape[:2] != (1, 1) or cls_shape[2] <= 0:
+        raise ValueError("TIPSv2 cls_token must have shape (1, 1, width)")
+    width = cls_shape[2]
+    patch = shape("patch_embed.proj.weight")
+    if (len(patch) != 4 or patch[:2] != (width, 3)
+            or patch[2] <= 0 or patch[2] != patch[3]):
+        raise ValueError("TIPSv2 patch projection must have shape (width, 3, patch, patch)")
+    position = shape("pos_embed")
+    if len(position) != 3 or position[0] != 1 or position[2] != width or position[1] <= 1:
+        raise ValueError("TIPSv2 pos_embed must have shape (1, patches + 1, width)")
+    side = math.isqrt(position[1] - 1)
+    if side * side != position[1] - 1:
+        raise ValueError("TIPSv2 position embeddings require a square patch grid")
+
+    blocks = set()
+    for key in state:
+        if key.startswith("vision_encoder.blocks."):
+            parts = key.split(".")
+            if (len(parts) < 4 or not parts[2].isascii() or not parts[2].isdecimal()
+                    or str(int(parts[2])) != parts[2]):
+                raise ValueError(f"Invalid TIPSv2 block key: {key}")
+            blocks.add(int(parts[2]))
+    if not blocks or blocks != set(range(len(blocks))):
+        raise ValueError("TIPSv2 blocks must be contiguous and start at zero")
+    depth = len(blocks)
+    vision_fn = {(768, 12): "vit_base", (1152, 27): "vit_so400m"}.get((width, depth))
+    if vision_fn is None:
+        raise NotImplementedError(f"Unsupported TIPSv2 vision width {width}, depth {depth}")
+    return {"vision_fn": vision_fn, "patch_size": patch[2], "img_size": side * patch[2]}
+
+
 class TIPSv2VisionModel(nn.Module):
     """Vision-only TIPSv2 encoder exposing per-layer hidden states.
 
@@ -1035,33 +1076,38 @@ class TIPSv2VisionModel(nn.Module):
         dtype: torch.dtype = torch.float32,
         cache_dir: Optional[str] = None,
     ) -> "TIPSv2VisionModel":
-        """Build the vision encoder and load its safetensors weights."""
-        import json
+        """Load vision safetensors without relying on changing Hub config layouts.
 
+        Architecture inference is restricted to the audited local builders. The
+        separate DPT loader continues to use its pinned backbone and head files.
+        """
         from huggingface_hub import hf_hub_download
         from safetensors.torch import load_file
 
-        config_path = hf_hub_download(model_id, "config.json", cache_dir=cache_dir)
-        with open(config_path, encoding="utf-8") as f:
-            config = json.load(f)
-
-        model = cls(config)
-
-        ckpt = hf_hub_download(model_id, "model.safetensors", cache_dir=cache_dir)
+        ckpt = hf_hub_download(model_id, TIPS2_WEIGHT_FILENAME, cache_dir=cache_dir)
         state = load_file(ckpt)
         state = {k: v for k, v in state.items() if k.startswith("vision_encoder.")}
         if not state:
             raise RuntimeError(f"No vision_encoder weights found in {model_id}")
 
-        missing, unexpected = model.load_state_dict(state, strict=False)
-        if missing:
-            print(
-                f"[tipsv2] Missing keys ({len(missing)}): {missing[:8]}{'...' if len(missing) > 8 else ''}"
-            )
-        if unexpected:
-            print(
-                f"[tipsv2] Unexpected keys ({len(unexpected)}): {unexpected[:8]}{'...' if len(unexpected) > 8 else ''}"
-            )
+        config = _infer_vision_config(state)
+        # Validate every key and shape before allocating a second full encoder.
+        # A partial state must not leave randomly initialized feature weights.
+        with torch.device("meta"):
+            expected = cls(config).state_dict()
+        missing = sorted(expected.keys() - state.keys())
+        unexpected = sorted(state.keys() - expected.keys())
+        if missing or unexpected:
+            raise ValueError(f"Invalid TIPSv2 vision state: missing {missing[:8]}, unexpected {unexpected[:8]}")
+        for key, tensor in state.items():
+            if tensor.shape != expected[key].shape or not tensor.is_floating_point():
+                raise ValueError(
+                    f"Invalid TIPSv2 tensor {key}: expected floating {tuple(expected[key].shape)}, "
+                    f"got {tensor.dtype} {tuple(tensor.shape)}"
+                )
+        del expected
 
+        model = cls(config)
+        model.load_state_dict(state, strict=True)
         model.to(device=device, dtype=dtype)
         return model

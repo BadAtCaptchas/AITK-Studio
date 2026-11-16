@@ -295,8 +295,7 @@
       "group": "runtime"
     },
     "testing.test_optimal_noise_pairing": {
-      "group": "manual",
-      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+      "group": "runtime"
     },
     "testing.test_optimizer_checkpoint": {
       "group": "runtime"
@@ -368,8 +367,7 @@
       "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
     },
     "testing.test_tipsv2": {
-      "group": "manual",
-      "reason": "Legacy suite outside the verified offline CI set. Review model/data requirements, then run individually in the project environment; no broad discovery."
+      "group": "runtime"
     },
     "testing.test_trainer_reporting": {
       "group": "runtime"
